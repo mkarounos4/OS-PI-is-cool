@@ -1,22 +1,42 @@
-CROSS = aarch64-none-elf-
+# ==============================================================
+#  Makefile — Raspberry Pi 5 bare-metal
+#
+#  Requires the AArch64 bare-metal toolchain:
+#    macOS:   brew install aarch64-none-elf (or arm-none-eabi)
+#    Ubuntu:  sudo apt install gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+#             (or download the Arm GNU Toolchain from developer.arm.com)
+# ==============================================================
 
-CC = $(CROSS)gcc
-LD = $(CROSS)ld
+CROSS   = aarch64-none-elf-
+CC      = $(CROSS)gcc
+LD      = $(CROSS)ld
 OBJCOPY = $(CROSS)objcopy
+OBJDUMP = $(CROSS)objdump
 
-CFLAGS = -Wall -O2 -ffreestanding -nostdlib
+CFLAGS  = -Wall -Wextra -O2 -ffreestanding -nostdlib -mgeneral-regs-only
 
-SRC = src/boot.S src/kernel.c
+SRCS    = src/boot.S src/kernel.c
+OBJS    = boot.o kernel.o
+TARGET  = kernel8.img
 
-all: kernel8.img
+.PHONY: all clean dump
 
-kernel8.img:
-	$(CC) $(CFLAGS) -c src/boot.S -o boot.o
-	$(CC) $(CFLAGS) -c src/kernel.c -o kernel.o
+all: $(TARGET)
 
-	$(LD) -T linker.ld boot.o kernel.o -o kernel.elf
+$(TARGET): $(OBJS) linker.ld
+	$(LD) -T linker.ld $(OBJS) -o kernel.elf
+	$(OBJCOPY) kernel.elf -O binary $@
+	@echo "Built $@ ($(shell wc -c < $@) bytes)"
 
-	$(OBJCOPY) kernel.elf -O binary kernel8.img
+boot.o: src/boot.S
+	$(CC) $(CFLAGS) -c $< -o $@
+
+kernel.o: src/kernel.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# Disassemble for inspection
+dump: kernel.elf
+	$(OBJDUMP) -d kernel.elf | less
 
 clean:
 	rm -f *.o *.elf *.img
