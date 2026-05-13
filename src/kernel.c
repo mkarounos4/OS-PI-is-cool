@@ -16,6 +16,7 @@
 // =============================================================
 
 #include <stdint.h>
+#include "uart.h"
 
 // ------------------------------------------------------------------
 //  RP1 base address (PCIe BAR as mapped by the Pi 5 firmware)
@@ -84,7 +85,8 @@
 // ------------------------------------------------------------------
 #define LED_GPIO        21
 
-
+// only for rpi
+#ifdef PLATFORM_RPI
 // =============================================================
 //  gpio_set_output()  —  configure a pin as a driven output
 // =============================================================
@@ -132,7 +134,7 @@ static void delay(volatile uint64_t cycles)
     while (cycles--)
         __asm__ volatile ("nop");
 }
-
+#endif // end only for rpi section
 
 // =============================================================
 //  kernel_main()  —  your embedded system "super-loop"
@@ -140,16 +142,25 @@ static void delay(volatile uint64_t cycles)
 void kernel_main(void)
 {
     // ---- one-time initialisation ----
+#ifdef PLATFORM_RPI
     gpio_set_output(LED_GPIO);
+#endif
+    uart_init();
+    uart_puts("Starting...\n");
 
     // ---- super-loop ----
     while (1)
     {
+#ifdef PLATFORM_RPI
         gpio_write(LED_GPIO, 1);        // LED ON
         delay(100000000ULL);            // ~0.5 s
 
         gpio_write(LED_GPIO, 0);        // LED OFF
         delay(100000000ULL);            // ~0.5 s
+#else
+	// Loop
+	__asm__ volatile("nop");	
+#endif
 
         // ---------------------------------------------------------
         // YOUR APPLICATION CODE GOES HERE.

@@ -15,18 +15,43 @@ OBJDUMP = $(CROSS)objdump
 
 CFLAGS  = -Wall -Wextra -O2 -ffreestanding -nostdlib -mgeneral-regs-only
 
-SRCS    = src/boot.S src/kernel.c
-OBJS    = boot.o kernel.o
-TARGET  = kernel8.img
+# ── Platform selection ────────────────────────────────────────────────────────
+# Usage:  make PLATFORM=qemu   (default)
+#         make PLATFORM=rpi
+PLATFORM ?= qemu
 
-.PHONY: all clean dump
+ifeq ($(PLATFORM),rpi)
+    CFLAGS  += -DPLATFORM_RPI
+    UART_SRC = src/uart_rpi.c
+else ifeq ($(PLATFORM),qemu)
+    CFLAGS  += -DPLATFORM_QEMU
+    UART_SRC = src/uart_qemu.c
+else
+    $(error Unknown PLATFORM '$(PLATFORM)'. Use 'qemu' or 'rpi')
+endif
+
+# ── Linker script selection ───────────────────────────────────────────────────
+ifeq ($(PLATFORM),rpi)
+    LINKER = linker_rpi.ld
+else
+    LINKER = linker_qemu.ld
+endif
+
+# ── Sources & objects ─────────────────────────────────────────────────────────
+SRCS = src/boot.S src/kernel.c $(UART_SRC)
+OBJS = boot.o kernel.o uart.o
+
+TARGET = kernel8.img
+
+# ── Targets ───────────────────────────────────────────────────────────────────
+.PHONY: all clean dump qemu
 
 all: $(TARGET)
 
-$(TARGET): $(OBJS) linker.ld
-	$(LD) -T linker.ld $(OBJS) -o kernel.elf
+$(TARGET): $(OBJS) $(LINKER)
+	$(LD) -T $(LINKER) $(OBJS) -o kernel.elf
 	$(OBJCOPY) kernel.elf -O binary $@
-	@echo "Built $@ ($(shell wc -c < $@) bytes)"
+	@echo "Built $@ for PLATFORM=$(PLATFORM) ($(shell wc -c < $@) bytes)"
 
 boot.o: src/boot.S
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -34,7 +59,21 @@ boot.o: src/boot.S
 kernel.o: src/kernel.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# Disassemble for inspection
+uart.o: $(UART_SRC)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# ── QEMU convenience target ───────────────────────────────────────────────────
+# Launches a Raspberry Pi 3B machine; Ctrl-A X to quit
+qemu: PLATFORM = qemu
+qemu: all
+	qemu-system-aarch64 \
+	    -M raspi3b \
+	    -kernel kernel8.img \
+	    -nographic \
+	    -monitor none \
+	    -semihosting-config enable=on,target=native
+
+# ── Inspection ────────────────────────────────────────────────────────────────
 dump: kernel.elf
 	$(OBJDUMP) -d kernel.elf | less
 
