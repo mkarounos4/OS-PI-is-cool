@@ -4,7 +4,7 @@
 #   Ubuntu: sudo apt install gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 #   macOS:  brew install aarch64-none-elf
 
-CROSS   ?= aarch64-linux-gnu-
+CROSS   ?= aarch64-none-elf-
 CC      = $(CROSS)gcc
 OBJCOPY = $(CROSS)objcopy
 OBJDUMP = $(CROSS)objdump
@@ -23,7 +23,6 @@ ifeq ($(PLATFORM),rpi)
     UART_SRC = src/uart_rpi.c
     LINKER = linker_rpi.ld
     TARGET = kernel8.img
-    EXTRA_TARGETS = kernel_2712.img
 else ifeq ($(PLATFORM),qemu)
     CFLAGS += -DPLATFORM_QEMU
     UART_SRC = src/uart_qemu.c
@@ -37,16 +36,12 @@ OBJS = boot.o kernel.o uart.o
 
 .PHONY: all clean dump
 
-all: $(TARGET) $(EXTRA_TARGETS)
+all: $(TARGET)
 
 $(TARGET): $(OBJS) $(LINKER)
 	$(CC) -T $(LINKER) $(LDFLAGS) $(OBJS) -o kernel.elf
 	$(OBJCOPY) kernel.elf -O binary $@
 	@echo "Built $@ for PLATFORM=$(PLATFORM) ($$(wc -c < $@) bytes)"
-
-kernel_2712.img: kernel8.img
-	cp kernel8.img $@
-	@echo "Built $@ for Raspberry Pi 5 ($$(wc -c < $@) bytes)"
 
 boot.o: src/boot.S
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -56,6 +51,15 @@ kernel.o: src/kernel.c src/uart.h
 
 uart.o: $(UART_SRC) src/uart.h
 	$(CC) $(CFLAGS) -c $< -o $@
+
+qemu: PLATFORM = qemu
+qemu: all
+	qemu-system-aarch64 \
+	    -M raspi3b \
+	    -kernel kernel8.img \
+	    -nographic \
+	    -monitor none \
+	    -semihosting-config enable=on,target=native
 
 dump: kernel.elf
 	$(OBJDUMP) -d kernel.elf | less
