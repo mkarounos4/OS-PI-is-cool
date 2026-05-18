@@ -161,7 +161,11 @@ struct trap_frame *irq_handle_exception(struct trap_frame *frame) {
     irq_depth++;
 
     if (irq_table[intid].handler != NULL) {
-        irq_table[intid].handler(intid, frame, irq_table[intid].ctx);
+        struct trap_frame *new_frame = irq_table[intid].handler(intid, frame, irq_table[intid].ctx);
+
+        if (new_frame != NULL) {
+            frame = new_frame;
+        }
     } else {
         irq_disable_line(intid);
     }

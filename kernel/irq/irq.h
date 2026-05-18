@@ -4,7 +4,7 @@
 
 #include "traps/traps.h"
 
-typedef void (*irq_handler_t)(unsigned intid, struct trap_frame *frame, void *ctx);
+typedef struct trap_frame *(*irq_handler_t)(unsigned intid, struct trap_frame *frame, void *ctx);
 
 // Initialize GIC
 void irq_init(void);

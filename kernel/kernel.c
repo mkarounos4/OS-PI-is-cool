@@ -13,8 +13,7 @@ void kernel_main(void) {
     exceptions_init();
 
     irq_init();
-    scheduler_init();
-    timer_init(1);
+    timer_init();
     irq_enable();
 
     // Delay no scheduler test
@@ -24,9 +23,9 @@ void kernel_main(void) {
         timer_delay_ms(100);
     }
 
-    timer_enable_scheduler_tick();
+    scheduler_init();
+    scheduler_start();
 
-    // Delay + scheduler interrupt test
     while (1) {
         timer_delay_ms(750);
         uart_puts("while loop heartbeat\n");
