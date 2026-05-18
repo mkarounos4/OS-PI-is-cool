@@ -4,6 +4,7 @@
 #include "scheduler/scheduler.h"
 #include "timer/timer.h"
 #include "traps/traps.h"
+#include "memory/malloc.h"
 #include "uart/uart.h"
 
 void kernel_main(void) {
