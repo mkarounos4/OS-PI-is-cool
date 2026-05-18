@@ -1,3 +1,4 @@
+#include "rpi5_addresses.h"
 #include "uart.h"
 
 #define UART_DR     0x00
@@ -62,10 +63,6 @@ void uart_init(void) {
     rpi5_mmio_write32(RPI5_RP1_UART0_BASE + UART_LCRH, LCRH_WLEN_8 | LCRH_FEN);
     rpi5_mmio_write32(RPI5_RP1_UART0_BASE + UART_CR, CR_UARTEN | CR_TXE | CR_RXE);
     rpi5_mmio_barrier();
-}
-
-void enable_uart(void) {
-    uart_init();
 }
 
 void uart_raw_putc(const char c) {
