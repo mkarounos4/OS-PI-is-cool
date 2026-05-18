@@ -36,12 +36,6 @@ OBJS = boot.o kernel.o uart.o
 
 .PHONY: all clean dump
 
-all: $(TARGET)
-
-$(TARGET): $(OBJS) $(LINKER)
-	$(CC) -T $(LINKER) $(LDFLAGS) $(OBJS) -o kernel.elf
-	$(OBJCOPY) kernel.elf -O binary $@
-	@echo "Built $@ for PLATFORM=$(PLATFORM) ($$(wc -c < $@) bytes)"
 
 boot.o: src/boot.S
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -52,14 +46,26 @@ kernel.o: src/kernel.c src/uart.h
 uart.o: $(UART_SRC) src/uart.h
 	$(CC) $(CFLAGS) -c $< -o $@
 
-qemu: PLATFORM = qemu
-qemu: all
+all: rpi
+
+rpi:
+	$(MAKE) PLATFORM=rpi build
+
+# quit qemu with Ctrl+A X
+qemu: 
+	$(MAKE) PLATFORM=qemu build
 	qemu-system-aarch64 \
-	    -M raspi3b \
-	    -kernel kernel8.img \
+	    -M virt \
+	    -cpu cortex-a72 \
 	    -nographic \
-	    -monitor none \
-	    -semihosting-config enable=on,target=native
+	    -kernel kernel8.img
+
+build: $(TARGET)
+
+$(TARGET): $(OBJS) $(LINKER)
+	$(CC) -T $(LINKER) $(LDFLAGS) $(OBJS) -o kernel.elf
+	$(OBJCOPY) kernel.elf -O binary $@
+	@echo "Built $@ for PLATFORM=$(PLATFORM) ($$(wc -c < $@) bytes)"
 
 dump: kernel.elf
 	$(OBJDUMP) -d kernel.elf | less
