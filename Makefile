@@ -1,81 +1,64 @@
-# ==============================================================
-#  Makefile — Raspberry Pi 5 bare-metal
+# Raspberry Pi 5 bare-metal starter
 #
-#  Requires the AArch64 bare-metal toolchain:
-#    macOS:   brew install aarch64-none-elf (or arm-none-eabi)
-#    Ubuntu:  sudo apt install gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
-#             (or download the Arm GNU Toolchain from developer.arm.com)
-# ==============================================================
+# Requires an AArch64 cross toolchain, for example:
+#   Ubuntu: sudo apt install gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+#   macOS:  brew install aarch64-none-elf
 
-CROSS   = aarch64-none-elf-
+CROSS   ?= aarch64-linux-gnu-
 CC      = $(CROSS)gcc
-LD      = $(CROSS)ld
 OBJCOPY = $(CROSS)objcopy
 OBJDUMP = $(CROSS)objdump
 
-CFLAGS  = -Wall -Wextra -O2 -ffreestanding -nostdlib -mgeneral-regs-only
+PLATFORM ?= rpi
 
-# ── Platform selection ────────────────────────────────────────────────────────
-# Usage:  make PLATFORM=qemu   (default)
-#         make PLATFORM=rpi
-PLATFORM ?= qemu
+CFLAGS = -Wall -Wextra -O2 \
+         -ffreestanding -nostdlib -mgeneral-regs-only \
+         -fno-pic -fno-pie -fno-stack-protector \
+         -fno-asynchronous-unwind-tables -fno-unwind-tables
+LDFLAGS = -nostdlib -nostartfiles -nodefaultlibs -static -no-pie \
+          -Wl,--build-id=none -Wl,-Map=kernel.map
 
 ifeq ($(PLATFORM),rpi)
-    CFLAGS  += -DPLATFORM_RPI
+    CFLAGS += -DPLATFORM_RPI -mcpu=cortex-a76
     UART_SRC = src/uart_rpi.c
-else ifeq ($(PLATFORM),qemu)
-    CFLAGS  += -DPLATFORM_QEMU
-    UART_SRC = src/uart_qemu.c
-else
-    $(error Unknown PLATFORM '$(PLATFORM)'. Use 'qemu' or 'rpi')
-endif
-
-# ── Linker script selection ───────────────────────────────────────────────────
-ifeq ($(PLATFORM),rpi)
     LINKER = linker_rpi.ld
-else
+    TARGET = kernel8.img
+    EXTRA_TARGETS = kernel_2712.img
+else ifeq ($(PLATFORM),qemu)
+    CFLAGS += -DPLATFORM_QEMU
+    UART_SRC = src/uart_qemu.c
     LINKER = linker_qemu.ld
+    TARGET = kernel8.img
+else
+    $(error Unknown PLATFORM '$(PLATFORM)'. Use 'rpi' or 'qemu')
 endif
 
-# ── Sources & objects ─────────────────────────────────────────────────────────
-SRCS = src/boot.S src/kernel.c $(UART_SRC)
 OBJS = boot.o kernel.o uart.o
 
-TARGET = kernel8.img
+.PHONY: all clean dump
 
-# ── Targets ───────────────────────────────────────────────────────────────────
-.PHONY: all clean dump qemu
-
-all: $(TARGET)
+all: $(TARGET) $(EXTRA_TARGETS)
 
 $(TARGET): $(OBJS) $(LINKER)
-	$(LD) -T $(LINKER) $(OBJS) -o kernel.elf
+	$(CC) -T $(LINKER) $(LDFLAGS) $(OBJS) -o kernel.elf
 	$(OBJCOPY) kernel.elf -O binary $@
-	@echo "Built $@ for PLATFORM=$(PLATFORM) ($(shell wc -c < $@) bytes)"
+	@echo "Built $@ for PLATFORM=$(PLATFORM) ($$(wc -c < $@) bytes)"
+
+kernel_2712.img: kernel8.img
+	cp kernel8.img $@
+	@echo "Built $@ for Raspberry Pi 5 ($$(wc -c < $@) bytes)"
 
 boot.o: src/boot.S
 	$(CC) $(CFLAGS) -c $< -o $@
 
-kernel.o: src/kernel.c
+kernel.o: src/kernel.c src/uart.h
 	$(CC) $(CFLAGS) -c $< -o $@
 
-uart.o: $(UART_SRC)
+uart.o: $(UART_SRC) src/uart.h
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# ── QEMU convenience target ───────────────────────────────────────────────────
-# Launches a Raspberry Pi 3B machine; Ctrl-A X to quit
-qemu: PLATFORM = qemu
-qemu: all
-	qemu-system-aarch64 \
-	    -M raspi3b \
-	    -kernel kernel8.img \
-	    -nographic \
-	    -monitor none \
-	    -semihosting-config enable=on,target=native
-
-# ── Inspection ────────────────────────────────────────────────────────────────
 dump: kernel.elf
 	$(OBJDUMP) -d kernel.elf | less
 
 clean:
-	rm -f *.o *.elf *.img
+	rm -f *.o *.elf *.img *.map

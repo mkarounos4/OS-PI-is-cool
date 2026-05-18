@@ -1,18 +1,14 @@
-# config.txt  —  Raspberry Pi 5 bare-metal boot configuration
-
-# Load our 64-bit bare-metal kernel
+# Raspberry Pi 5 bare-metal boot configuration.
 arm_64bit=1
-kernel=kernel8.img
+kernel=kernel_2712.img
+kernel_address=0x80000
+disable_commandline_tags=1
 
-# kernel8.img is loaded to 0x80000 by default in 64-bit mode.
-# Uncomment the line below only if you rename the image.
-# kernel_address=0x80000
+# Enable the RP1 PL011 on GPIO14/GPIO15 and print firmware UART logs too.
+enable_rp1_uart=1
+enable_uart=1
+uart_2ndstage=1
 
-# Prevent the firmware from appending a Linux boot command line
-# or device-tree tags that would clobber memory near 0x80000.
-disable_commandline_tags=2
-
-# Keep all 4 cores at their reset state; core 0 is released to
-# our kernel automatically.  Cores 1-3 sit in the firmware
-# spin-table until explicitly woken (we park them in boot.S).
-# kernel_old=0  (default — do not set kernel_old=1 for bare metal)
+# Keep the RP1 PCIe link alive for the kernel. Without this, RP1 MMIO
+# at the firmware-reported 0x1c00000000 handoff window is inaccessible.
+pciex4_reset=0

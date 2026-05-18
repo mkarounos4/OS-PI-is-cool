@@ -1,40 +1,39 @@
-/*
- * linker.ld  —  Bare-metal linker script for Raspberry Pi 5 (AArch64)
- *
- * The Pi 5 firmware loads our kernel to 0x80000 (same as Pi 3/4
- * in 64-bit mode) and jumps to the very first instruction there.
- */
-
 ENTRY(_start)
+
+PHDRS
+{
+    text PT_LOAD FLAGS(5);
+    data PT_LOAD FLAGS(6);
+}
 
 SECTIONS
 {
-    /* Load address: where the firmware places the binary */
     . = 0x80000;
+    __kernel_start = .;
 
-    .text :
-    {
-        KEEP(*(.text.boot))     /* boot.S _start must come first */
+    .text : {
+        KEEP(*(.text.boot))
         *(.text*)
-    }
+    } :text
 
-    .rodata : { *(.rodata*) }
+    .rodata : { *(.rodata*) } :text
+    .data   : { *(.data*)   } :data
 
-    .data   : { *(.data*)   }
-
-    .bss :
-    {
+    . = ALIGN(16);
+    .bss (NOLOAD) : {
         __bss_start = .;
         *(.bss*)
         *(COMMON)
+        . = ALIGN(16);
         __bss_end = .;
-    }
+    } :data
 
-    /* 64 KiB stack, 16-byte aligned */
     . = ALIGN(16);
-    .stack (NOLOAD) :
-    {
-        . = . + 0x10000;
+    .stack (NOLOAD) : {
+        _stack_bottom = .;
+        . += 0x10000;
         _stack_top = .;
-    }
+    } :data
+
+    __kernel_end = .;
 }
