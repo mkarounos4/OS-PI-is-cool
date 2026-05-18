@@ -1,58 +1,74 @@
-# Raspberry Pi 5 bare-metal starter
-#
-# Requires an AArch64 cross toolchain, for example:
-#   Ubuntu: sudo apt install gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
-#   macOS:  brew install aarch64-none-elf
-
 CROSS   ?= aarch64-none-elf-
 CC      = $(CROSS)gcc
 OBJCOPY = $(CROSS)objcopy
 OBJDUMP = $(CROSS)objdump
+BOOTDIR = /media/veerkakar/bootfs
 
 PLATFORM ?= rpi
+
+KERNEL_DIR = kernel
+BUILD_DIR  = build/$(PLATFORM)
+
+HEADERS  := $(shell find $(KERNEL_DIR) -type f -name '*.h')
+INCLUDES := $(shell find $(KERNEL_DIR) -type d | sed 's/^/-I/')
 
 CFLAGS = -Wall -Wextra -O2 \
          -ffreestanding -nostdlib -mgeneral-regs-only \
          -fno-pic -fno-pie -fno-stack-protector \
-         -fno-asynchronous-unwind-tables -fno-unwind-tables
+         -fno-asynchronous-unwind-tables -fno-unwind-tables \
+         $(INCLUDES)
+
 LDFLAGS = -nostdlib -nostartfiles -nodefaultlibs -static -no-pie \
           -Wl,--build-id=none -Wl,-Map=kernel.map
 
 ifeq ($(PLATFORM),rpi)
     CFLAGS += -DPLATFORM_RPI -mcpu=cortex-a76
-    UART_SRC = src/uart_rpi.c
+    UART_SRC = kernel/uart/uart_rpi.c
     LINKER = linker_rpi.ld
     TARGET = kernel8.img
 else ifeq ($(PLATFORM),qemu)
     CFLAGS += -DPLATFORM_QEMU
-    UART_SRC = src/uart_qemu.c
+    UART_SRC = kernel/uart/uart_qemu.c
     LINKER = linker_qemu.ld
     TARGET = kernel8.img
 else
     $(error Unknown PLATFORM '$(PLATFORM)'. Use 'rpi' or 'qemu')
 endif
 
-OBJS = boot.o kernel.o uart.o
+ALL_C_SRCS := $(shell find $(KERNEL_DIR) -type f -name '*.c')
+ASM_SRCS   := $(shell find $(KERNEL_DIR) -type f -name '*.S')
 
-.PHONY: all clean dump
+C_SRCS := $(filter-out kernel/uart/uart_rpi.c kernel/uart/uart_qemu.c,$(ALL_C_SRCS)) $(UART_SRC)
 
+OBJS := $(patsubst $(KERNEL_DIR)/%.c,$(BUILD_DIR)/%.o,$(C_SRCS))
+OBJS += $(patsubst $(KERNEL_DIR)/%.S,$(BUILD_DIR)/%.o,$(ASM_SRCS))
 
-boot.o: src/boot.S
+.PHONY: all clean dump rpi install qemu build FORCE
+
+$(BUILD_DIR)/%.o: $(KERNEL_DIR)/%.c $(HEADERS)
+	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-kernel.o: src/kernel.c src/uart.h
+$(BUILD_DIR)/%.o: $(KERNEL_DIR)/%.S
+	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-uart.o: $(UART_SRC) src/uart.h
-	$(CC) $(CFLAGS) -c $< -o $@
-
-all: rpi
+all: rpi install
 
 rpi:
 	$(MAKE) PLATFORM=rpi build
 
+install:
+	cp kernel8.img $(BOOTDIR)
+	cp kernel8.img $(BOOTDIR)/kernel_2712.img
+	cp kernel.elf $(BOOTDIR)
+	cp config.txt $(BOOTDIR)
+	@echo "Copied all files to boot dir correctly."
+	eject $(BOOTDIR)
+	@echo "Ejected boot directory"
+
 # quit qemu with Ctrl+A X
-qemu: 
+qemu:
 	$(MAKE) PLATFORM=qemu build
 	qemu-system-aarch64 \
 	    -M virt \
@@ -62,7 +78,7 @@ qemu:
 
 build: $(TARGET)
 
-$(TARGET): $(OBJS) $(LINKER)
+$(TARGET): FORCE $(OBJS) $(LINKER)
 	$(CC) -T $(LINKER) $(LDFLAGS) $(OBJS) -o kernel.elf
 	$(OBJCOPY) kernel.elf -O binary $@
 	@echo "Built $@ for PLATFORM=$(PLATFORM) ($$(wc -c < $@) bytes)"
@@ -71,4 +87,7 @@ dump: kernel.elf
 	$(OBJDUMP) -d kernel.elf | less
 
 clean:
+	rm -rf build
 	rm -f *.o *.elf *.img *.map
+
+FORCE:
