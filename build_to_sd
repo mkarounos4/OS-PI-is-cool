@@ -1,9 +1,9 @@
 make clean
 make PLATFORM=rpi
-mount /media/veerkakar/bootfs/
-cp config.txt   /media/veerkakar/bootfs/
-cp kernel8.img  /media/veerkakar/bootfs/
-cp kernel8.img  /media/veerkakar/bootfs/kernel_2712.img
-sync /media/veerkakar/bootfs/
-umount /media/veerkakar/bootfs/
-eject /media/veerkakar/bootfs/
+mount /run/media/veerkakar/bootfs/
+cp config.txt   /run/media/veerkakar/bootfs/
+cp kernel8.img  /run/media/veerkakar/bootfs/
+cp kernel8.img  /run/media/veerkakar/bootfs/kernel_2712.img
+sync /run/media/veerkakar/bootfs/
+umount /run/media/veerkakar/bootfs/
+eject /run/media/veerkakar/bootfs/

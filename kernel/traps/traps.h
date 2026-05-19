@@ -35,8 +35,11 @@ struct trap_frame {
 // Initialize exception vectors
 void exceptions_init(void);
 
-// Dispatch an exception and return the next trap frame to execute. Currently calls IRQ handler if applicable, or fatal exception otherwise.
+// Dispatch an exception and return the next trap frame to execute.
 struct trap_frame *exception_dispatch(struct trap_frame *frame);
+
+// Print a saved trap frame and decoded exception details.
+void trap_frame_dump(const struct trap_frame *frame);
 
 // Get current exception level (0-3)
 uint64_t cpu_current_el(void);

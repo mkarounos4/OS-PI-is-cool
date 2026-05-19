@@ -34,6 +34,7 @@ exception_vectors:
 
 .global exception_entry
 exception_entry:
+    // Store all global registers
     stp x2,  x3,  [sp, #16]
     stp x4,  x5,  [sp, #32]
     stp x6,  x7,  [sp, #48]
@@ -50,7 +51,21 @@ exception_entry:
     stp x28, x29, [sp, #224]
     str x30, [sp, #240]
 
+    // Check if kernel mode exception, if so branch to 1
+    cmp x0, #8
+    b.lo 1f
+
+    // Otherwise user mode exception (in EL0) so branch 2
+    // Stores SP_EL0 in frame->sp
+    mrs x1, sp_el0
+    b 2f
+
+1:
+    // Kernel mode exception, store sp + TRAP_FRAME_SIZE in frame->sp 
     add x1, sp, #TRAP_FRAME_SIZE
+
+2:
+    // Store old context in trap_frame
     str x1, [sp, #248]
 
     mrs x1, elr_el1
@@ -64,15 +79,23 @@ exception_entry:
     str x0, [sp, #288]
     str xzr, [sp, #296]
 
+    // Dispatch exception
     mov x0, sp
     bl exception_dispatch
     mov sp, x0
 
+    // Restore context from trap_frame
     ldr x1, [sp, #256]
     msr elr_el1, x1
     ldr x1, [sp, #264]
     msr spsr_el1, x1
+    and x2, x1, #0xf
+    cbnz x2, 3f             // Branch for if EL0 or EL1
+    ldr x3, [sp, #248]    // If EL0, store SP in SP_EL0
+    msr sp_el0, x3
 
+3:
+    // Load all registers back
     ldp x2,  x3,  [sp, #16]
     ldp x4,  x5,  [sp, #32]
     ldp x6,  x7,  [sp, #48]
@@ -90,6 +113,7 @@ exception_entry:
     ldr x30, [sp, #240]
     ldp x0, x1, [sp, #0]
 
+    // Return from excpetion
     add sp, sp, #TRAP_FRAME_SIZE
     eret
 
@@ -101,6 +125,11 @@ trap_frame_restore:
     msr elr_el1, x1
     ldr x1, [sp, #264]
     msr spsr_el1, x1
+    and x2, x1, #0xf
+    cbnz x2, 4f
+    ldr x3, [sp, #248]
+    msr sp_el0, x3
+4:
 
     ldp x2,  x3,  [sp, #16]
     ldp x4,  x5,  [sp, #32]

@@ -2,7 +2,7 @@ CROSS   ?= aarch64-none-elf-
 CC      = $(CROSS)gcc
 OBJCOPY = $(CROSS)objcopy
 OBJDUMP = $(CROSS)objdump
-BOOTDIR = /media/veerkakar/bootfs
+BOOTDIR = /run/media/veerkakar/bootfs
 
 PLATFORM ?= rpi
 
