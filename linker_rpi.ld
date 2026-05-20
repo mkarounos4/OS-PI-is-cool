@@ -34,6 +34,13 @@ SECTIONS
         . += 0x10000;
         _stack_top = .;
     } :data
+    
+    . = ALIGN(16);
+    .kernel_heap (NOLOAD) : {
+        __kernel_heap_start = .;
+        . += 0x100000; /* 1 MiB for now */
+        __kernel_heap_end = .;
+    } 
 
     __kernel_end = .;
 }

@@ -5,67 +5,79 @@
 #include "timer/timer.h"
 #include "uart/uart.h"
 #include "syscall/syscall.h"
+#include "scheduler/process.h"
+#include "data-structs/vec.h"
+#include "memory/malloc.h"
+#include "syscall/u_syscall.h"
 
 #define SCHEDULER_QUANTUM_MS 1000u
 
-static struct tcb_st threads[THREAD_COUNT];
-static unsigned curr_thread;
-static uint64_t heartbeat;
+struct sched_task_node {
+    pcb_t *pcb;
+    struct sched_task_node *next;
+};
+struct sched_task_node *sched_queue_head;
+struct sched_task_node *sched_queue_tail;
+int sched_queue_size;
+
+static pcb_t *curr_proc;
+static uint64_t curr_tick;
+
+static struct tcb_st idle_task;
 
 static struct trap_frame *scheduler_tick(struct trap_frame *frame, void *ctx);
 extern void trap_frame_restore(struct trap_frame *frame) __attribute__((noreturn));
 
-// Aligns the given value down to the nearest multiple of the given alignment, which must be a power of 2.
 static uintptr_t align_down(uintptr_t value, uintptr_t alignment) {
     return value & ~(alignment - 1u);
 }
-// Entry point for thread1
-static void thread1_func(uint64_t tid) {
-    (void) tid;
-    while (1) {
-        sys_write_console("this is a thread heartbeat yeahhh\r\n", 35);
-        uart_puts("done syscall\r\n");
-        
-        volatile uint64_t cycles = 1000000ULL;
 
-        while (cycles--)
-            __asm__ volatile ("nop");
+static void add_sched_queue_node(pcb_t *pcb) {
+    struct sched_task_node *new_node = malloc(sizeof(struct sched_task_node));
+    new_node->pcb = pcb;
+    new_node->next = NULL;
+
+    if (sched_queue_tail == NULL) {
+        sched_queue_head = new_node;
+        sched_queue_tail = new_node;
+    } else {
+        sched_queue_tail->next = new_node;
+        sched_queue_tail = new_node;
     }
+
+    sched_queue_size++;
 }
 
-static void thread2_func(uint64_t tid) {
-    (void) tid;
-    while (1) {
-        uart_puts("starting syscall 2\r\n");
-        sys_write_console("nvm its not noooooo\r\n", 21);
-        uart_puts("done syscall\r\n");
-        volatile uint64_t cycles = 1000000ULL;
+static pcb_t *pop_sched_queue() {
+    if (sched_queue_size == 0) {
+        return NULL;
+    }
 
-        while (cycles--)
-            __asm__ volatile ("nop");
+    struct sched_task_node *task_node = sched_queue_head;
+    if (sched_queue_size == 1) {
+        sched_queue_head = NULL;
+        sched_queue_tail = NULL;
+    } else {
+        sched_queue_head = sched_queue_head->next;
+    }
+
+    pcb_t *ret = sched_queue_head->pcb;
+    free(task_node);
+    sched_queue_size--;
+    return ret;
+}
+
+void idle_task_fn(void*) {
+    while (1) {
+        asm volatile ("wfe");
     }
 }
 
 // Initialize a new thread (make a tcb and load it for that index)
-static void thread_init(void (*entry)(uint64_t)) {
-    // Find next unused thread
-    int tid = -1;
-    for (unsigned int i = 0; i < THREAD_COUNT; i++) {
-        if (threads[i].state == THREAD_UNUSED) {
-            tid = i;
-            break;
-        }
-    }
-
-    // If no unused threads, return with error
-    if (tid < 0) {
-        uart_puts("ERROR: thread limit reached.\n");
-        return;
-    }
-
+static void thread_init(void (*entry)(void*), struct tcb_st *tcb) {
     // Get stacks for thread
-    uintptr_t kernel_top = align_down((uintptr_t)&threads[tid].kernel_stack[THREAD_STACK_SIZE], 16);
-    uintptr_t user_top = align_down((uintptr_t)&threads[tid].usr_stack[THREAD_STACK_SIZE], 16);
+    uintptr_t kernel_top = align_down((uintptr_t)&tcb->kernel_stack[THREAD_STACK_SIZE], 16);
+    uintptr_t user_top = align_down((uintptr_t)&tcb->usr_stack[THREAD_STACK_SIZE], 16);
 
     // Get trap_frame with thread context
     struct trap_frame *frame = (struct trap_frame *)(kernel_top - sizeof(struct trap_frame));
@@ -75,7 +87,8 @@ static void thread_init(void (*entry)(uint64_t)) {
         frame->regs[i] = 0;
     }
 
-    frame->regs[0] = (uint64_t)tid;
+    // SET TID here temporary 0 as only using this for idle until real multithreaded library implemented
+    frame->regs[0] = (uint64_t)0;
 
     // Initialize all special registers.
     frame->sp = user_top;
@@ -87,35 +100,39 @@ static void thread_init(void (*entry)(uint64_t)) {
     frame->intid = 0;
 
     // Initialize rest of tcb
-    threads[tid].frame = frame;
-    threads[tid].state = THREAD_READY;
-    threads[tid].tid = tid;
+    tcb->frame = frame;
+    tcb->state = THREAD_READY;
+    tcb->tid = 0;
 }
 
-// Initialize scheduler state and the initial 4 kernel threads.
 void scheduler_init(void) {
-    heartbeat = 0;
-    curr_thread = 0;
-    for (unsigned int i = 0; i < THREAD_COUNT; i++) {
-        threads[i].state = THREAD_UNUSED;
-    }
+    curr_tick = 0;
+    curr_proc = NULL;
+    processes_init();
 
-    thread_init(thread1_func);
-    thread_init(thread2_func);
-    thread_init(thread1_func);
+    sched_queue_head = NULL;
+    sched_queue_tail = NULL;
+    sched_queue_size = 0;
+
+    thread_init(idle_task_fn, &idle_task);
 }
 
 // Starts execution at thread 0. Does not return.
 void scheduler_start(void) {
     timer_schedule_interrupt_ms(SCHEDULER_QUANTUM_MS, scheduler_tick, 0);
-    threads[0].state = THREAD_RUNNING;
-    trap_frame_restore(threads[0].frame);
+    pcb_t *next_pcb = pop_sched_queue();
+    
+    if (next_pcb != NULL) {
+        trap_frame_restore(next_pcb->frame);
+    } else {
+        trap_frame_restore(idle_task.frame);
+    }
 }
 
 // Prints scheduler tick info to the console for debugging purposes.
 static void scheduler_print_tick(unsigned int tid1, unsigned int tid2) {
     uart_puts("scheduler tick ");
-    uart_puthex(heartbeat++);
+    uart_puthex(curr_tick++);
     uart_puts(" switching ");
     uart_puthex(tid1);
     uart_puts(" -> ");
@@ -129,31 +146,45 @@ static void scheduler_print_tick(unsigned int tid1, unsigned int tid2) {
 static struct trap_frame *scheduler_tick(struct trap_frame *frame, void *ctx) {
     (void)ctx;
 
-    timer_schedule_interrupt_ms(SCHEDULER_QUANTUM_MS, scheduler_tick, 0);
-
     if (frame->type != EXC_IRQ_LOWER_A64) {
         return frame;
     }
 
-    threads[curr_thread].frame = frame;
-    threads[curr_thread].state = THREAD_READY;
-
-    // Get next ready thread
-    unsigned int start_thread = curr_thread;
-    do {
-        curr_thread = (curr_thread + 1) % THREAD_COUNT;
-    } while (curr_thread != start_thread && threads[curr_thread].state != THREAD_READY);
-    
-    scheduler_print_tick(start_thread, curr_thread);
-
-    // Verify there was a ready thread
-    if (threads[curr_thread].state != THREAD_READY) {
-        // need to go to idle task
-        return frame;
+    if (curr_proc != NULL) {
+        // TODO: load curr malloc brk back into curr_proc->heap_brk
     }
 
-    // Update new thread data and start next thread
-    threads[curr_thread].state = THREAD_RUNNING;
-    return threads[curr_thread].frame;
-}
+    // TODO: load kernel malloc __kernel_heap_start, __kernel_heap_end, and heap brk (store somewhere)
 
+    if (curr_proc != NULL) {
+        curr_proc->frame = frame;
+        if (curr_proc->state == PROC_RUNNING_STATE) {
+            curr_proc->state = PROC_READY_STATE;
+            add_sched_queue_node(curr_proc);
+        }
+    }
+
+    pid_t old_pcb = curr_proc == NULL ? -1 : curr_proc->pid;
+
+    // idle if no tasks
+    curr_proc = pop_sched_queue();
+    if (curr_proc == NULL) {
+        scheduler_print_tick(-1, -1);
+        return idle_task.frame;
+    }
+    
+    // If next thread exists, run it
+    scheduler_print_tick(old_pcb, curr_proc->pid);
+
+    // TODO: load malloc start,brk,end with curr_proc->head_[start/brk/end]
+    // Also right before store back heap brk somewhere
+
+    // Update new thread data
+    curr_proc->state = PROC_RUNNING_STATE;
+    
+    // Setup next scheduler interrupt
+    timer_schedule_interrupt_ms(SCHEDULER_QUANTUM_MS, scheduler_tick, 0);
+
+    // Return frame for new thread
+    return curr_proc->frame;
+}

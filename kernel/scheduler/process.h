@@ -1,0 +1,46 @@
+#include <stdint.h>
+
+typedef int32_t pid_t;
+
+#define MAX_PROCESS_COUNT 16
+#define PROC_STACK_SIZE 2048u
+#define PROC_HEAP_SIZE 4096u
+
+enum process_state {
+    PROC_UNUSED_STATE,
+    PROC_READY_STATE,
+    PROC_RUNNING_STATE,
+    PROC_BLOCKED_STATE,
+    PROC_STOPPED_STATE,
+    PROC_ZOMBIE_STATE,
+};
+
+typedef struct pcb_st {
+    pid_t pid; 
+    pid_t ppid; // Parent pid
+    pid_t pgid; // group id
+    
+    const char *name;
+    pid_t waiting_for_pid;
+    uintptr_t wait_status_ptr;
+    enum process_state state;
+    int exit_code;
+
+    // Thread parameters (implementation simplified to one thread per process)
+    struct trap_frame *frame;
+    unsigned char user_stack[PROC_STACK_SIZE];
+    unsigned char kernel_stack[PROC_STACK_SIZE];
+    unsigned char heap[PROC_HEAP_SIZE];
+    
+    uintptr_t user_stack_base;
+    uintptr_t user_stack_top;
+    uintptr_t kernel_stack_base;
+    uintptr_t kernel_stack_top;
+    uintptr_t heap_base;
+    uintptr_t heap_brk;
+    uintptr_t heap_end;
+
+} pcb_t;
+
+pcb_t *get_pcb_by_pid(pid_t pid);
+void processes_init();

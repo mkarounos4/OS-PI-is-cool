@@ -8,6 +8,9 @@
 #include "uart/uart.h"
 #include "syscall/syscall.h"
 
+extern char __kernel_heap_start[];
+extern char __kernel_heap_end[];
+
 #define TRAP_TEST_FATAL_BRK 0
 #define TRAP_TEST_FATAL_SVC 0
 #define TRAP_TEST_UNDEFINED_INSTRUCTION 0
@@ -57,6 +60,8 @@ void kernel_main(void) {
     irq_init();
     timer_init();
     irq_enable();
+
+    mem_init(__kernel_heap_start, __kernel_heap_end - __kernel_heap_start);
 
     // Delay no scheduler test
     for (int i = 0; i < 10; i++) {

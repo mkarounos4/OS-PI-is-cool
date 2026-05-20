@@ -5,14 +5,17 @@
 #include "traps/traps.h"
 
 enum syscall_type {
-    SYS_WRITE_CONSOLE = 1,
-    SYS_PUTC = 2,
-    SYS_GET_TICKS = 3,
-    SYS_YIELD = 4,
-    SYS_EXIT = 5,
-    SYS_GETPID = 6,
-    SYS_CURRENT_EL = 7,
-    SYS_DELAY = 8,
+    S_WRITE_CONSOLE = 1,
+    S_PUTC = 2,
+    S_GET_TICKS = 3,
+    S_YIELD = 4,
+    S_EXIT = 5,
+    S_GETPID = 6,
+    S_CURRENT_EL = 7,
+    S_DELAY = 8,
+    S_SPAWN = 9,
+    S_WAITPID = 10,
+    S_SBRK = 11,
 };
 
 #define SYS_ENOSYS (-38L)
@@ -62,22 +65,4 @@ static inline long sys_call4(long nr, long a0, long a1, long a2, long a3) {
 
 static inline long sys_call5(long nr, long a0, long a1, long a2, long a3, long a4) {
     return sys_call6(nr, a0, a1, a2, a3, a4, 0);
-}
-
-static inline long sys_write_console(const char *s, uint64_t len) {
-    return sys_call2(SYS_WRITE_CONSOLE, (long)(uintptr_t)s, (long)len);
-}
-
-static inline long sys_putc(char c) {
-    return sys_call1(SYS_PUTC, (long)c);
-}
-
-static inline long sys_get_ticks(void) {
-    return sys_call0(SYS_GET_TICKS);
-}
-
-// NOT IMPLEMENTED YET
-static inline long sys_delay(uint64_t ms) {
-    (void) ms;
-    return 0;
 }

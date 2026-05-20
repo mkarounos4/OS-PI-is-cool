@@ -32,32 +32,55 @@ static long sys_write_console_impl(const char *s, uint64_t len) {
     return (long)written;
 }
 
+static long s_exit_impl(int code) {
+    (void) code;
+    return 0;
+}
+
+static long s_spawn() {
+
+    return 0;
+}
+
+static long s_waitpid() {
+    return 0;
+}
+
 struct trap_frame *syscall_dispatch(struct trap_frame *frame) {
     uint64_t syscall_number = frame->regs[8];
     long ret = SYS_ENOSYS;
 
     switch (syscall_number) {
-    case SYS_WRITE_CONSOLE:
+    case S_WRITE_CONSOLE:
         ret = sys_write_console_impl((const char *)(uintptr_t)frame->regs[0], frame->regs[1]);
         break;
 
-    case SYS_PUTC:
+    case S_PUTC:
         uart_putc((char)frame->regs[0]);
         ret = 0;
         break;
 
-    case SYS_GET_TICKS:
+    case S_GET_TICKS:
         ret = (long)timer_get_ticks();
         break;
 
-    case SYS_YIELD:
+    case S_YIELD:
         break;
 
-    case SYS_EXIT:
-    case SYS_GETPID:
-    case SYS_CURRENT_EL:
-    case SYS_DELAY:
+    case S_EXIT:
+        ret = s_exit_impl((int)frame->regs[0]);
+        break;
+    case S_GETPID:
+        break;
+    case S_CURRENT_EL:
+    case S_DELAY:
         ret = SYS_ENOSYS;
+        break;
+    case S_SPAWN:
+        ret = s_spawn();
+        break;
+    case S_WAITPID:
+        ret = s_waitpid();
         break;
 
     default:
