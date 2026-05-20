@@ -1,4 +1,16 @@
-#include "memory/malloc.h"
+#include "malloc.h"
+
+#include "uart/uart.h"
+
+// create pointers to the heads of their segregated explicit free lists of size in double word blocks
+typedef struct {
+    void *one_two_free_ptr;       // size 1-2
+    void *three_free_ptr;         // size 3
+    void *four_free_ptr;          // size 4
+    void *five_eight_free_ptr;    // size 5-8
+    void *nine_sixteen_free_ptr;  // size 9-16
+    void *seventeen_free_ptr;     // size 17+
+} Seg_Lists;
 
 
 /* Memset and Memcpy */
@@ -25,22 +37,61 @@ void *memcpy(void *dst, const void *src, size_t num)
 static void *HeapMemoryBrk = NULL;
 static void *HeapMemory = NULL;
 static void *HeapMemoryEnd = NULL;
+static void *heap_ptr = NULL;
+static Seg_Lists *seg_lists_ptr = NULL;
 
-void mem_init(void *heapMemory, size_t heapMemorySize)
+void mem_init(struct mem_ctx *ctx)
 {
-        HeapMemory = heapMemory;
-        HeapMemoryBrk = heapMemory;
-        HeapMemoryEnd = heapMemory + heapMemorySize;
+    ctx->heap_brk = ctx->heap_start;
+    ctx->heap_ptr = NULL;
+    ctx->seg_lists = NULL;
+
+    HeapMemory = ctx->heap_start;
+    HeapMemoryBrk = ctx->heap_brk;
+    HeapMemoryEnd = ctx->heap_end;
+    heap_ptr = NULL;
+    seg_lists_ptr = NULL;
+    
+    if (!mm_init()) {
+        uart_puts("ERROR: failed to initialize heap\n");
+        while (1) {
+            asm volatile ("wfe");
+        }
+    }
+
+    mem_fetch_heap_vals(ctx);
+}
+
+void mem_load_heap(struct mem_ctx *ctx) {
+    HeapMemory = ctx->heap_start;
+    HeapMemoryBrk = ctx->heap_brk;
+    HeapMemoryEnd = ctx->heap_end;
+    heap_ptr = ctx->heap_ptr;
+    seg_lists_ptr = (Seg_Lists *)ctx->seg_lists;
+}
+
+void mem_fetch_heap_vals(struct mem_ctx *ctx) {
+    ctx->heap_start = HeapMemory;
+    ctx->heap_brk = HeapMemoryBrk;
+    ctx->heap_end = HeapMemoryEnd;
+    ctx->heap_ptr = heap_ptr;
+    ctx->seg_lists = seg_lists_ptr;
 }
 
 void *mem_sbrk(intptr_t incr)
 {
         void *prevBrk = HeapMemoryBrk;
-        if (prevBrk + incr > HeapMemoryEnd) {
+        if (HeapMemoryBrk == NULL || HeapMemoryEnd == NULL || incr < 0) {
                 uart_puts("ERROR: Allocated too much memory!\n");
                 return (void *) -1;
         }
-        HeapMemoryBrk += incr;
+
+        void *nextBrk = (char *)HeapMemoryBrk + incr;
+        if ((uintptr_t)nextBrk > (uintptr_t)HeapMemoryEnd) {
+                uart_puts("ERROR: Allocated too much memory!\n");
+                return (void *) -1;
+        }
+        HeapMemoryBrk = nextBrk;
         return prevBrk;
 }
 
@@ -51,7 +102,7 @@ void *mem_heap_lo()
 
 void *mem_heap_hi()
 {
-        return HeapMemoryBrk - 1;
+        return (char *)HeapMemoryBrk - 1;
 }
 
 
@@ -64,24 +115,10 @@ static size_t align(size_t x)
     return ALIGNMENT * ((x+ALIGNMENT-1)/ALIGNMENT);
 }
 
-// initialize heap ptr to NULL
-void *heap_ptr = NULL;
-
 // create word size and double word size constants
 static const size_t WS = 8;
 static const size_t DWS = 16;
 static const size_t PAGE_SIZE = 4096;
-
-// create pointers to the heads of their segregated explicit free lists of size in double word blocks
-typedef struct {
-    void *one_two_free_ptr;// size 1-2
-    void *three_free_ptr; // size 3
-    void *four_free_ptr; // size 4
-    void *five_eight_free_ptr; // size 5-8
-    void *nine_sixteen_free_ptr; // size 9-16
-    void *seventeen_free_ptr; // size 17+
-} Seg_Lists;
-Seg_Lists *seg_lists_ptr;
 
 typedef struct free_block {
     size_t header;
@@ -191,7 +228,7 @@ void *coalesce(void *ptr) {
     	size_t prev_size = *(size_t *)((char *)ptr - DWS) & ~0xF;
 
 	// remove previous from its free list
-	remove_free(ptr - prev_size, prev_size);
+	remove_free((char *)ptr - prev_size, prev_size);
 
 	// extend size of previous free block to include current free block
 	*(size_t *)((char *)ptr - prev_size - WS) = (prev_size+ size) | 0;
@@ -229,7 +266,7 @@ void initialize_free(void *ptr, size_t size) {
     *(size_t *)((char *)ptr + size - WS) = (size | 0); // create footer
 
     // coalesce with any neighboring free
-    ptr = coalesce(ptr + WS);
+    ptr = coalesce((char *)ptr + WS);
     
     insert_free(ptr); // add to desired free list   
 }
@@ -238,8 +275,10 @@ void *extend_heap(size_t size) {
     size = align(size); // ensure size alignment
 
     // extend heap
-    void *header_ptr = mem_sbrk(size);
-    if (header_ptr == (void *)-1) return NULL;
+    void *old_brk = mem_sbrk(size);
+    if (old_brk == (void *)-1) return NULL;
+
+    void *header_ptr = (char *)old_brk - WS;
 
     // new epilogue
     *(size_t *)((char *)header_ptr + size) = (0 | 1);
@@ -267,10 +306,12 @@ bool mm_init(void)
 	
     // allocate prologue
     *(size_t *)(heap_ptr) = (DWS | 1); // header
-    *(size_t *)(heap_ptr + WS) = (DWS | 1); // footer
-    *(size_t *)(heap_ptr + 2*WS) = (0|1); // epilogue
+    *(size_t *)((char *)heap_ptr + WS) = (DWS | 1); // footer
+    *(size_t *)((char *)heap_ptr + 2*WS) = (0|1); // epilogue
 
-    extend_heap(PAGE_SIZE); // extend heap -- handles epilogue
+    if (extend_heap(PAGE_SIZE) == NULL) { // extend heap -- handles epilogue
+        return false;
+    }
 
     return true;
 }

@@ -6,6 +6,7 @@
 #include "uart/uart.h"
 #include "syscall/syscall.h"
 #include "data-structs/vec.h"
+#include "memory/kernel_mem.h"
 #include "memory/malloc.h"
 #include "syscall/u_syscall.h"
 
@@ -32,7 +33,16 @@ static uintptr_t align_down(uintptr_t value, uintptr_t alignment) {
 }
 
 static void add_sched_queue_node(pcb_t *pcb) {
+    if (pcb == NULL) {
+        return;
+    }
+
     struct sched_task_node *new_node = malloc(sizeof(struct sched_task_node));
+    if (new_node == NULL) {
+        uart_puts("ERROR: failed to allocate scheduler queue node\n");
+        return;
+    }
+
     new_node->pcb = pcb;
     new_node->next = NULL;
 
@@ -63,6 +73,9 @@ static pcb_t *pop_sched_queue() {
     pcb_t *ret = task_node->pcb;
     free(task_node);
     sched_queue_size--;
+    if (ret->state != PROC_READY_STATE) {
+        return pop_sched_queue();
+    }
     return ret;
 }
 
@@ -127,6 +140,8 @@ void scheduler_start(void) {
     curr_proc = next_pcb;
     
     if (next_pcb != NULL) {
+        mem_fetch_heap_vals(get_kernel_mem_ctx());
+        mem_load_heap(&next_pcb->heap_ctx);
         next_pcb->state = PROC_RUNNING_STATE;
         trap_frame_restore(next_pcb->frame);
     } else {
@@ -156,10 +171,10 @@ static struct trap_frame *scheduler_tick(struct trap_frame *frame, void *ctx) {
     }
 
     if (curr_proc != NULL) {
-        // TODO: load curr malloc brk back into curr_proc->heap_brk
+        mem_fetch_heap_vals(&curr_proc->heap_ctx);
     }
 
-    // TODO: load kernel malloc __kernel_heap_start, __kernel_heap_end, and heap brk (store somewhere)
+    mem_load_heap(get_kernel_mem_ctx());
 
     if (curr_proc != NULL) {
         if (frame != NULL) {
@@ -184,8 +199,9 @@ static struct trap_frame *scheduler_tick(struct trap_frame *frame, void *ctx) {
     // If next thread exists, run it
     scheduler_print_tick(old_pcb, curr_proc->pid);
 
-    // TODO: load malloc start,brk,end with curr_proc->head_[start/brk/end]
-    // Also right before store back heap brk somewhere
+    // Load new proc heap to malloc
+    mem_fetch_heap_vals(get_kernel_mem_ctx());
+    mem_load_heap(&curr_proc->heap_ctx);
 
     // Update new thread data
     curr_proc->state = PROC_RUNNING_STATE;

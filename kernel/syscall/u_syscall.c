@@ -27,8 +27,8 @@ long getpid(void) {
     return sys_call0(S_GETPID);
 }
 
-long spawn(void) {
-    return 0;
+long spawn(void *(*func)(void *), void *arg) {
+    return sys_call2(S_SPAWN, (long)(uintptr_t)func, (long)(uintptr_t)arg);
 }
 
 long waitpid(pid_t pid, int *status, uint32_t flags) {
@@ -37,4 +37,8 @@ long waitpid(pid_t pid, int *status, uint32_t flags) {
 
 long sbrk(int64_t increment) {
     return sys_call1(S_SBRK, increment);
+}
+
+long kill(pid_t pid, int signal) {
+    return sys_call2(S_KILL, pid, (long)(uintptr_t)signal);
 }

@@ -1,7 +1,9 @@
 #include "scheduler/scheduler.h"
+#include "memory/kernel_mem.h"
 #include "memory/malloc.h"
 #include "traps/traps.h"
 #include "syscall/u_syscall.h"
+#include "uart/uart.h"
 
 static pcb_t processes[MAX_PROCESS_COUNT];
 
@@ -47,18 +49,29 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
         return -1;
     }
 
+    pcb_t *running_proc = get_curr_process();
+    if (running_proc != NULL) {
+        mem_fetch_heap_vals(&running_proc->heap_ctx);
+    } else {
+        mem_fetch_heap_vals(get_kernel_mem_ctx());
+    }
+
+    mem_load_heap(get_kernel_mem_ctx());
+
     // TODO: replace when VM added with better heap allocation
-    new_proc->heap_base = (uintptr_t) &new_proc->heap[0];
-    new_proc->heap_brk = (uintptr_t) new_proc->heap_base;
-    new_proc->heap_end = (uintptr_t) (new_proc->heap_base + PROC_HEAP_SIZE);
-    
-    mem_init((void*)new_proc->heap_base, new_proc->heap_end - new_proc->heap_base);
-    // TODO: Full malloc init here
+    new_proc->heap_ctx.heap_start = (void *)&new_proc->heap[0];
+    new_proc->heap_ctx.heap_brk = new_proc->heap_ctx.heap_start;
+    new_proc->heap_ctx.heap_end = (void *)&new_proc->heap[PROC_HEAP_SIZE];
+    new_proc->heap_ctx.heap_ptr = NULL;
+    new_proc->heap_ctx.seg_lists = NULL;
+
+    mem_init(&new_proc->heap_ctx);
+    mem_load_heap(get_kernel_mem_ctx());
 
     // Setup FD table here based on parent if applicable (after FS impl)
     new_proc->ppid = ppid;
     pcb_t *parent_proc = get_pcb_by_pid(ppid);
-    if (ppid == 0 || parent_proc == NULL) {
+    if (parent_proc == NULL) {
         new_proc->pgid = new_proc->pid;
     } else {
         new_proc->pgid = parent_proc->pgid; 
@@ -70,6 +83,9 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
 
     new_proc->state = PROC_READY_STATE;
     new_proc->waiting_for_pid = -2;
+    new_proc->wait_status_ptr = 0;
+    new_proc->exit_code = 0;
+    new_proc->name = NULL;
 
     // Get stacks for thread
     uintptr_t kernel_top = align_down((uintptr_t)&new_proc->kernel_stack[PROC_STACK_SIZE], 16);
@@ -102,6 +118,14 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
 
     // Initialize rest of tcb
     new_proc->frame = frame;
+
+    mem_fetch_heap_vals(get_kernel_mem_ctx());
+    if (running_proc != NULL) {
+        mem_load_heap(&running_proc->heap_ctx);
+    } else {
+        mem_load_heap(get_kernel_mem_ctx());
+    }
+
     return new_proc->pid;
 }
 

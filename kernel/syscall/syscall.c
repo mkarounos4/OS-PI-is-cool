@@ -73,6 +73,12 @@ static long s_waitpid() {
     return 0;
 }
 
+long s_kill(pid_t pid, int signal) {
+    (void)pid;
+    (void)signal;
+    return 0;
+}
+
 struct trap_frame *syscall_dispatch(struct trap_frame *frame) {
     uint64_t syscall_number = frame->regs[8];
     long ret = SYS_ENOSYS;
@@ -108,6 +114,9 @@ struct trap_frame *syscall_dispatch(struct trap_frame *frame) {
         break;
     case S_WAITPID:
         ret = s_waitpid();
+        break;
+    case S_KILL:
+        ret = s_kill((pid_t)frame->regs[0], (int)(uintptr_t)frame->regs[1]);
         break;
 
     default:

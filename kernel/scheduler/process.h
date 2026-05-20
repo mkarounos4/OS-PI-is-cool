@@ -1,11 +1,16 @@
+#pragma once
+
 #include <stdint.h>
+
 #include "data-structs/vec.h"
+#include "memory/malloc.h"
+#include "traps/traps.h"
 
 typedef int32_t pid_t;
 
 #define MAX_PROCESS_COUNT 16
 #define PROC_STACK_SIZE 2048u
-#define PROC_HEAP_SIZE 4096u
+#define PROC_HEAP_SIZE 16384u
 
 enum process_state {
     PROC_UNUSED_STATE,
@@ -37,9 +42,8 @@ typedef struct pcb_st {
     uintptr_t user_stack_top;
     uintptr_t kernel_stack_base;
     uintptr_t kernel_stack_top;
-    uintptr_t heap_base;
-    uintptr_t heap_brk;
-    uintptr_t heap_end;
+    
+    struct mem_ctx heap_ctx;
 
     Vec children;   // vec of children PIDs
     Vec file_descriptors;   // vec of fds
