@@ -1,12 +1,23 @@
-#include "scheduler/process.h"
+#include "scheduler/scheduler.h"
 #include "memory/malloc.h"
 #include "traps/traps.h"
+#include "syscall/u_syscall.h"
 
 static pcb_t processes[MAX_PROCESS_COUNT];
 
 // Aligns the given value down to the nearest multiple of the given alignment, which must be a power of 2.
 static uintptr_t align_down(uintptr_t value, uintptr_t alignment) {
     return value & ~(alignment - 1u);
+}
+
+static void process_trampoline(void *(*func)(void *), void *arg) {
+    void *ret = func(arg);
+    exit((int)(uintptr_t)ret);
+
+    // Should not reach.
+    while (1) {
+        asm volatile ("wfe");
+    }
 }
 
 long s_waitpid_impl(pid_t pid, int *status, int32_t flags) {
@@ -27,9 +38,8 @@ static pcb_t *get_next_unused_pcb() {
     return NULL;
 }
 
-pid_t proc_create(void *(*func)(void*), char *argv[], pid_t ppid) {
+pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     // TODO add arguments
-    (void) argv;
 
     pcb_t *new_proc = get_next_unused_pcb();
     if (new_proc == NULL) {
@@ -52,8 +62,11 @@ pid_t proc_create(void *(*func)(void*), char *argv[], pid_t ppid) {
         new_proc->pgid = new_proc->pid;
     } else {
         new_proc->pgid = parent_proc->pgid; 
-        // Update parent child vec with own pid
+        vec_push_back(&parent_proc->children, (ptr_t)(uintptr_t)new_proc->pid); 
     }
+
+    // Setup children array
+    new_proc->children = vec_new(5, NULL);
 
     new_proc->state = PROC_READY_STATE;
     new_proc->waiting_for_pid = -2;
@@ -75,11 +88,12 @@ pid_t proc_create(void *(*func)(void*), char *argv[], pid_t ppid) {
         frame->regs[i] = 0;
     }
 
-    frame->regs[0] = (uint64_t)new_proc->pid;
+    frame->regs[0] = (uint64_t)(uintptr_t)func;
+    frame->regs[1] = (uint64_t)(uintptr_t)args;
 
     // Initialize all special registers.
     frame->sp = user_top;
-    frame->elr = (uint64_t)(uintptr_t)func;
+    frame->elr = (uint64_t)(uintptr_t)process_trampoline;
     frame->spsr = 0; // Initialize to SP_EL0 for user exception level
     frame->esr = 0;
     frame->far = 0;
@@ -93,11 +107,10 @@ pid_t proc_create(void *(*func)(void*), char *argv[], pid_t ppid) {
 
 void proc_destroy(pcb_t *p) {
     (void) p;
-
 }
 
 pcb_t *get_pcb_by_pid(pid_t pid) {
-    if (pid > MAX_PROCESS_COUNT || pid < 0 || processes[pid].state == PROC_UNUSED_STATE) {
+    if (pid >= MAX_PROCESS_COUNT || pid < 0 || processes[pid].state == PROC_UNUSED_STATE) {
         return NULL;
     }
 
@@ -107,5 +120,16 @@ pcb_t *get_pcb_by_pid(pid_t pid) {
 void processes_init() {
     for (unsigned int i = 0; i < MAX_PROCESS_COUNT; i++) {
         processes[i].state = PROC_UNUSED_STATE;
+        processes[i].pid = i;
     }
 }
+
+#if 0
+void init_process_entry(void*) {
+    while (1) {
+        waitpid(-1, NULL, 0);
+    }
+}
+#endif
+
+// Add stop/terminate/block/unblock/continue process (but reqs signal mask and handlers)

@@ -5,9 +5,18 @@
 #include "timer/timer.h"
 #include "traps/traps.h"
 #include "uart/uart.h"
+#include "scheduler/scheduler.h"
 
 #define SYS_WRITE_CONSOLE_MAX 1024u
 #define SYS_USER_PTR_MIN      UINT64_C(0x1000)
+
+static long s_getpid() {
+    pcb_t *curr_proc = get_curr_process();
+    if (curr_proc == NULL) {
+        return -1;
+    }
+    return (long) curr_proc->pid;
+}
 
 static long sys_write_console_impl(const char *s, uint64_t len) {
     uint64_t written = 0;
@@ -32,14 +41,32 @@ static long sys_write_console_impl(const char *s, uint64_t len) {
     return (long)written;
 }
 
-static long s_exit_impl(int code) {
-    (void) code;
-    return 0;
+static struct trap_frame *s_exit_impl(struct trap_frame *frame, int code) {
+    pcb_t *curr_proc = get_curr_process();
+    if (curr_proc != NULL) {
+        curr_proc->state = PROC_ZOMBIE_STATE;
+        curr_proc->exit_code = code;
+        curr_proc->frame = frame;
+        // call SIGCHILD here
+    }    
+
+    return schedule_next_task();
 }
 
-static long s_spawn() {
+static long s_spawn(void* (*func)(void*), void *argv) {
+    pid_t ppid = s_getpid();
+    
+    pid_t new_proc = proc_create(func, argv, ppid);
+    if (new_proc < 0) {
+        return new_proc;
+    }
+    pcb_t *new_pcb = get_pcb_by_pid(new_proc);
+    if (new_pcb == NULL) {
+        return -1;
+    }
 
-    return 0;
+    add_task_to_scheduler(new_pcb);
+    return new_pcb->pid;
 }
 
 static long s_waitpid() {
@@ -68,16 +95,16 @@ struct trap_frame *syscall_dispatch(struct trap_frame *frame) {
         break;
 
     case S_EXIT:
-        ret = s_exit_impl((int)frame->regs[0]);
-        break;
+        return s_exit_impl(frame, (int)frame->regs[0]);
     case S_GETPID:
+        ret = s_getpid();
         break;
     case S_CURRENT_EL:
     case S_DELAY:
         ret = SYS_ENOSYS;
         break;
     case S_SPAWN:
-        ret = s_spawn();
+        ret = s_spawn((void*(*)(void*))frame->regs[0], (void*) frame->regs[1]);
         break;
     case S_WAITPID:
         ret = s_waitpid();

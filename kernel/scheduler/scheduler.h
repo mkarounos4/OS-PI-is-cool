@@ -1,6 +1,7 @@
 #pragma once
 
 #include "traps/traps.h"
+#include "scheduler/process.h"
 
 #define THREAD_STACK_SIZE 4096u
 #define THREAD_COUNT      4u
@@ -30,3 +31,11 @@ void scheduler_init(void);
 
 // Starts execution at thread 0. Does not return.
 void scheduler_start(void) __attribute__((noreturn));
+
+void add_task_to_scheduler(pcb_t *pcb);
+
+pcb_t *get_curr_process();
+
+struct trap_frame *scheduler_exit_current(struct trap_frame *frame, int exit_code);
+
+struct trap_frame *schedule_next_task();

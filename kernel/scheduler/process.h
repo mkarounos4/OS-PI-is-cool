@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include "data-structs/vec.h"
 
 typedef int32_t pid_t;
 
@@ -40,7 +41,10 @@ typedef struct pcb_st {
     uintptr_t heap_brk;
     uintptr_t heap_end;
 
+    Vec children;   // vec of children PIDs
+    Vec file_descriptors;   // vec of fds
 } pcb_t;
 
 pcb_t *get_pcb_by_pid(pid_t pid);
 void processes_init();
+pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid);

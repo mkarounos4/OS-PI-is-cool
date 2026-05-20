@@ -5,7 +5,6 @@
 #include "timer/timer.h"
 #include "uart/uart.h"
 #include "syscall/syscall.h"
-#include "scheduler/process.h"
 #include "data-structs/vec.h"
 #include "memory/malloc.h"
 #include "syscall/u_syscall.h"
@@ -61,7 +60,7 @@ static pcb_t *pop_sched_queue() {
         sched_queue_head = sched_queue_head->next;
     }
 
-    pcb_t *ret = sched_queue_head->pcb;
+    pcb_t *ret = task_node->pcb;
     free(task_node);
     sched_queue_size--;
     return ret;
@@ -71,6 +70,10 @@ void idle_task_fn(void*) {
     while (1) {
         asm volatile ("wfe");
     }
+}
+
+void add_task_to_scheduler(pcb_t *pcb) {
+    add_sched_queue_node(pcb);
 }
 
 // Initialize a new thread (make a tcb and load it for that index)
@@ -121,8 +124,10 @@ void scheduler_init(void) {
 void scheduler_start(void) {
     timer_schedule_interrupt_ms(SCHEDULER_QUANTUM_MS, scheduler_tick, 0);
     pcb_t *next_pcb = pop_sched_queue();
+    curr_proc = next_pcb;
     
     if (next_pcb != NULL) {
+        next_pcb->state = PROC_RUNNING_STATE;
         trap_frame_restore(next_pcb->frame);
     } else {
         trap_frame_restore(idle_task.frame);
@@ -146,7 +151,7 @@ static void scheduler_print_tick(unsigned int tid1, unsigned int tid2) {
 static struct trap_frame *scheduler_tick(struct trap_frame *frame, void *ctx) {
     (void)ctx;
 
-    if (frame->type != EXC_IRQ_LOWER_A64) {
+    if (frame != NULL && frame->type != EXC_IRQ_LOWER_A64) {
         return frame;
     }
 
@@ -157,7 +162,9 @@ static struct trap_frame *scheduler_tick(struct trap_frame *frame, void *ctx) {
     // TODO: load kernel malloc __kernel_heap_start, __kernel_heap_end, and heap brk (store somewhere)
 
     if (curr_proc != NULL) {
-        curr_proc->frame = frame;
+        if (frame != NULL) {
+            curr_proc->frame = frame;
+        }
         if (curr_proc->state == PROC_RUNNING_STATE) {
             curr_proc->state = PROC_READY_STATE;
             add_sched_queue_node(curr_proc);
@@ -170,6 +177,7 @@ static struct trap_frame *scheduler_tick(struct trap_frame *frame, void *ctx) {
     curr_proc = pop_sched_queue();
     if (curr_proc == NULL) {
         scheduler_print_tick(-1, -1);
+        timer_schedule_interrupt_ms(SCHEDULER_QUANTUM_MS, scheduler_tick, 0);
         return idle_task.frame;
     }
     
@@ -187,4 +195,12 @@ static struct trap_frame *scheduler_tick(struct trap_frame *frame, void *ctx) {
 
     // Return frame for new thread
     return curr_proc->frame;
+}
+
+pcb_t *get_curr_process() {
+    return curr_proc;
+}
+
+struct trap_frame *schedule_next_task() {
+    return scheduler_tick(NULL, NULL);
 }
