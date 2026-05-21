@@ -26,12 +26,20 @@ static uint64_t curr_tick;
 static struct cpu_context boot_ctx;
 static struct cpu_context idle_ctx;
 static unsigned char idle_stack[THREAD_STACK_SIZE];
+static volatile int ready_to_schedule = 0;
+static void *ready_ctx = NULL;
 
 static void scheduler_tick(void *ctx);
 
 static uintptr_t align_down(uintptr_t value, uintptr_t alignment) {
     return value & ~(alignment - 1u);
 }
+
+static void set_ready_to_schedule(void *ctx) {
+    ready_to_schedule = 1;
+    ready_ctx = ctx;
+}
+
 
 static void add_sched_queue_node(pcb_t *pcb) {
     if (pcb == NULL) {
@@ -118,7 +126,7 @@ void scheduler_init(void) {
 
 // Starts execution at thread 0. Does not return.
 void scheduler_start(void) {
-    timer_schedule_interrupt_ms(SCHEDULER_QUANTUM_MS, scheduler_tick, 0);
+    timer_schedule_interrupt_ms(SCHEDULER_QUANTUM_MS, set_ready_to_schedule, 0);
     pcb_t *next_pcb = pop_sched_queue();
     curr_proc = next_pcb;
     
@@ -198,7 +206,7 @@ void scheduler_tick(void *ctx) {
     scheduler_print_tick(old_pid, new_pid);
     
     // Setup next scheduler interrupt
-    timer_schedule_interrupt_ms(SCHEDULER_QUANTUM_MS, scheduler_tick, 0);
+    timer_schedule_interrupt_ms(SCHEDULER_QUANTUM_MS, set_ready_to_schedule, 0);
 
     // context switch to next process
     context_switch(old_ctx, new_ctx);
@@ -210,4 +218,13 @@ pcb_t *get_curr_process() {
 
 void schedule_yield() {
     scheduler_tick(NULL);
+}
+
+void run_scheduler_if_needed() {
+    if (!ready_to_schedule) {
+        return;
+    }
+
+    ready_to_schedule = 0;
+    scheduler_tick(ready_ctx);
 }

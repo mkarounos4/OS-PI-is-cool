@@ -42,7 +42,8 @@ void kernel_main(void) {
     scheduler_init();
     
     // TESTS HERE
-    scheduler_test();
+    // scheduler_orphan_test();
+    waitpid_signal_test();
 
     scheduler_start();
 

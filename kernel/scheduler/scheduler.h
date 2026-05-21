@@ -28,3 +28,5 @@ pcb_t *get_curr_process();
 void scheduler_exit_current(int exit_code);
 
 void schedule_yield();
+
+void run_scheduler_if_needed();

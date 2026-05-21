@@ -379,7 +379,9 @@ void irq_restore(uint64_t flags) {
 
 struct trap_frame *exception_dispatch(struct trap_frame *frame) {
     if (is_irq_type(frame->type)) {
-        return irq_handle_exception(frame);
+        frame = irq_handle_exception(frame);
+        run_scheduler_if_needed();
+        return frame;
     }
 
     if (is_fiq_type(frame->type)) {
