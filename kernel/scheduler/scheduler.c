@@ -81,7 +81,7 @@ static pcb_t *pop_sched_queue() {
 
 void idle_task_fn(void*) {
     while (1) {
-        asm volatile ("wfe");
+        asm volatile ("nop");
     }
 }
 

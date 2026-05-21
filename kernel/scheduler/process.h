@@ -52,3 +52,4 @@ typedef struct pcb_st {
 pcb_t *get_pcb_by_pid(pid_t pid);
 void processes_init();
 pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid);
+void proc_destroy(pcb_t *p);

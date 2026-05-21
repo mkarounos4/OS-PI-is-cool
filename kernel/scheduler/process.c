@@ -130,7 +130,25 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
 }
 
 void proc_destroy(pcb_t *p) {
-    (void) p;
+    // Rn, stack and heap are tied to pcb, so automatically "free" when create new process
+    // When adding VM, TODO add cleanup of stack/heap
+    p->state = PROC_UNUSED_STATE;
+    
+    // cleanup children
+    while (!vec_is_empty(&p->children)) {
+        ptr_t child_pid;
+        vec_pop_back(&p->children, &child_pid);
+        pcb_t *child_pcb = get_pcb_by_pid((pid_t)(uintptr_t)child_pid);
+        if (child_pcb == NULL) {
+            continue;
+        }
+
+        if (child_pcb->state == PROC_ZOMBIE_STATE) {
+            proc_destroy(child_pcb);
+        } else {
+            // Set as child of INIT and send SIGCHILD
+        }
+    }
 }
 
 pcb_t *get_pcb_by_pid(pid_t pid) {
