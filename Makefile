@@ -22,7 +22,7 @@ LDFLAGS = -nostdlib -nostartfiles -nodefaultlibs -static -no-pie \
           -Wl,--build-id=none -Wl,-Map=kernel.map
 
 ifeq ($(PLATFORM),rpi)
-    CFLAGS += -DPLATFORM_RPI -mcpu=cortex-a76
+    CFLAGS += -DPLATFORM_RPI -DPLATFORM_RPI5 -mcpu=cortex-a76
     UART_SRC = kernel/uart/uart_rpi.c
     LINKER = linker_rpi.ld
     TARGET = kernel8.img
@@ -70,19 +70,11 @@ install:
 # quit qemu with Ctrl+A X
 qemu:
 	$(MAKE) PLATFORM=qemu build
-<<<<<<< HEAD
 	qemu-system-aarch64 \
-	    -M virt,gic-version=2 \
-	    -cpu cortex-a72 \
+	    -M raspi3b \
+	    -cpu cortex-a53 \
 	    -nographic \
 	    -kernel kernel8.img
-=======
-	    qemu-system-aarch64 \
-	        -M raspi3b \
-	        -cpu cortex-a72 \
-	        -nographic \
-	        -kernel kernel8.img
->>>>>>> main
 
 build: $(TARGET)
 

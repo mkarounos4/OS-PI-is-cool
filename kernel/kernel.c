@@ -24,17 +24,15 @@ extern char exception_vectors[];
 #define PROCESS_TESTS_ENABLED 0
 #define VM_TESTS_ENABLED 1
 #define VM_PROCESS_TESTS_ENABLED 1
+#define PROCESS_TEST_MODE_TERMINATING 0
 
 #if defined(PLATFORM_QEMU)
-#define VM_MEMORY_BASE UINT64_C(0x40000000)
-#define VM_MEMORY_SIZE UINT64_C(0x08000000)
+#define VM_MEMORY_BASE UINT64_C(0x00000000)
+#define VM_MEMORY_SIZE UINT64_C(0x3f000000)
 #else
 #define VM_MEMORY_BASE UINT64_C(0x00000000)
 #define VM_MEMORY_SIZE UINT64_C(0x40000000)
 #endif
-#define PROCESS_TESTS_ENABLED 0
-#define PROCESS_TEST_MODE_TERMINATING 0
-
 static void run_trap_self_tests(void) {
     uart_puts("[trap-test] current EL before scheduler: ");
     uart_puthex(cpu_current_el());
@@ -201,6 +199,25 @@ static void run_vm_self_tests(void) {
     }
 }
 
+static void user_puthex(uint64_t value) {
+    char buf[18];
+    int pos = 0;
+    int started = 0;
+
+    buf[pos++] = '0';
+    buf[pos++] = 'x';
+
+    for (int shift = 60; shift >= 0; shift -= 4) {
+        unsigned int digit = (unsigned int)((value >> shift) & 0xFu);
+        if (digit != 0 || started || shift == 0) {
+            started = 1;
+            buf[pos++] = (char)(digit < 10 ? '0' + digit : 'A' + digit - 10);
+        }
+    }
+
+    write_console(buf, (uint64_t)pos);
+}
+
 #if PROCESS_TESTS_ENABLED
 struct process_test_args {
     const char *name;
@@ -214,7 +231,6 @@ static struct process_test_args process_test_a_args = { "A", 250000u, 1 };
 static struct process_test_args process_test_b_args = { "B", 350000u, 0 };
 static struct process_test_args process_test_c_args = { "C", 450000u, 0 };
 static struct process_test_args process_test_spawn_args = { "S", 550000u, 0 };
-#endif
 
 struct terminating_process_args {
     const char *name;
@@ -273,28 +289,7 @@ static uint64_t test_strlen(const char *s) {
 static void user_puts(const char *s) {
     write_console(s, test_strlen(s));
 }
-#endif
 
-static void user_puthex(uint64_t value) {
-    char buf[18];
-    int pos = 0;
-    int started = 0;
-
-    buf[pos++] = '0';
-    buf[pos++] = 'x';
-
-    for (int shift = 60; shift >= 0; shift -= 4) {
-        unsigned int digit = (unsigned int)((value >> shift) & 0xFu);
-        if (digit != 0 || started || shift == 0) {
-            started = 1;
-            buf[pos++] = (char)(digit < 10 ? '0' + digit : 'A' + digit - 10);
-        }
-    }
-
-    write_console(buf, (uint64_t)pos);
-}
-
-#if PROCESS_TESTS_ENABLED
 static void process_test_delay(uint64_t loops) {
     volatile uint64_t remaining = loops;
     while (remaining-- != 0) {
@@ -690,6 +685,7 @@ static void run_vm_process_tests(void) {
     uart_puts("[vm-user] scheduler_start should run one normal syscall test, then two controlled user faults, then idle\n");
 }
 
+#if PROCESS_TESTS_ENABLED
 static void run_terminating_process_self_tests(void) {
     uart_puts("[term-test] creating terminating process scheduler tests\n");
     uart_puts("[term-test] explicit process should call exit() itself\n");
@@ -712,6 +708,7 @@ static void run_terminating_process_self_tests(void) {
     uart_puts("[term-test] scheduler_start should now run finite processes only\n");
     uart_puts("[term-test] expected final state: repeated scheduler idle ticks with no term-test heartbeats\n");
 }
+#endif
 
 void kernel_main(void) {
     uart_init();
@@ -731,14 +728,6 @@ void kernel_main(void) {
     uart_puts("\n");
     irq_enable();
     uart_puts("[boot] irq_enable done\n");
-    uart_puts("[irq-test] force timer PPI pending begin\n");
-    irq_force_pending(30u);
-    for (volatile uint64_t spin = 0; spin < 1000000u; spin++) {
-        asm volatile("nop");
-    }
-    uart_puts("[irq-test] ticks after forced pending=");
-    uart_puthex(timer_get_ticks());
-    uart_puts("\n");
 
     kernel_mem_init(__kernel_heap_start, __kernel_heap_end);
     uart_puts("[boot] kernel heap ready\n");
@@ -771,6 +760,7 @@ void kernel_main(void) {
     run_terminating_process_self_tests();
 #else
     run_process_self_tests();
+#endif
 #endif
 #if VM_PROCESS_TESTS_ENABLED
     run_vm_process_tests();

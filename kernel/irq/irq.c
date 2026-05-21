@@ -196,7 +196,11 @@ void irq_force_pending(unsigned intid) {
         return;
     }
 
+#if defined(PLATFORM_QEMU)
+    (void)intid;
+#else
     gicd_write(GICD_ISPENDR + ((intid / 32u) * 4u), 1u << (intid % 32u));
+#endif
 }
 
 struct trap_frame *irq_handle_exception(struct trap_frame *frame) {

@@ -170,7 +170,12 @@ static struct trap_frame *scheduler_tick(struct trap_frame *frame, void *ctx) {
     (void)ctx;
 
     if (frame != NULL && frame->type != EXC_IRQ_LOWER_A64) {
-        return frame;
+        int idle_irq = curr_proc == NULL &&
+                       (frame->type == EXC_IRQ_CURRENT_SPX ||
+                        frame->type == EXC_IRQ_CURRENT_SP0);
+        if (!idle_irq) {
+            return frame;
+        }
     }
 
     if (curr_proc != NULL) {

@@ -186,10 +186,15 @@ static void reserve_kernel_image(void) {
 
 static void map_platform_devices(void) {
 #if defined(PLATFORM_QEMU)
-    vm_map_range(&kernel_as, UINT64_C(0x08000000), UINT64_C(0x08000000),
-                 UINT64_C(0x00200000), VM_FLAG_READ | VM_FLAG_WRITE | VM_FLAG_DEVICE);
-    vm_map_range(&kernel_as, UINT64_C(0x09000000), UINT64_C(0x09000000),
-                 UINT64_C(0x00100000), VM_FLAG_READ | VM_FLAG_WRITE | VM_FLAG_DEVICE);
+    vm_map_range(&kernel_as, UINT64_C(0x3f000000), UINT64_C(0x3f000000),
+                 UINT64_C(0x01000000), VM_FLAG_READ | VM_FLAG_WRITE | VM_FLAG_DEVICE);
+    vm_map_range(&kernel_as, UINT64_C(0x40000000), UINT64_C(0x40000000),
+                 UINT64_C(0x00010000), VM_FLAG_READ | VM_FLAG_WRITE | VM_FLAG_DEVICE);
+#elif defined(PLATFORM_RPI5)
+    vm_map_range(&kernel_as, UINT64_C(0x107fff9000), UINT64_C(0x107fff9000),
+                 UINT64_C(0x00020000), VM_FLAG_READ | VM_FLAG_WRITE | VM_FLAG_DEVICE);
+    vm_map_range(&kernel_as, UINT64_C(0x1c00000000), UINT64_C(0x1c00000000),
+                 UINT64_C(0x02000000), VM_FLAG_READ | VM_FLAG_WRITE | VM_FLAG_DEVICE);
 #elif defined(PLATFORM_RPI)
     vm_map_range(&kernel_as, UINT64_C(0x107fff9000), UINT64_C(0x107fff9000),
                  UINT64_C(0x00020000), VM_FLAG_READ | VM_FLAG_WRITE | VM_FLAG_DEVICE);
