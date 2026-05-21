@@ -70,10 +70,11 @@ install:
 # quit qemu with Ctrl+A X
 qemu:
 	$(MAKE) PLATFORM=qemu build
-	qemu-system-aarch64 \
-	    -M raspi3b \
-	    -serial stdio \
-	    -kernel kernel8.img
+	    qemu-system-aarch64 \
+	        -M raspi3b \
+	        -cpu cortex-a72 \
+	        -nographic \
+	        -kernel kernel8.img
 
 build: $(TARGET)
 
