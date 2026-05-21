@@ -3,6 +3,41 @@
 #include <stddef.h>
 
 #define GIC_MAX_INTIDS 1020u
+#define ARM_GENERIC_TIMER_INTID 30u
+#define IRQ_SPURIOUS_INTID 1023u
+
+struct irq_slot {
+    irq_handler_t handler;
+    void *ctx;
+};
+
+static struct irq_slot irq_table[GIC_MAX_INTIDS];
+static unsigned irq_depth;
+
+static inline void mmio_write32(uint64_t address, uint32_t value) {
+    *(volatile uint32_t *)(uintptr_t)address = value;
+}
+
+static inline uint32_t mmio_read32(uint64_t address) {
+    return *(volatile uint32_t *)(uintptr_t)address;
+}
+
+#if defined(PLATFORM_QEMU)
+
+#define RPI3_LOCAL_BASE                 UINT64_C(0x40000000)
+#define RPI3_LOCAL_CORE0_TIMER_IRQCNTL  0x40u
+#define RPI3_LOCAL_CORE0_IRQ_SOURCE     0x60u
+#define RPI3_LOCAL_CNTP_IRQ_BITS        ((1u << 0) | (1u << 1))
+
+static inline void local_write(uint32_t reg, uint32_t value) {
+    mmio_write32(RPI3_LOCAL_BASE + reg, value);
+}
+
+static inline uint32_t local_read(uint32_t reg) {
+    return mmio_read32(RPI3_LOCAL_BASE + reg);
+}
+
+#else
 
 #define RPI_GICD_BASE  UINT64_C(0x107fff9000)
 #define RPI_GICC_BASE  UINT64_C(0x107fffa000)
@@ -28,16 +63,7 @@
 #define GICC_EOIR        0x010u
 
 #define GICC_IAR_INTID_MASK 0x3ffu
-#define GICC_SPURIOUS_INTID 1023u
-
-struct irq_slot {
-    irq_handler_t handler;
-    void *ctx;
-};
-
-static struct irq_slot irq_table[GIC_MAX_INTIDS];
 static unsigned gic_lines;
-static unsigned irq_depth;
 
 extern uint64_t get_uart_base(void) __attribute__((weak));
 
@@ -47,14 +73,6 @@ static uint64_t gicd_base(void) {
 
 static uint64_t gicc_base(void) {
     return get_uart_base != NULL ? RPI_GICC_BASE : QEMU_GICC_BASE;
-}
-
-static inline void mmio_write32(uint64_t address, uint32_t value) {
-    *(volatile uint32_t *)(uintptr_t)address = value;
-}
-
-static inline uint32_t mmio_read32(uint64_t address) {
-    return *(volatile uint32_t *)(uintptr_t)address;
 }
 
 static inline void gicd_write(uint32_t reg, uint32_t value) {
@@ -81,7 +99,16 @@ static unsigned clamp_gic_lines(unsigned lines) {
     return lines;
 }
 
+#endif
+
 void irq_init(void) {
+#if defined(PLATFORM_QEMU)
+    irq_disable();
+
+    local_write(RPI3_LOCAL_CORE0_TIMER_IRQCNTL, 0);
+
+    asm volatile("dsb sy\nisb" ::: "memory");
+#else
     uint32_t typer;
 
     irq_disable();
@@ -112,10 +139,11 @@ void irq_init(void) {
     }
 
     gicc_write(GICC_PMR, 0xffu);
-    gicc_write(GICC_CTLR, 1u);
-    gicd_write(GICD_CTLR, 1u);
+    gicc_write(GICC_CTLR, 3u);
+    gicd_write(GICD_CTLR, 3u);
 
     asm volatile("dsb sy\nisb" ::: "memory");
+#endif
 }
 
 int irq_register(unsigned intid, irq_handler_t handler, void *ctx) {
@@ -138,7 +166,14 @@ void irq_enable_line(unsigned intid) {
         return;
     }
 
+#if defined(PLATFORM_QEMU)
+    if (intid == ARM_GENERIC_TIMER_INTID) {
+        local_write(RPI3_LOCAL_CORE0_TIMER_IRQCNTL,
+                    local_read(RPI3_LOCAL_CORE0_TIMER_IRQCNTL) | RPI3_LOCAL_CNTP_IRQ_BITS);
+    }
+#else
     gicd_write(GICD_ISENABLER + ((intid / 32u) * 4u), 1u << (intid % 32u));
+#endif
 }
 
 void irq_disable_line(unsigned intid) {
@@ -146,7 +181,14 @@ void irq_disable_line(unsigned intid) {
         return;
     }
 
+#if defined(PLATFORM_QEMU)
+    if (intid == ARM_GENERIC_TIMER_INTID) {
+        local_write(RPI3_LOCAL_CORE0_TIMER_IRQCNTL,
+                    local_read(RPI3_LOCAL_CORE0_TIMER_IRQCNTL) & ~RPI3_LOCAL_CNTP_IRQ_BITS);
+    }
+#else
     gicd_write(GICD_ICENABLER + ((intid / 32u) * 4u), 1u << (intid % 32u));
+#endif
 }
 
 void irq_force_pending(unsigned intid) {
@@ -158,12 +200,21 @@ void irq_force_pending(unsigned intid) {
 }
 
 struct trap_frame *irq_handle_exception(struct trap_frame *frame) {
+#if defined(PLATFORM_QEMU)
+    uint32_t source = local_read(RPI3_LOCAL_CORE0_IRQ_SOURCE);
+    unsigned intid = IRQ_SPURIOUS_INTID;
+
+    if ((source & RPI3_LOCAL_CNTP_IRQ_BITS) != 0) {
+        intid = ARM_GENERIC_TIMER_INTID;
+    }
+#else
     uint32_t iar = gicc_read(GICC_IAR);
     unsigned intid = iar & GICC_IAR_INTID_MASK;
+#endif
 
     frame->intid = intid;
 
-    if (intid == GICC_SPURIOUS_INTID || intid >= GIC_MAX_INTIDS) {
+    if (intid == IRQ_SPURIOUS_INTID || intid >= GIC_MAX_INTIDS) {
         return frame;
     }
 
@@ -179,7 +230,9 @@ struct trap_frame *irq_handle_exception(struct trap_frame *frame) {
         irq_disable_line(intid);
     }
 
+#if !defined(PLATFORM_QEMU)
     gicc_write(GICC_EOIR, iar);
+#endif
 
     irq_depth--;
 
@@ -191,6 +244,15 @@ unsigned irq_get_depth(void) {
 }
 
 void irq_get_controller_info(uint32_t *typer, uint32_t *iidr) {
+#if defined(PLATFORM_QEMU)
+    if (typer != NULL) {
+        *typer = 0;
+    }
+
+    if (iidr != NULL) {
+        *iidr = 0;
+    }
+#else
     if (typer != NULL) {
         *typer = gicd_read(GICD_TYPER);
     }
@@ -198,4 +260,5 @@ void irq_get_controller_info(uint32_t *typer, uint32_t *iidr) {
     if (iidr != NULL) {
         *iidr = gicd_read(GICD_IIDR);
     }
+#endif
 }

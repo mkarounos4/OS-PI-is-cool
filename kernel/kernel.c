@@ -32,6 +32,8 @@ extern char exception_vectors[];
 #define VM_MEMORY_BASE UINT64_C(0x00000000)
 #define VM_MEMORY_SIZE UINT64_C(0x40000000)
 #endif
+#define PROCESS_TESTS_ENABLED 0
+#define PROCESS_TEST_MODE_TERMINATING 0
 
 static void run_trap_self_tests(void) {
     uart_puts("[trap-test] current EL before scheduler: ");
@@ -214,7 +216,52 @@ static struct process_test_args process_test_c_args = { "C", 450000u, 0 };
 static struct process_test_args process_test_spawn_args = { "S", 550000u, 0 };
 #endif
 
-#if PROCESS_TESTS_ENABLED
+struct terminating_process_args {
+    const char *name;
+    uint64_t delay_loops;
+    uint64_t heartbeats;
+    int exit_code;
+};
+
+static void *explicit_exit_process_main(void *arg);
+static void *implicit_exit_process_main(void *arg);
+static void *spawning_exit_process_main(void *arg);
+
+static struct terminating_process_args explicit_exit_args = {
+    "explicit-exit",
+    180000u,
+    2u,
+    0xE1,
+};
+
+static struct terminating_process_args implicit_exit_args = {
+    "implicit-return",
+    220000u,
+    3u,
+    0xB2,
+};
+
+static struct terminating_process_args spawner_exit_args = {
+    "spawner",
+    260000u,
+    2u,
+    0xA3,
+};
+
+static struct terminating_process_args spawned_child_exit_args = {
+    "spawned-child",
+    300000u,
+    2u,
+    0xC4,
+};
+
+static struct terminating_process_args last_exit_args = {
+    "last-explicit-exit",
+    360000u,
+    5u,
+    0x1D,
+};
+
 static uint64_t test_strlen(const char *s) {
     uint64_t len = 0;
     while (s[len] != '\0') {
@@ -253,6 +300,113 @@ static void process_test_delay(uint64_t loops) {
     while (remaining-- != 0) {
         asm volatile ("nop");
     }
+}
+
+static void terminating_process_heartbeat(const char *name, long pid, uint64_t heartbeat) {
+    user_puts("[term-test ");
+    user_puts(name);
+    user_puts("] heartbeat pid=");
+    user_puthex((uint64_t)pid);
+    user_puts(" n=");
+    user_puthex(heartbeat);
+    user_puts("\n");
+}
+
+static void run_terminating_heartbeats(struct terminating_process_args *cfg, long pid) {
+    for (uint64_t i = 0; i < cfg->heartbeats; i++) {
+        terminating_process_heartbeat(cfg->name, pid, i);
+        process_test_delay(cfg->delay_loops);
+    }
+}
+
+static void *explicit_exit_process_main(void *arg) {
+    struct terminating_process_args *cfg = (struct terminating_process_args *)arg;
+    long pid = getpid();
+
+    user_puts("[term-test ");
+    user_puts(cfg->name);
+    user_puts("] start explicit exit pid=");
+    user_puthex((uint64_t)pid);
+    user_puts("\n");
+
+    run_terminating_heartbeats(cfg, pid);
+
+    user_puts("[term-test ");
+    user_puts(cfg->name);
+    user_puts("] calling exit code=");
+    user_puthex((uint64_t)cfg->exit_code);
+    user_puts("\n");
+
+    exit(cfg->exit_code);
+
+    user_puts("[term-test ");
+    user_puts(cfg->name);
+    user_puts("] ERROR returned from exit syscall\n");
+
+    while (1) {
+        asm volatile ("wfe");
+    }
+
+    return NULL;
+}
+
+static void *implicit_exit_process_main(void *arg) {
+    struct terminating_process_args *cfg = (struct terminating_process_args *)arg;
+    long pid = getpid();
+
+    user_puts("[term-test ");
+    user_puts(cfg->name);
+    user_puts("] start implicit trampoline exit pid=");
+    user_puthex((uint64_t)pid);
+    user_puts("\n");
+
+    run_terminating_heartbeats(cfg, pid);
+
+    user_puts("[term-test ");
+    user_puts(cfg->name);
+    user_puts("] returning code=");
+    user_puthex((uint64_t)cfg->exit_code);
+    user_puts(" for trampoline exit\n");
+
+    return (void *)(uintptr_t)cfg->exit_code;
+}
+
+static void *spawning_exit_process_main(void *arg) {
+    struct terminating_process_args *cfg = (struct terminating_process_args *)arg;
+    long pid = getpid();
+
+    user_puts("[term-test ");
+    user_puts(cfg->name);
+    user_puts("] start spawn-and-exit pid=");
+    user_puthex((uint64_t)pid);
+    user_puts("\n");
+
+    long child_pid = spawn(implicit_exit_process_main, &spawned_child_exit_args);
+    user_puts("[term-test ");
+    user_puts(cfg->name);
+    user_puts("] spawned terminating child pid=");
+    user_puthex((uint64_t)child_pid);
+    user_puts("\n");
+
+    run_terminating_heartbeats(cfg, pid);
+
+    user_puts("[term-test ");
+    user_puts(cfg->name);
+    user_puts("] explicit exit after spawn code=");
+    user_puthex((uint64_t)cfg->exit_code);
+    user_puts("\n");
+
+    exit(cfg->exit_code);
+
+    user_puts("[term-test ");
+    user_puts(cfg->name);
+    user_puts("] ERROR returned from exit syscall\n");
+
+    while (1) {
+        asm volatile ("wfe");
+    }
+
+    return NULL;
 }
 
 static void *process_test_main(void *arg) {
@@ -308,6 +462,22 @@ static void *process_test_main(void *arg) {
 static void enqueue_process_or_report(const char *name, pid_t pid) {
     pcb_t *pcb = get_pcb_by_pid(pid);
     uart_puts("[proc-test] ");
+    uart_puts(name);
+    uart_puts(" pid=");
+    uart_puthex((uint64_t)pid);
+
+    if (pcb == NULL) {
+        uart_puts(" create FAILED\n");
+        return;
+    }
+
+    add_task_to_scheduler(pcb);
+    uart_puts(" queued\n");
+}
+
+static void enqueue_terminating_process_or_report(const char *name, pid_t pid) {
+    pcb_t *pcb = get_pcb_by_pid(pid);
+    uart_puts("[term-test] ");
     uart_puts(name);
     uart_puts(" pid=");
     uart_puthex((uint64_t)pid);
@@ -520,6 +690,29 @@ static void run_vm_process_tests(void) {
     uart_puts("[vm-user] scheduler_start should run one normal syscall test, then two controlled user faults, then idle\n");
 }
 
+static void run_terminating_process_self_tests(void) {
+    uart_puts("[term-test] creating terminating process scheduler tests\n");
+    uart_puts("[term-test] explicit process should call exit() itself\n");
+    uart_puts("[term-test] implicit process should return and let trampoline call exit()\n");
+    uart_puts("[term-test] spawner should create a terminating child, then exit\n");
+    uart_puts("[term-test] when the final process exits, scheduler should switch to idle\n");
+
+    pid_t explicit_pid = proc_create(explicit_exit_process_main, &explicit_exit_args, -1);
+    enqueue_terminating_process_or_report("explicit-exit", explicit_pid);
+
+    pid_t implicit_pid = proc_create(implicit_exit_process_main, &implicit_exit_args, -1);
+    enqueue_terminating_process_or_report("implicit-return", implicit_pid);
+
+    pid_t spawner_pid = proc_create(spawning_exit_process_main, &spawner_exit_args, -1);
+    enqueue_terminating_process_or_report("spawner", spawner_pid);
+
+    pid_t last_pid = proc_create(explicit_exit_process_main, &last_exit_args, -1);
+    enqueue_terminating_process_or_report("last-explicit-exit", last_pid);
+
+    uart_puts("[term-test] scheduler_start should now run finite processes only\n");
+    uart_puts("[term-test] expected final state: repeated scheduler idle ticks with no term-test heartbeats\n");
+}
+
 void kernel_main(void) {
     uart_init();
     uart_puts("\nAArch64 bare-metal kernel entered\n");
@@ -574,6 +767,9 @@ void kernel_main(void) {
 
     scheduler_init();
 #if PROCESS_TESTS_ENABLED
+#if PROCESS_TEST_MODE_TERMINATING
+    run_terminating_process_self_tests();
+#else
     run_process_self_tests();
 #endif
 #if VM_PROCESS_TESTS_ENABLED
