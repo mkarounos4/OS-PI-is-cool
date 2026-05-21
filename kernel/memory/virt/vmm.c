@@ -70,6 +70,29 @@ static inline uint64_t pte_addr(pte_t entry) {
     return entry & PTE_ADDR_MASK;
 }
 
+static uint64_t dcache_line_size(void) {
+    uint64_t ctr;
+    asm volatile("mrs %0, ctr_el0" : "=r"(ctr));
+    return UINT64_C(4) << ((ctr >> 16) & UINT64_C(0xf));
+}
+
+static void dcache_clean_range(uint64_t start, uint64_t size) {
+    uint64_t line_size = dcache_line_size();
+    uint64_t addr = start & ~(line_size - 1u);
+    uint64_t end = start + size;
+
+    while (addr < end) {
+        asm volatile("dc cvac, %0" : : "r"(addr) : "memory");
+        addr += line_size;
+    }
+
+    asm volatile("dsb ishst" ::: "memory");
+}
+
+static void clean_pte(const pte_t *pte) {
+    dcache_clean_range((uint64_t)(uintptr_t)pte, sizeof(*pte));
+}
+
 static void tlb_invalidate_all(void) {
     asm volatile(
         "dsb ishst\n"
@@ -80,7 +103,11 @@ static void tlb_invalidate_all(void) {
 }
 
 static pte_t *alloc_table(void) {
-    return (pte_t *)alloc_page();
+    pte_t *table = (pte_t *)alloc_page();
+    if (table != NULL) {
+        dcache_clean_range((uint64_t)(uintptr_t)table, PAGE_SIZE);
+    }
+    return table;
 }
 
 static pte_t make_table_desc(pte_t *table) {
@@ -136,6 +163,7 @@ static pte_t *clone_table(const pte_t *src, unsigned level) {
         }
     }
 
+    dcache_clean_range((uint64_t)(uintptr_t)dst, PAGE_SIZE);
     return dst;
 }
 
@@ -158,6 +186,7 @@ static pte_t *get_l3_pte(struct address_space *as, uint64_t va, int create) {
             return NULL;
         }
         l1[l1_index(va)] = make_table_desc(l2);
+        clean_pte(&l1[l1_index(va)]);
     }
 
     l2 = (pte_t *)(uintptr_t)pte_addr(l1[l1_index(va)]);
@@ -172,6 +201,7 @@ static pte_t *get_l3_pte(struct address_space *as, uint64_t va, int create) {
             return NULL;
         }
         l2[l2_index(va)] = make_table_desc(l3);
+        clean_pte(&l2[l2_index(va)]);
     }
 
     l3 = (pte_t *)(uintptr_t)pte_addr(l2[l2_index(va)]);
@@ -307,6 +337,7 @@ int vm_map_page(struct address_space *as, uint64_t va, uint64_t pa, uint64_t fla
     }
 
     *pte = make_page_desc(pa, flags);
+    clean_pte(pte);
     if (mmu_enabled) {
         tlb_invalidate_all();
     }
@@ -336,6 +367,7 @@ int vm_unmap_page(struct address_space *as, uint64_t va) {
     }
 
     *pte = 0;
+    clean_pte(pte);
     if (mmu_enabled) {
         tlb_invalidate_all();
     }

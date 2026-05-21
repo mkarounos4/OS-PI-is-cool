@@ -87,7 +87,6 @@ void uart_raw_puts(const char *s) {
     while (*s) {
         if (*s == '\n') {
             uart_raw_putc('\r');
-            uart_raw_putc('\n');
         }
         uart_raw_putc(*s++);
     }
