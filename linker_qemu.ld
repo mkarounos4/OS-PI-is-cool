@@ -5,18 +5,24 @@ SECTIONS
     . = 0x40080000;
     __kernel_start = .;
 
+    __text_start = .;
     .text : {
         *(.text.boot)
         *(.text*)
     }
+    __text_end = .;
 
+    __rodata_start = .;
     .rodata : {
         *(.rodata*)
     }
+    __rodata_end = .;
 
+    __data_start = .;
     .data : {
         *(.data*)
     }
+    __data_end = .;
 
     .bss : {
         __bss_start = .;

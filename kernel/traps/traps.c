@@ -3,6 +3,7 @@
 #include <stddef.h>
 
 #include "irq/irq.h"
+#include "scheduler/scheduler.h"
 #include "syscall/syscall.h"
 #include "uart/uart.h"
 
@@ -258,6 +259,8 @@ static void __attribute__((noreturn)) exception_halt(const char *reason, const s
     }
 }
 
+static struct trap_frame *handle_user_page_fault(struct trap_frame *frame, const char *reason);
+
 static struct trap_frame *handle_sync_exception(struct trap_frame *frame) {
     uint64_t ec = (frame->esr >> ESR_EC_SHIFT) & ESR_EC_MASK;
     uint64_t iss = frame->esr & ESR_ISS_MASK;
@@ -290,10 +293,10 @@ static struct trap_frame *handle_sync_exception(struct trap_frame *frame) {
         }
         
     case ESR_EC_DABT_LOWER:
-        exception_halt("user data abort", frame);
+        return handle_user_page_fault(frame, "user data abort");
 
     case ESR_EC_IABT_LOWER:
-        exception_halt("user instruction abort", frame);
+        return handle_user_page_fault(frame, "user instruction abort");
 
     case ESR_EC_DABT_CURRENT:
         exception_halt("kernel data abort", frame);
@@ -315,6 +318,31 @@ static struct trap_frame *handle_sync_exception(struct trap_frame *frame) {
     }
 }
 
+static struct trap_frame *handle_user_page_fault(struct trap_frame *frame, const char *reason) {
+    pcb_t *proc = get_curr_process();
+
+    uart_puts("\nUser process fault\n");
+    uart_puts("reason: ");
+    uart_puts(reason);
+    uart_puts("\n");
+    uart_puts("pid: ");
+    uart_puthex(proc != NULL ? (uint64_t)proc->pid : UINT64_C(0xffffffffffffffff));
+    uart_puts("\nFAR: ");
+    uart_puthex(frame->far);
+    uart_puts("\nESR: ");
+    uart_puthex(frame->esr);
+    uart_puts("\n");
+
+    if (proc == NULL) {
+        exception_halt("user page fault without current process", frame);
+    }
+
+    proc->state = PROC_ZOMBIE_STATE;
+    proc->exit_code = -1;
+    proc->frame = frame;
+    return schedule_next_task();
+}
+
 void exceptions_init(void) {
     irq_disable();
     asm volatile(
@@ -333,11 +361,11 @@ uint64_t cpu_current_el(void) {
 }
 
 void irq_enable(void) {
-    asm volatile("msr daifclr, #2" ::: "memory");
+    asm volatile("msr daifclr, #3" ::: "memory");
 }
 
 void irq_disable(void) {
-    asm volatile("msr daifset, #2" ::: "memory");
+    asm volatile("msr daifset, #3" ::: "memory");
 }
 
 uint64_t irq_save(void) {
@@ -357,7 +385,7 @@ struct trap_frame *exception_dispatch(struct trap_frame *frame) {
     }
 
     if (is_fiq_type(frame->type)) {
-        exception_halt("fiq is not supported yet", frame);
+        return irq_handle_exception(frame);
     }
 
     if (is_serror_type(frame->type)) {

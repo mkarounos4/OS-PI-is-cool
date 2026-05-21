@@ -4,6 +4,7 @@
 
 #include "data-structs/vec.h"
 #include "memory/malloc.h"
+#include "memory/virt/vmm.h"
 #include "traps/traps.h"
 
 typedef int32_t pid_t;
@@ -44,6 +45,11 @@ typedef struct pcb_st {
     uintptr_t kernel_stack_top;
     
     struct mem_ctx heap_ctx;
+    struct address_space *as;
+    uint64_t user_code_base;
+    uint64_t user_heap_base;
+    uint64_t user_heap_brk;
+    uint64_t user_heap_end;
 
     Vec children;   // vec of children PIDs
     Vec file_descriptors;   // vec of fds

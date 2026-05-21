@@ -8,6 +8,7 @@
 #include "data-structs/vec.h"
 #include "memory/kernel_mem.h"
 #include "memory/malloc.h"
+#include "memory/virt/vmm.h"
 #include "syscall/u_syscall.h"
 
 #define SCHEDULER_QUANTUM_MS 1000u
@@ -81,7 +82,7 @@ static pcb_t *pop_sched_queue() {
 
 void idle_task_fn(void*) {
     while (1) {
-        asm volatile ("wfe");
+        asm volatile ("nop");
     }
 }
 
@@ -109,7 +110,7 @@ static void thread_init(void (*entry)(void*), struct tcb_st *tcb) {
     // Initialize all special registers.
     frame->sp = user_top;
     frame->elr = (uint64_t)(uintptr_t)entry;
-    frame->spsr = 0; // Initialize to SP_EL0 for user exception level
+    frame->spsr = 0x5; // Idle runs at EL1h; real processes are initialized in proc_create().
     frame->esr = 0;
     frame->far = 0;
     frame->type = 0;
@@ -142,9 +143,11 @@ void scheduler_start(void) {
     if (next_pcb != NULL) {
         mem_fetch_heap_vals(get_kernel_mem_ctx());
         mem_load_heap(&next_pcb->heap_ctx);
+        vm_switch_address_space(next_pcb->as);
         next_pcb->state = PROC_RUNNING_STATE;
         trap_frame_restore(next_pcb->frame);
     } else {
+        vm_switch_address_space(vm_kernel_address_space());
         trap_frame_restore(idle_task.frame);
     }
 }
@@ -191,6 +194,7 @@ static struct trap_frame *scheduler_tick(struct trap_frame *frame, void *ctx) {
     // idle if no tasks
     curr_proc = pop_sched_queue();
     if (curr_proc == NULL) {
+        vm_switch_address_space(vm_kernel_address_space());
         scheduler_print_tick(-1, -1);
         timer_schedule_interrupt_ms(SCHEDULER_QUANTUM_MS, scheduler_tick, 0);
         return idle_task.frame;
@@ -202,6 +206,7 @@ static struct trap_frame *scheduler_tick(struct trap_frame *frame, void *ctx) {
     // Load new proc heap to malloc
     mem_fetch_heap_vals(get_kernel_mem_ctx());
     mem_load_heap(&curr_proc->heap_ctx);
+    vm_switch_address_space(curr_proc->as);
 
     // Update new thread data
     curr_proc->state = PROC_RUNNING_STATE;

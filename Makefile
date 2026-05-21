@@ -71,7 +71,7 @@ install:
 qemu:
 	$(MAKE) PLATFORM=qemu build
 	qemu-system-aarch64 \
-	    -M virt \
+	    -M virt,gic-version=2 \
 	    -cpu cortex-a72 \
 	    -nographic \
 	    -kernel kernel8.img

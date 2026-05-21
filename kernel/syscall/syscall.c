@@ -6,9 +6,11 @@
 #include "traps/traps.h"
 #include "uart/uart.h"
 #include "scheduler/scheduler.h"
+#include "memory/virt/vmm.h"
 
 #define SYS_WRITE_CONSOLE_MAX 1024u
 #define SYS_USER_PTR_MIN      UINT64_C(0x1000)
+#define SYS_WRITE_CHUNK       128u
 
 static long s_getpid() {
     pcb_t *curr_proc = get_curr_process();
@@ -20,6 +22,8 @@ static long s_getpid() {
 
 static long sys_write_console_impl(const char *s, uint64_t len) {
     uint64_t written = 0;
+    pcb_t *curr_proc = get_curr_process();
+    struct address_space *as = curr_proc != NULL ? curr_proc->as : vm_kernel_address_space();
 
     if (s == NULL && len != 0) {
         return SYS_EFAULT;
@@ -33,9 +37,27 @@ static long sys_write_console_impl(const char *s, uint64_t len) {
         len = SYS_WRITE_CONSOLE_MAX;
     }
 
-    while (written < len) {
-        uart_putc(s[written]);
-        written++;
+    if (vm_is_enabled()) {
+        char buffer[SYS_WRITE_CHUNK];
+
+        while (written < len) {
+            uint64_t remaining = len - written;
+            uint64_t chunk = remaining < SYS_WRITE_CHUNK ? remaining : SYS_WRITE_CHUNK;
+
+            if (copy_from_user(as, buffer, (uint64_t)(uintptr_t)s + written, chunk) != 0) {
+                return written == 0 ? SYS_EFAULT : (long)written;
+            }
+
+            for (uint64_t i = 0; i < chunk; i++) {
+                uart_putc(buffer[i]);
+            }
+            written += chunk;
+        }
+    } else {
+        while (written < len) {
+            uart_putc(s[written]);
+            written++;
+        }
     }
 
     return (long)written;

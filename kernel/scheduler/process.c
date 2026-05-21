@@ -1,11 +1,18 @@
 #include "scheduler/scheduler.h"
 #include "memory/kernel_mem.h"
 #include "memory/malloc.h"
+#include "memory/page.h"
+#include "memory/phys/pmm.h"
 #include "traps/traps.h"
 #include "syscall/u_syscall.h"
 #include "uart/uart.h"
 
 static pcb_t processes[MAX_PROCESS_COUNT];
+
+#define PROC_USER_STACK_PAGES 4u
+
+extern char __text_start[];
+extern char __text_end[];
 
 // Aligns the given value down to the nearest multiple of the given alignment, which must be a power of 2.
 static uintptr_t align_down(uintptr_t value, uintptr_t alignment) {
@@ -19,6 +26,50 @@ static void process_trampoline(void *(*func)(void *), void *arg) {
     // Should not reach.
     while (1) {
         asm volatile ("wfe");
+    }
+}
+
+static void setup_process_address_space(pcb_t *proc) {
+    proc->as = NULL;
+    proc->user_code_base = (uint64_t)(uintptr_t)process_trampoline;
+    proc->user_heap_base = (uint64_t)(uintptr_t)&proc->heap[0];
+    proc->user_heap_brk = proc->user_heap_base;
+    proc->user_heap_end = (uint64_t)(uintptr_t)&proc->heap[PROC_HEAP_SIZE];
+
+    if (!vm_is_enabled()) {
+        return;
+    }
+
+    proc->as = vm_create_address_space();
+    if (proc->as == NULL) {
+        uart_puts("ERROR: failed to create process address space\n");
+        return;
+    }
+
+    vm_map_range(proc->as, (uint64_t)(uintptr_t)__text_start,
+                 (uint64_t)(uintptr_t)__text_start,
+                 (uint64_t)((uintptr_t)__text_end - (uintptr_t)__text_start),
+                 VM_FLAG_READ | VM_FLAG_EXEC | VM_FLAG_USER);
+
+    void *stack_pages = alloc_pages(PROC_USER_STACK_PAGES);
+    if (stack_pages != NULL) {
+        uint64_t stack_base = VM_USER_STACK_TOP - PROC_USER_STACK_PAGES * PAGE_SIZE;
+        if (vm_map_range(proc->as, stack_base, (uint64_t)(uintptr_t)stack_pages,
+                         PROC_USER_STACK_PAGES * PAGE_SIZE,
+                         VM_FLAG_READ | VM_FLAG_WRITE | VM_FLAG_USER) == 0) {
+            proc->user_stack_base = stack_base;
+            proc->user_stack_top = VM_USER_STACK_TOP;
+        }
+    }
+
+    void *heap_page = alloc_page();
+    if (heap_page != NULL) {
+        if (vm_map_page(proc->as, VM_USER_HEAP_BASE, (uint64_t)(uintptr_t)heap_page,
+                        VM_FLAG_READ | VM_FLAG_WRITE | VM_FLAG_USER) == 0) {
+            proc->user_heap_base = VM_USER_HEAP_BASE;
+            proc->user_heap_brk = VM_USER_HEAP_BASE;
+            proc->user_heap_end = VM_USER_HEAP_BASE + PAGE_SIZE;
+        }
     }
 }
 
@@ -86,6 +137,7 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     new_proc->wait_status_ptr = 0;
     new_proc->exit_code = 0;
     new_proc->name = NULL;
+    new_proc->as = NULL;
 
     // Get stacks for thread
     uintptr_t kernel_top = align_down((uintptr_t)&new_proc->kernel_stack[PROC_STACK_SIZE], 16);
@@ -95,6 +147,8 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     new_proc->user_stack_top = (uintptr_t) user_top;
     new_proc->kernel_stack_base = (uintptr_t) &new_proc->kernel_stack[0];
     new_proc->kernel_stack_top = (uintptr_t) kernel_top;
+
+    setup_process_address_space(new_proc);
 
     // Get trap_frame with thread context
     struct trap_frame *frame = (struct trap_frame *)(kernel_top - sizeof(struct trap_frame));
@@ -109,6 +163,9 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
 
     // Initialize all special registers.
     frame->sp = user_top;
+    if (new_proc->as != NULL) {
+        frame->sp = new_proc->user_stack_top;
+    }
     frame->elr = (uint64_t)(uintptr_t)process_trampoline;
     frame->spsr = 0; // Initialize to SP_EL0 for user exception level
     frame->esr = 0;

@@ -11,13 +11,20 @@ SECTIONS
     . = 0x80000;
     __kernel_start = .;
 
+    __text_start = .;
     .text : {
         KEEP(*(.text.boot))
         *(.text*)
     } :text
+    __text_end = .;
 
+    __rodata_start = .;
     .rodata : { *(.rodata*) } :text
+    __rodata_end = .;
+
+    __data_start = .;
     .data   : { *(.data*)   } :data
+    __data_end = .;
 
     . = ALIGN(16);
     .bss (NOLOAD) : {

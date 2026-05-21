@@ -15,6 +15,7 @@
 #define GICD_IGROUPR     0x080u
 #define GICD_ISENABLER   0x100u
 #define GICD_ICENABLER   0x180u
+#define GICD_ISPENDR     0x200u
 #define GICD_ICPENDR     0x280u
 #define GICD_ICACTIVER   0x380u
 #define GICD_IPRIORITYR  0x400u
@@ -95,7 +96,7 @@ void irq_init(void) {
         gicd_write(GICD_ICENABLER + (intid / 8u), 0xffffffffu);
         gicd_write(GICD_ICPENDR + (intid / 8u), 0xffffffffu);
         gicd_write(GICD_ICACTIVER + (intid / 8u), 0xffffffffu);
-        gicd_write(GICD_IGROUPR + (intid / 8u), 0xffffffffu);
+        gicd_write(GICD_IGROUPR + (intid / 8u), 0x00000000u);
     }
 
     for (unsigned intid = 0; intid < gic_lines; intid += 4u) {
@@ -146,6 +147,14 @@ void irq_disable_line(unsigned intid) {
     }
 
     gicd_write(GICD_ICENABLER + ((intid / 32u) * 4u), 1u << (intid % 32u));
+}
+
+void irq_force_pending(unsigned intid) {
+    if (intid >= GIC_MAX_INTIDS) {
+        return;
+    }
+
+    gicd_write(GICD_ISPENDR + ((intid / 32u) * 4u), 1u << (intid % 32u));
 }
 
 struct trap_frame *irq_handle_exception(struct trap_frame *frame) {
