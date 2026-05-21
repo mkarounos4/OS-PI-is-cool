@@ -8,7 +8,6 @@
 #include "data-structs/vec.h"
 #include "memory/kernel_mem.h"
 #include "memory/malloc.h"
-#include "memory/virt/vmm.h"
 #include "syscall/u_syscall.h"
 
 #define SCHEDULER_QUANTUM_MS 1000u
@@ -24,10 +23,11 @@ int sched_queue_size;
 static pcb_t *curr_proc;
 static uint64_t curr_tick;
 
-static struct tcb_st idle_task;
+static struct cpu_context boot_ctx;
+static struct cpu_context idle_ctx;
+static unsigned char idle_stack[THREAD_STACK_SIZE];
 
-static struct trap_frame *scheduler_tick(struct trap_frame *frame, void *ctx);
-extern void trap_frame_restore(struct trap_frame *frame) __attribute__((noreturn));
+static void scheduler_tick(void *ctx);
 
 static uintptr_t align_down(uintptr_t value, uintptr_t alignment) {
     return value & ~(alignment - 1u);
@@ -82,7 +82,7 @@ static pcb_t *pop_sched_queue() {
 
 void idle_task_fn(void*) {
     while (1) {
-        asm volatile ("nop");
+        asm volatile ("wfe");
     }
 }
 
@@ -90,48 +90,30 @@ void add_task_to_scheduler(pcb_t *pcb) {
     add_sched_queue_node(pcb);
 }
 
-// Initialize a new thread (make a tcb and load it for that index)
-static void thread_init(void (*entry)(void*), struct tcb_st *tcb) {
-    // Get stacks for thread
-    uintptr_t kernel_top = align_down((uintptr_t)&tcb->kernel_stack[THREAD_STACK_SIZE], 16);
-    uintptr_t user_top = align_down((uintptr_t)&tcb->usr_stack[THREAD_STACK_SIZE], 16);
-
-    // Get trap_frame with thread context
-    struct trap_frame *frame = (struct trap_frame *)(kernel_top - sizeof(struct trap_frame));
-
-    // Initialize all thread registers to 0.
-    for (unsigned i = 0; i < 31; i++) {
-        frame->regs[i] = 0;
-    }
-
-    // SET TID here temporary 0 as only using this for idle until real multithreaded library implemented
-    frame->regs[0] = (uint64_t)0;
-
-    // Initialize all special registers.
-    frame->sp = user_top;
-    frame->elr = (uint64_t)(uintptr_t)entry;
-    frame->spsr = 0x5; // Idle runs at EL1h; real processes are initialized in proc_create().
-    frame->esr = 0;
-    frame->far = 0;
-    frame->type = 0;
-    frame->intid = 0;
-
-    // Initialize rest of tcb
-    tcb->frame = frame;
-    tcb->state = THREAD_READY;
-    tcb->tid = 0;
-}
-
 void scheduler_init(void) {
     curr_tick = 0;
     curr_proc = NULL;
-    processes_init();
 
     sched_queue_head = NULL;
     sched_queue_tail = NULL;
     sched_queue_size = 0;
 
-    thread_init(idle_task_fn, &idle_task);
+    processes_init();
+
+    uintptr_t idle_top = align_down((uintptr_t)&idle_stack[THREAD_STACK_SIZE], 16);
+    idle_ctx.x19 = 0;
+    idle_ctx.x20 = 0;
+    idle_ctx.x21 = 0;
+    idle_ctx.x22 = 0;
+    idle_ctx.x23 = 0;
+    idle_ctx.x24 = 0;
+    idle_ctx.x25 = 0;
+    idle_ctx.x26 = 0;
+    idle_ctx.x27 = 0;
+    idle_ctx.x28 = 0;
+    idle_ctx.x29 = 0;
+    idle_ctx.x30 = (uint64_t)(uintptr_t)idle_task_fn;
+    idle_ctx.sp = idle_top;
 }
 
 // Starts execution at thread 0. Does not return.
@@ -143,12 +125,14 @@ void scheduler_start(void) {
     if (next_pcb != NULL) {
         mem_fetch_heap_vals(get_kernel_mem_ctx());
         mem_load_heap(&next_pcb->heap_ctx);
-        vm_switch_address_space(next_pcb->as);
         next_pcb->state = PROC_RUNNING_STATE;
-        trap_frame_restore(next_pcb->frame);
+        context_switch(&boot_ctx, &next_pcb->ctx);
     } else {
-        vm_switch_address_space(vm_kernel_address_space());
-        trap_frame_restore(idle_task.frame);
+        context_switch(&boot_ctx, &idle_ctx);
+    }
+
+    while (1) {
+        asm volatile ("wfe");
     }
 }
 
@@ -166,67 +150,64 @@ static void scheduler_print_tick(unsigned int tid1, unsigned int tid2) {
 }
 
 // Timer interrupt handler which performs actual scheduling
-static struct trap_frame *scheduler_tick(struct trap_frame *frame, void *ctx) {
+void scheduler_tick(void *ctx) {
     (void)ctx;
 
-    if (frame != NULL && frame->type != EXC_IRQ_LOWER_A64) {
-        int idle_irq = curr_proc == NULL &&
-                       (frame->type == EXC_IRQ_CURRENT_SPX ||
-                        frame->type == EXC_IRQ_CURRENT_SP0);
-        if (!idle_irq) {
-            return frame;
-        }
-    }
+    struct cpu_context *old_ctx;
+    struct cpu_context *new_ctx;
 
+    // Get previous ctx
     if (curr_proc != NULL) {
         mem_fetch_heap_vals(&curr_proc->heap_ctx);
+        old_ctx = &curr_proc->ctx;
+    } else {
+        // if idle task, ignore ctx
+        old_ctx = &idle_ctx;
     }
 
     mem_load_heap(get_kernel_mem_ctx());
 
     if (curr_proc != NULL) {
-        if (frame != NULL) {
-            curr_proc->frame = frame;
-        }
         if (curr_proc->state == PROC_RUNNING_STATE) {
             curr_proc->state = PROC_READY_STATE;
             add_sched_queue_node(curr_proc);
         }
     }
 
-    pid_t old_pcb = curr_proc == NULL ? -1 : curr_proc->pid;
+    pid_t old_pid = curr_proc == NULL ? -1 : curr_proc->pid;
+    pid_t new_pid;
 
     // idle if no tasks
     curr_proc = pop_sched_queue();
-    if (curr_proc == NULL) {
-        vm_switch_address_space(vm_kernel_address_space());
-        scheduler_print_tick(-1, -1);
-        timer_schedule_interrupt_ms(SCHEDULER_QUANTUM_MS, scheduler_tick, 0);
-        return idle_task.frame;
-    }
-    
-    // If next thread exists, run it
-    scheduler_print_tick(old_pcb, curr_proc->pid);
-
     // Load new proc heap to malloc
     mem_fetch_heap_vals(get_kernel_mem_ctx());
-    mem_load_heap(&curr_proc->heap_ctx);
-    vm_switch_address_space(curr_proc->as);
+    if (curr_proc == NULL) {
+        new_ctx = &idle_ctx;
+        new_pid = -1;
+    } else {
+        new_ctx = &curr_proc->ctx;
 
-    // Update new thread data
-    curr_proc->state = PROC_RUNNING_STATE;
+        mem_load_heap(&curr_proc->heap_ctx);
+
+        // Update new thread data
+        curr_proc->state = PROC_RUNNING_STATE;
+        new_pid = curr_proc->pid;
+    }
+
+    // If next thread exists, run it
+    scheduler_print_tick(old_pid, new_pid);
     
     // Setup next scheduler interrupt
     timer_schedule_interrupt_ms(SCHEDULER_QUANTUM_MS, scheduler_tick, 0);
 
-    // Return frame for new thread
-    return curr_proc->frame;
+    // context switch to next process
+    context_switch(old_ctx, new_ctx);
 }
 
 pcb_t *get_curr_process() {
     return curr_proc;
 }
 
-struct trap_frame *schedule_next_task() {
-    return scheduler_tick(NULL, NULL);
+void schedule_yield() {
+    scheduler_tick(NULL);
 }

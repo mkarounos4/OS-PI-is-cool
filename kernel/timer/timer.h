@@ -4,7 +4,7 @@
 
 #include "traps/traps.h"
 
-typedef struct trap_frame *(*timer_handler_t)(struct trap_frame *frame, void *ctx);
+typedef void (*timer_handler_t)(void *ctx);
 
 // Initialize the generic timer hardware.
 void timer_init(void);

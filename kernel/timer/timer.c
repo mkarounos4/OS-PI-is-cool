@@ -45,7 +45,8 @@ static struct trap_frame *timer_irq_handler(unsigned intid, struct trap_frame *f
         return 0;
     }
 
-    return handler(frame, handler_ctx);
+    handler(handler_ctx);
+    return frame;
 }
 
 void timer_init(void) {

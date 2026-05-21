@@ -4,14 +4,26 @@
 
 #include "data-structs/vec.h"
 #include "memory/malloc.h"
-#include "memory/virt/vmm.h"
 #include "traps/traps.h"
 
 typedef int32_t pid_t;
 
 #define MAX_PROCESS_COUNT 16
-#define PROC_STACK_SIZE 2048u
+#define PROC_STACK_SIZE 8192u
 #define PROC_HEAP_SIZE 16384u
+
+#define WNOHANG 1
+#define WUNTRACED 2
+#define WCONTINUED 4
+
+#define ECHILD -2
+
+#define WAIT_EXITED 1
+#define WAIT_SIGNALED 2
+#define WAIT_STOPPED 3
+#define WAIT_CONTINUED 4
+
+#define BLOCK_UNTIL_NEW_CHILD 1
 
 enum process_state {
     PROC_UNUSED_STATE,
@@ -29,12 +41,13 @@ typedef struct pcb_st {
     
     const char *name;
     pid_t waiting_for_pid;
-    uintptr_t wait_status_ptr;
+    uint32_t waiting_for_flags;
     enum process_state state;
     int exit_code;
+    uint32_t blocked_until;
 
     // Thread parameters (implementation simplified to one thread per process)
-    struct trap_frame *frame;
+    struct cpu_context ctx;
     unsigned char user_stack[PROC_STACK_SIZE];
     unsigned char kernel_stack[PROC_STACK_SIZE];
     unsigned char heap[PROC_HEAP_SIZE];
@@ -45,11 +58,13 @@ typedef struct pcb_st {
     uintptr_t kernel_stack_top;
     
     struct mem_ctx heap_ctx;
-    struct address_space *as;
     uint64_t user_code_base;
     uint64_t user_heap_base;
     uint64_t user_heap_brk;
     uint64_t user_heap_end;
+
+    uint8_t wait_stop_pending;
+    uint8_t wait_cont_pending;
 
     Vec children;   // vec of children PIDs
     Vec file_descriptors;   // vec of fds
@@ -59,3 +74,11 @@ pcb_t *get_pcb_by_pid(pid_t pid);
 void processes_init();
 pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid);
 void proc_destroy(pcb_t *p);
+long s_waitpid_impl(pid_t pid, int *status, int32_t flags);
+
+void terminate_process(pcb_t *pcb);
+void stop_process(pcb_t *pcb);
+void block_process(pcb_t *pcb);
+void unblock_process(pcb_t *pcb);
+void continue_process(pcb_t *pcb);
+void send_unblock_event(pid_t pid, uint32_t event);

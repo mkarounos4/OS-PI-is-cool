@@ -6,7 +6,8 @@
 #include "traps/traps.h"
 #include "uart/uart.h"
 #include "scheduler/scheduler.h"
-#include "memory/virt/vmm.h"
+#include "memory/kernel_mem.h"
+#include "signals/signals.h"
 
 #define SYS_WRITE_CONSOLE_MAX 1024u
 #define SYS_USER_PTR_MIN      UINT64_C(0x1000)
@@ -22,8 +23,6 @@ static long s_getpid() {
 
 static long sys_write_console_impl(const char *s, uint64_t len) {
     uint64_t written = 0;
-    pcb_t *curr_proc = get_curr_process();
-    struct address_space *as = curr_proc != NULL ? curr_proc->as : vm_kernel_address_space();
 
     if (s == NULL && len != 0) {
         return SYS_EFAULT;
@@ -37,45 +36,30 @@ static long sys_write_console_impl(const char *s, uint64_t len) {
         len = SYS_WRITE_CONSOLE_MAX;
     }
 
-    if (vm_is_enabled()) {
-        char buffer[SYS_WRITE_CHUNK];
-
-        while (written < len) {
-            uint64_t remaining = len - written;
-            uint64_t chunk = remaining < SYS_WRITE_CHUNK ? remaining : SYS_WRITE_CHUNK;
-
-            if (copy_from_user(as, buffer, (uint64_t)(uintptr_t)s + written, chunk) != 0) {
-                return written == 0 ? SYS_EFAULT : (long)written;
-            }
-
-            for (uint64_t i = 0; i < chunk; i++) {
-                uart_putc(buffer[i]);
-            }
-            written += chunk;
-        }
-    } else {
-        while (written < len) {
-            uart_putc(s[written]);
-            written++;
-        }
+    while (written < len) {
+        uart_putc(s[written]);
+        written++;
     }
 
     return (long)written;
 }
 
-static struct trap_frame *s_exit_impl(struct trap_frame *frame, int code) {
+static long s_exit_impl(int code) {
     pcb_t *curr_proc = get_curr_process();
     if (curr_proc != NULL) {
         curr_proc->state = PROC_ZOMBIE_STATE;
         curr_proc->exit_code = code;
-        curr_proc->frame = frame;
-        // call SIGCHILD here
+        send_sigchld(curr_proc->pid);
     }    
 
-    return schedule_next_task();
+    schedule_yield();
+    return 0;
 }
 
 static long s_spawn(void* (*func)(void*), void *argv) {
+    struct mem_ctx prev_ctx;
+    mem_fetch_heap_vals(&prev_ctx);
+
     pid_t ppid = s_getpid();
     
     pid_t new_proc = proc_create(func, argv, ppid);
@@ -87,17 +71,19 @@ static long s_spawn(void* (*func)(void*), void *argv) {
         return -1;
     }
 
-    add_task_to_scheduler(new_pcb);
+    mem_load_heap(&prev_ctx);
     return new_pcb->pid;
 }
 
-static long s_waitpid() {
-    return 0;
-}
+static long s_block_until_event(uint32_t event) {
+    pcb_t *curr_proc = get_curr_process();
+    if (curr_proc == NULL) {
+        return -1;
+    }
 
-long s_kill(pid_t pid, int signal) {
-    (void)pid;
-    (void)signal;
+    curr_proc->blocked_until = event;
+    block_process(curr_proc);
+
     return 0;
 }
 
@@ -120,27 +106,34 @@ struct trap_frame *syscall_dispatch(struct trap_frame *frame) {
         break;
 
     case S_YIELD:
+        schedule_yield();
         break;
 
     case S_EXIT:
-        return s_exit_impl(frame, (int)frame->regs[0]);
+        ret = s_exit_impl((int)frame->regs[0]);
+        break;
     case S_GETPID:
         ret = s_getpid();
         break;
     case S_CURRENT_EL:
     case S_DELAY:
-        ret = SYS_ENOSYS;
+        timer_delay_ms((int)frame->regs[0]);
+        ret = 0;
         break;
     case S_SPAWN:
         ret = s_spawn((void*(*)(void*))frame->regs[0], (void*) frame->regs[1]);
         break;
     case S_WAITPID:
-        ret = s_waitpid();
+        ret = s_waitpid_impl((pid_t)frame->regs[0],
+                             (int *)(uintptr_t)frame->regs[1],
+                             (int32_t)frame->regs[2]);
         break;
     case S_KILL:
         ret = s_kill((pid_t)frame->regs[0], (int)(uintptr_t)frame->regs[1]);
         break;
-
+    case S_BLOCK_UNTIL_EVENT:
+        ret = s_block_until_event((uint32_t) frame->regs[0]);
+        break;
     default:
         ret = SYS_ENOSYS;
         break;

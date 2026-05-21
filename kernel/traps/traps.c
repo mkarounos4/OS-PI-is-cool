@@ -285,12 +285,10 @@ static struct trap_frame *handle_sync_exception(struct trap_frame *frame) {
          * which is already the instruction after the SVC. Unlike BRK above,
          * do not manually advance ELR here.
          */
-        {
-            uint64_t flags = irq_save();
-            struct trap_frame *next_frame = syscall_dispatch(frame);
-            irq_restore(flags);
-            return next_frame;
-        }
+        irq_enable();
+        struct trap_frame *next_frame = syscall_dispatch(frame);
+        irq_disable();
+        return next_frame;
         
     case ESR_EC_DABT_LOWER:
         return handle_user_page_fault(frame, "user data abort");
@@ -339,8 +337,8 @@ static struct trap_frame *handle_user_page_fault(struct trap_frame *frame, const
 
     proc->state = PROC_ZOMBIE_STATE;
     proc->exit_code = -1;
-    proc->frame = frame;
-    return schedule_next_task();
+    schedule_yield();
+    return frame;
 }
 
 void exceptions_init(void) {

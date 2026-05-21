@@ -22,15 +22,38 @@ enum exception_type {
 };
 
 struct trap_frame {
+    // Restoration fields
     uint64_t regs[31];
-    uint64_t sp;
-    uint64_t elr;
-    uint64_t spsr;
-    uint64_t esr;
-    uint64_t far;
-    uint64_t type;
-    uint64_t intid;
+    uint64_t sp; // Stack Pointer
+    uint64_t elr; // PC to return to after eret
+    uint64_t spsr; // SPSR_EL1, saved processor stte. Mode that eret returns to (exception lvl, stack mode, interrupt mask bits, condition flags).
+
+    // Diagnosis fields
+    uint64_t esr;  // Exception syndrome register (contains exception class, so what exception happened)
+    uint64_t far;  // Fault addr register, stores address of failure for data/instruction aborts/page faults
+    uint64_t type;  // Stores enum exception_type of exception
+    uint64_t intid; // interrupt id
 };
+
+struct cpu_context {
+    uint64_t x19;
+    uint64_t x20;
+    uint64_t x21;
+    uint64_t x22;
+    uint64_t x23;
+    uint64_t x24;
+    uint64_t x25;
+    uint64_t x26;
+    uint64_t x27;
+    uint64_t x28;
+    uint64_t x29;
+    uint64_t x30;
+    uint64_t sp;
+};
+
+void context_switch(struct cpu_context *old_ctx, struct cpu_context *new_ctx);
+void context_switch_to(struct cpu_context *new_ctx);
+void trap_frame_restore(struct trap_frame *frame) __attribute__((noreturn));
 
 // Initialize exception vectors
 void exceptions_init(void);

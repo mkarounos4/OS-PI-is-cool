@@ -17,6 +17,7 @@ enum syscall_type {
     S_WAITPID = 10,
     S_SBRK = 11,
     S_KILL = 12,
+    S_BLOCK_UNTIL_EVENT = 13,
 };
 
 #define SYS_ENOSYS (-38L)

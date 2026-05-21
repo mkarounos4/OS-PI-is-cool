@@ -15,8 +15,7 @@ long get_ticks(void) {
 
 // NOT IMPLEMENTED YET
 long delay(uint64_t ms) {
-    (void) ms;
-    return 0;
+    return sys_call1(S_DELAY, ms);
 }
 
 long exit(int code) {
@@ -41,4 +40,8 @@ long sbrk(int64_t increment) {
 
 long kill(pid_t pid, int signal) {
     return sys_call2(S_KILL, pid, (long)(uintptr_t)signal);
+}
+
+long block_until_event(uint32_t events) {
+    return sys_call1(S_BLOCK_UNTIL_EVENT, events);
 }

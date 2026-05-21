@@ -15,17 +15,6 @@ enum thread_state {
     THREAD_ZOMBIE
 };
 
-// Thread control block structure
-struct tcb_st {
-    struct trap_frame *frame; // Trap frame with register state for this thread
-    unsigned char usr_stack[THREAD_STACK_SIZE]; // Stack for this thread (EL0)
-    unsigned char kernel_stack[THREAD_STACK_SIZE]; // kernel stack for this thread (EL1)
-    uint32_t tid;
-    enum thread_state state;
-    uint32_t exit_code;
-
-};
-
 // Initializes scheduler state and the initial two kernel threads.
 void scheduler_init(void);
 
@@ -36,6 +25,6 @@ void add_task_to_scheduler(pcb_t *pcb);
 
 pcb_t *get_curr_process();
 
-struct trap_frame *scheduler_exit_current(struct trap_frame *frame, int exit_code);
+void scheduler_exit_current(int exit_code);
 
-struct trap_frame *schedule_next_task();
+void schedule_yield();
