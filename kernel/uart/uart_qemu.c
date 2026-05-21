@@ -1,48 +1,48 @@
-// src/uart_qemu.c
-
 #include "uart.h"
+
 #include <stdint.h>
 
-#define UART0 ((volatile uint32_t *)0x09000000)
+#define QEMU_RPI3_UART0_BASE UINT64_C(0x3f201000)
+
+#define UART_DR 0x00u
+#define UART_FR 0x18u
+
+#define FR_TXFF (1u << 5)
 
 void uart_init(void)
 {
-    // QEMU virt PL011 already initialized
+    // QEMU raspi3b firmware leaves PL011 usable for early serial output.
 }
 
 void uart_raw_putc(const char c)
 {
-    *UART0 = (uint32_t)c;
+    while ((rpi5_mmio_read32(QEMU_RPI3_UART0_BASE + UART_FR) & FR_TXFF) != 0) {
+        asm volatile("yield" ::: "memory");
+    }
+
+    rpi5_mmio_write32(QEMU_RPI3_UART0_BASE + UART_DR, (uint32_t)(uint8_t)c);
 }
 
 void uart_putc(const char c)
 {
     if (c == '\n') {
-        *UART0 = '\r';
+        uart_raw_putc('\r');
     }
 
-    *UART0 = (uint32_t)c;
+    uart_raw_putc(c);
 }
 
 void uart_puts(const char *s)
 {
     while (*s) {
-
-        if (*s == '\n') {
-            *UART0 = '\r';
-        }
-
-        *UART0 = (uint32_t)(*s);
-
-        s++;
+        uart_putc(*s++);
     }
 }
 
 void uart_raw_puts(const char *s)
 {
     while (*s) {
-        *UART0 = (uint32_t)(*s);
-        s++;
+        uart_raw_putc(*s++);
     }
 }
 
@@ -50,19 +50,14 @@ void uart_puthex(uint64_t value)
 {
     uart_puts("0x");
 
+    int started = 0;
     for (int shift = 60; shift >= 0; shift -= 4) {
+        uint8_t nibble = (value >> shift) & 0xfu;
+        char c = nibble < 10 ? (char)('0' + nibble) : (char)('A' + (nibble - 10));
 
-        uint8_t nibble =
-            (value >> shift) & 0xF;
-
-        char c;
-
-        if (nibble < 10) {
-            c = '0' + nibble;
-        } else {
-            c = 'A' + (nibble - 10);
+        if (started || c != '0' || shift == 0) {
+            started = 1;
+            uart_putc(c);
         }
-
-        uart_putc(c);
     }
 }

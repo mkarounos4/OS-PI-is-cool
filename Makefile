@@ -27,9 +27,9 @@ ifeq ($(PLATFORM),rpi)
     LINKER = linker_rpi.ld
     TARGET = kernel8.img
 else ifeq ($(PLATFORM),qemu)
-    CFLAGS += -DPLATFORM_QEMU
+    CFLAGS += -DPLATFORM_QEMU -mcpu=cortex-a53
     UART_SRC = kernel/uart/uart_qemu.c
-    LINKER = linker_qemu.ld
+    LINKER = linker_rpi.ld
     TARGET = kernel8.img
 else
     $(error Unknown PLATFORM '$(PLATFORM)'. Use 'rpi' or 'qemu')
@@ -71,9 +71,8 @@ install:
 qemu:
 	$(MAKE) PLATFORM=qemu build
 	qemu-system-aarch64 \
-	    -M virt \
-	    -cpu cortex-a72 \
-	    -nographic \
+	    -M raspi3b \
+	    -serial stdio \
 	    -kernel kernel8.img
 
 build: $(TARGET)
