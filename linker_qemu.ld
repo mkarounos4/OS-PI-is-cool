@@ -48,4 +48,15 @@ SECTIONS
     }
     
     __kernel_end = .;
+
+
+    . = ALIGN(4096);
+    __l0_table = .;
+    . += 0x1000;
+    __l1_table = .;
+    . += 0x1000;
+    __l2_table = .;
+    . += 0x1000;
+    __l3_table = .;
+    . += 0x1000;
 }
