@@ -1,15 +1,8 @@
 #include <stdint.h>
 
-typedef uint64_t pte_t;
 
-typedef struct {
-    pte_t pte[512];
-} page_table_t;
+void *alloc_page();
 
-// TEMP static initial page table
-static page_table_t l0_table __attribute__((aligned(4096)));
-static page_table_t l1_table __attribute__((aligned(4096)));
-static page_table_t l2_table __attribute__((aligned(4096)));
-static page_table_t l3_table __attribute__((aligned(4096)));
+void free_page(void *page);
 
-uint64_t make_table_desc(uint64_t phys_addr);
+uint8_t pt_walk(uint64_t *l0, uint64_t *va) 
