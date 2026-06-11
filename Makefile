@@ -41,7 +41,7 @@ ASM_SRCS   := $(shell find $(KERNEL_DIR) -type f -name '*.S')
 C_SRCS := $(filter-out kernel/uart/uart_rpi.c kernel/uart/uart_qemu.c,$(ALL_C_SRCS)) $(UART_SRC)
 
 OBJS := $(patsubst $(KERNEL_DIR)/%.c,$(BUILD_DIR)/%.o,$(C_SRCS))
-OBJS += $(patsubst $(KERNEL_DIR)/%.S,$(BUILD_DIR)/%.o,$(ASM_SRCS))
+OBJS += $(patsubst $(KERNEL_DIR)/%.S,$(BUILD_DIR)/%.S.o,$(ASM_SRCS))
 
 .PHONY: all clean dump rpi install qemu build FORCE
 
@@ -49,7 +49,7 @@ $(BUILD_DIR)/%.o: $(KERNEL_DIR)/%.c $(HEADERS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/%.o: $(KERNEL_DIR)/%.S
+$(BUILD_DIR)/%.S.o: $(KERNEL_DIR)/%.S
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
