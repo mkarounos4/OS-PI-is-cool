@@ -6,6 +6,11 @@
 #include "uart/uart.h"
 #include "signals/signals.h"
 
+#define USER_STACK_TOP PROC_STACK_SIZE
+#define KERNEL_STACK_TOP USER_STACK_TOP + PROC_STACK_SIZE
+#define USER_HEAP_END KERNEL_STACK_TOP + PROC_HEAP_SIZE
+#define USER_HEAP_START KERNEL_STACK_TOP + 1
+
 static pcb_t processes[MAX_PROCESS_COUNT];
 
 void *init_process_entry(void*);
@@ -134,33 +139,14 @@ static pcb_t *get_next_unused_pcb() {
 }
 
 pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
-    struct mem_ctx prev_ctx;
-    mem_fetch_heap_vals(&prev_ctx);
-
     pcb_t *new_proc = get_next_unused_pcb();
     if (new_proc == NULL) {
         uart_puts("ERROR: no unused processes left");
         return -1;
     }
 
-    pcb_t *running_proc = get_curr_process();
-    if (running_proc != NULL) {
-        mem_fetch_heap_vals(&running_proc->heap_ctx);
-    } else {
-        mem_fetch_heap_vals(get_kernel_mem_ctx());
-    }
-
-    mem_load_heap(get_kernel_mem_ctx());
-
     // TODO: replace when VM added with better heap allocation
-    new_proc->heap_ctx.heap_start = (void *)&new_proc->heap[0];
-    new_proc->heap_ctx.heap_brk = new_proc->heap_ctx.heap_start;
-    new_proc->heap_ctx.heap_end = (void *)&new_proc->heap[PROC_HEAP_SIZE];
-    new_proc->heap_ctx.heap_ptr = NULL;
-    new_proc->heap_ctx.seg_lists = NULL;
-
-    mem_init(&new_proc->heap_ctx);
-    mem_load_heap(get_kernel_mem_ctx());
+    // allocate default heap values here
 
     // Setup FD table here based on parent if applicable (after FS impl)
     new_proc->ppid = ppid;
@@ -183,21 +169,8 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     new_proc->exit_code = 0;
     new_proc->name = NULL;
 
-    // Get stacks for thread
-    uintptr_t kernel_top = align_down((uintptr_t)&new_proc->kernel_stack[PROC_STACK_SIZE], 16);
-    uintptr_t user_top = align_down((uintptr_t)&new_proc->user_stack[PROC_STACK_SIZE], 16);
-
-    new_proc->user_stack_base = (uintptr_t) &new_proc->user_stack[0];
-    new_proc->user_stack_top = (uintptr_t) user_top;
-    new_proc->kernel_stack_base = (uintptr_t) &new_proc->kernel_stack[0];
-    new_proc->kernel_stack_top = (uintptr_t) kernel_top;
-    new_proc->user_code_base = (uint64_t)(uintptr_t)process_trampoline;
-    new_proc->user_heap_base = (uint64_t)(uintptr_t)&new_proc->heap[0];
-    new_proc->user_heap_brk = new_proc->user_heap_base;
-    new_proc->user_heap_end = (uint64_t)(uintptr_t)&new_proc->heap[PROC_HEAP_SIZE];
-
     // Get trap_frame with thread context
-    struct trap_frame *frame = (struct trap_frame *)(kernel_top - sizeof(struct trap_frame));
+    struct trap_frame *frame = (struct trap_frame *)(KERNEL_STACK_TOP - sizeof(struct trap_frame));
 
     // Initialize all thread registers to 0.
     for (unsigned i = 0; i < 31; i++) {
@@ -208,7 +181,7 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     frame->regs[1] = (uint64_t)(uintptr_t)args;
 
     // Initialize all special registers.
-    frame->sp = user_top;
+    frame->sp = USER_STACK_TOP;
     frame->elr = (uint64_t)(uintptr_t)process_trampoline;
     frame->spsr = 0; // Initialize to SP_EL0 for user exception level
     frame->esr = 0;
@@ -229,17 +202,13 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     new_proc->ctx.x28 = 0;
     new_proc->ctx.x29 = 0;
     new_proc->ctx.x30 = (uint64_t)(uintptr_t)process_first_run;
-    new_proc->ctx.sp = kernel_top - sizeof(struct trap_frame);
+    new_proc->ctx.sp = KERNEL_STACK_TOP - sizeof(struct trap_frame);
+    new_proc->ctx.ttbr0_el1 = (uint64_t) alloc_page();
+
+    // Put address space id at head of ttbr0_el1
+    *new_proc->ctx.ttbr0_el1 |= new_proc->pid << 48;
 
     add_task_to_scheduler(new_proc);
-    mem_fetch_heap_vals(get_kernel_mem_ctx());
-    if (running_proc != NULL) {
-        mem_load_heap(&running_proc->heap_ctx);
-    } else {
-        mem_load_heap(get_kernel_mem_ctx());
-    }
-    mem_load_heap(&prev_ctx);
-
 
     return new_proc->pid;
 }

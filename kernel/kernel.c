@@ -4,7 +4,6 @@
 #include "scheduler/scheduler.h"
 #include "timer/timer.h"
 #include "traps/traps.h"
-#include "memory/kernel_mem.h"
 #include "memory/malloc.h"
 #include "memory/page_table/page_table.h"
 #include "uart/uart.h"
@@ -12,11 +11,10 @@
 #include "syscall/u_syscall.h"
 #include "signals/signals.h"
 #include "tests/tests.h"
-
-extern char __kernel_heap_start[];
-extern char __kernel_heap_end[];
+#include "memoory/mmu.h"
 
 void kernel_main(void) {
+    initialize_vm();
     uart_init();
     uart_puts("\nAArch64 bare-metal kernel entered\n");
 
@@ -34,7 +32,6 @@ void kernel_main(void) {
     irq_enable();
     uart_puts("[boot] irq_enable done\n");
 
-    kernel_mem_init(__kernel_heap_start, __kernel_heap_end);
     uart_puts("[boot] kernel heap ready\n");
     uart_puts("[boot] virtual memory disabled for this test run\n");
 

@@ -31,7 +31,7 @@ void free_page(void *page) {
 }
 
 PTD = 0x0000FFFFFFFFF000ULL;
-uint8_t pt_walk(uint64_t *l0, uint64_t *va) {
+uint8_t pt_walk(uint64_t *l0, uint64_t va) {
     uint64_t l0_index = (va >> 39) & 0x1FF;
     uint64_t l1_index = (va >> 30) & 0x1FF;
     uint64_t l2_index = (va >> 21) & 0x1FF;

@@ -25,15 +25,10 @@ static uint64_t curr_tick;
 
 static struct cpu_context boot_ctx;
 static struct cpu_context idle_ctx;
-static unsigned char idle_stack[THREAD_STACK_SIZE];
 static volatile int ready_to_schedule = 0;
 static void *ready_ctx = NULL;
 
 static void scheduler_tick(void *ctx);
-
-static uintptr_t align_down(uintptr_t value, uintptr_t alignment) {
-    return value & ~(alignment - 1u);
-}
 
 static void set_ready_to_schedule(void *ctx) {
     ready_to_schedule = 1;
@@ -108,7 +103,6 @@ void scheduler_init(void) {
 
     processes_init();
 
-    uintptr_t idle_top = align_down((uintptr_t)&idle_stack[THREAD_STACK_SIZE], 16);
     idle_ctx.x19 = 0;
     idle_ctx.x20 = 0;
     idle_ctx.x21 = 0;
@@ -121,7 +115,9 @@ void scheduler_init(void) {
     idle_ctx.x28 = 0;
     idle_ctx.x29 = 0;
     idle_ctx.x30 = (uint64_t)(uintptr_t)idle_task_fn;
-    idle_ctx.sp = idle_top;
+    idle_ctx.sp = 8192ul;
+    idle_ctx.ttbr0_el1 = (uint64_t) alloc_page();
+    *idle_ctx.ttbr0_el1 |= 0xFFFF << 48;
 }
 
 // Starts execution at thread 0. Does not return.
@@ -131,8 +127,6 @@ void scheduler_start(void) {
     curr_proc = next_pcb;
     
     if (next_pcb != NULL) {
-        mem_fetch_heap_vals(get_kernel_mem_ctx());
-        mem_load_heap(&next_pcb->heap_ctx);
         next_pcb->state = PROC_RUNNING_STATE;
         context_switch(&boot_ctx, &next_pcb->ctx);
     } else {
@@ -166,14 +160,11 @@ void scheduler_tick(void *ctx) {
 
     // Get previous ctx
     if (curr_proc != NULL) {
-        mem_fetch_heap_vals(&curr_proc->heap_ctx);
         old_ctx = &curr_proc->ctx;
     } else {
         // if idle task, ignore ctx
         old_ctx = &idle_ctx;
     }
-
-    mem_load_heap(get_kernel_mem_ctx());
 
     if (curr_proc != NULL) {
         if (curr_proc->state == PROC_RUNNING_STATE) {
@@ -188,14 +179,11 @@ void scheduler_tick(void *ctx) {
     // idle if no tasks
     curr_proc = pop_sched_queue();
     // Load new proc heap to malloc
-    mem_fetch_heap_vals(get_kernel_mem_ctx());
     if (curr_proc == NULL) {
         new_ctx = &idle_ctx;
         new_pid = -1;
     } else {
         new_ctx = &curr_proc->ctx;
-
-        mem_load_heap(&curr_proc->heap_ctx);
 
         // Update new thread data
         curr_proc->state = PROC_RUNNING_STATE;

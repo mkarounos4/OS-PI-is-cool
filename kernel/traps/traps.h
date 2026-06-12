@@ -49,6 +49,7 @@ struct cpu_context {
     uint64_t x29;
     uint64_t x30;
     uint64_t sp;
+    uint64_t ttbr0_el1;
 };
 
 void context_switch(struct cpu_context *old_ctx, struct cpu_context *new_ctx);
@@ -78,3 +79,5 @@ uint64_t irq_save(void);
 
 // Restores previous interrupt mask state from flags returned by irq_save()
 void irq_restore(uint64_t flags);
+
+void fatal_exception(const char *reason, struct trap_frame *frame);

@@ -48,20 +48,6 @@ typedef struct pcb_st {
 
     // Thread parameters (implementation simplified to one thread per process)
     struct cpu_context ctx;
-    unsigned char user_stack[PROC_STACK_SIZE];
-    unsigned char kernel_stack[PROC_STACK_SIZE];
-    unsigned char heap[PROC_HEAP_SIZE];
-    
-    uintptr_t user_stack_base;
-    uintptr_t user_stack_top;
-    uintptr_t kernel_stack_base;
-    uintptr_t kernel_stack_top;
-    
-    struct mem_ctx heap_ctx;
-    uint64_t user_code_base;
-    uint64_t user_heap_base;
-    uint64_t user_heap_brk;
-    uint64_t user_heap_end;
 
     uint8_t wait_stop_pending;
     uint8_t wait_cont_pending;

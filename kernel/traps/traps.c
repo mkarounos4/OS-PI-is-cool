@@ -264,6 +264,7 @@ static struct trap_frame *handle_user_page_fault(struct trap_frame *frame, const
 static struct trap_frame *handle_sync_exception(struct trap_frame *frame) {
     uint64_t ec = (frame->esr >> ESR_EC_SHIFT) & ESR_EC_MASK;
     uint64_t iss = frame->esr & ESR_ISS_MASK;
+    uint64_t fsc = frame->esr & ESR_FSC_MASK;
 
     switch (ec) {
     case ESR_EC_BRK64:
@@ -273,11 +274,11 @@ static struct trap_frame *handle_sync_exception(struct trap_frame *frame) {
             return frame;
         }
 
-        exception_halt("brk exception", frame);
+        fatal_exception("brk exception", frame);
 
     case ESR_EC_SVC64:
         if (frame->type != EXC_SYNC_LOWER_A64) {
-            exception_halt("svc64 syscall invalid frame->type: not EXC_SYNC_LOWER_A64", frame);
+            fatal_exception("svc64 syscall invalid frame->type: not EXC_SYNC_LOWER_A64", frame);
         }
 
         /*
@@ -291,54 +292,53 @@ static struct trap_frame *handle_sync_exception(struct trap_frame *frame) {
         return next_frame;
         
     case ESR_EC_DABT_LOWER:
-        return handle_user_page_fault(frame, "user data abort");
-
-    case ESR_EC_IABT_LOWER:
-        return handle_user_page_fault(frame, "user instruction abort");
-
     case ESR_EC_DABT_CURRENT:
-        exception_halt("kernel data abort", frame);
-
+        handle_data_abort(fsc, frame->far, frame->elr, frame->esr);
+        return frame;
+    case ESR_EC_IABT_LOWER:
     case ESR_EC_IABT_CURRENT:
-        exception_halt("kernel instruction abort", frame);
-
+        handle_instruction_abort(fsc, frame->far, frame->elr, frame->esr);
+        return frame;
     case ESR_EC_SYSREG_TRAP:
-        exception_halt("system register access trap", frame);
+        fatal_exception("system register access trap", frame);
 
     case ESR_EC_PC_ALIGN:
-        exception_halt("pc alignment fault", frame);
+        fatal_exception("pc alignment fault", frame);
 
     case ESR_EC_SP_ALIGN:
-        exception_halt("sp alignment fault", frame);
+        fatal_exception("sp alignment fault", frame);
 
     default:
-        exception_halt(exception_class_name(ec), frame);
+        fatal_exception(exception_class_name(ec), frame);
     }
 }
 
-static struct trap_frame *handle_user_page_fault(struct trap_frame *frame, const char *reason) {
+static struct trap_frame *handle_user_page_fault(struct trap_frame *frame) {
+    
+}
+
+void fatal_exception(const char *reason, struct trap_frame *frame) {
     pcb_t *proc = get_curr_process();
 
-    uart_puts("\nUser process fault\n");
-    uart_puts("reason: ");
+    uart_puts("\nFatal exception: ");
     uart_puts(reason);
     uart_puts("\n");
     uart_puts("pid: ");
     uart_puthex(proc != NULL ? (uint64_t)proc->pid : UINT64_C(0xffffffffffffffff));
-    uart_puts("\nFAR: ");
-    uart_puthex(frame->far);
-    uart_puts("\nESR: ");
-    uart_puthex(frame->esr);
-    uart_puts("\n");
 
     if (proc == NULL) {
-        exception_halt("user page fault without current process", frame);
+        exception_halt("Fatal exception without a current process. Halting.", frame);
     }
 
-    proc->state = PROC_ZOMBIE_STATE;
-    proc->exit_code = -1;
-    schedule_yield();
-    return frame;
+    if (frame != NULL) {
+        trap_frame_dump(frame);
+    }
+
+    terminate_process(proc);
+}
+
+void fatal_exception(const char *reason) {
+    fatal_exception(reason, NULL);
 }
 
 void exceptions_init(void) {
@@ -389,12 +389,12 @@ struct trap_frame *exception_dispatch(struct trap_frame *frame) {
     }
 
     if (is_serror_type(frame->type)) {
-        exception_halt("serror exception", frame);
+        fatal_exception("serror exception", frame);
     }
 
     if (is_sync_type(frame->type)) {
         return handle_sync_exception(frame);
     }
 
-    exception_halt("unknown exception vector", frame);
+    fatal_exception("unknown exception vector", frame);
 }
