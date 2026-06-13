@@ -44,6 +44,9 @@
 #define TCR_TG1_4K          (2ULL << 30)
 
 #define TCR_IPS_40BIT       (2ULL << 32)
+#define ESR_EC_SHIFT        26ULL
+#define ESR_EC_MASK         UINT64_C(0x3f)
+#define ESR_EC_DABT_LOWER   UINT64_C(0x24)
 
 static uint64_t ttbr1_el1;
 static uint64_t boot_ttbr0_l0[PAGE_TABLE_ENTRIES] BOOT_PAGE_TABLE;
@@ -128,8 +131,48 @@ void BOOT_TEXT initialize_mmu(uint64_t ttbr0_el1, uint64_t ttbr1_el1_value) {
     initialize_mmu_asm(ttbr0_el1, ttbr1_el1_value, tcr, mair_el1);
 }
 
+static uint64_t table_phys_addr(uint64_t *table) {
+    return (uint64_t)(uintptr_t)table & TABLE_ADDR_MASK;
+}
+
+static uint8_t is_in_range(uint64_t va, uint64_t start, uint64_t size) {
+    return va >= start && va < start + size;
+}
+
+static void invalidate_all_stage1_tlbs(void) {
+    asm volatile(
+        "dsb ishst\n"
+        "tlbi vmalle1is\n"
+        "dsb ish\n"
+        "isb\n"
+        ::: "memory");
+}
+
+void install_kernel_page_table(void) {
+    uint64_t *kernel_l0 = initialize_kernel_page_table();
+    if (kernel_l0 == NULL) {
+        fatal_exception("failed to initialize final kernel page table");
+        return;
+    }
+
+    ttbr1_el1 = table_phys_addr(kernel_l0);
+    asm volatile(
+        "dsb ishst\n"
+        "msr ttbr1_el1, %0\n"
+        "tlbi vmalle1is\n"
+        "dsb ish\n"
+        "isb\n"
+        :
+        : "r"(ttbr1_el1)
+        : "memory");
+}
+
 void handle_instruction_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t esr) {
-    if (fsc >= ADDRESS_SIZE_FAULT && fsc < ADDRESS_SIZE_FAULT + 4) {
+    (void)far;
+    (void)elr;
+    (void)esr;
+
+    if (fsc < ADDRESS_SIZE_FAULT + 4) {
         fatal_exception("Instruction Abort: Address size fault");
     } else if (fsc < TRANSLATION_FAULT + 4) {
         fatal_exception("Instruction Abort: translation fault");
@@ -155,18 +198,23 @@ void handle_instruction_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t
 }
 
 void handle_data_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t esr) {
+    (void)elr;
+
     bool is_write = (esr & ESR_WNR) != 0;
     bool far_valid = (esr & ESR_FNV) == 0;
     bool during_table_walk = (esr & ESR_S1PTW) != 0;
     bool cache_maintenance = (esr & ESR_CM) != 0;
     bool external_abort_info = (esr & ESR_EA) != 0;
 
+    uint64_t ec = (esr >> ESR_EC_SHIFT) & ESR_EC_MASK;
+    bool from_lower_el = ec == ESR_EC_DABT_LOWER;
+
     (void)is_write;
     (void)during_table_walk;
     (void)cache_maintenance;
     (void)external_abort_info;
 
-    if (fsc >= ADDRESS_SIZE_FAULT && fsc < ADDRESS_SIZE_FAULT + 4) {
+    if (fsc < ADDRESS_SIZE_FAULT + 4) {
         fatal_exception("Data Abort: Address size fault");
     } else if (fsc < TRANSLATION_FAULT + 4) {
         if (!far_valid) {
@@ -174,20 +222,46 @@ void handle_data_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t esr) {
         }
         
         uint64_t table_base_addr = 0;
+        uint8_t mapped = 0;
         if ((far >> 48) == 0xFFFF) {
-            table_base_addr = ttbr1_el1;
+            if (!is_in_range(far, KERNEL_HEAP_START, KERNEL_HEAP_SIZE)) {
+                fatal_exception("Data Abort: Translation fault outside kernel lazy ranges");
+                return;
+            }
+
+            table_base_addr = kernel_direct_map_va(ttbr1_el1);
+            mapped = pt_walk_kernel_page((uint64_t *)(uintptr_t)table_base_addr, far);
         } else {
             pcb_t *curr_proc = get_curr_process();
             if (curr_proc == NULL) {
                 fatal_exception("Data Abort: Translation fault user address with no process");
+                return;
             }
 
             table_base_addr = kernel_direct_map_va(curr_proc->ctx.ttbr0_el1);
+            if (is_in_range(far, USER_HEAP_START, USER_HEAP_SIZE) ||
+                is_in_range(far, USER_STACK_TOP - USER_STACK_SIZE,
+                            USER_STACK_SIZE)) {
+                mapped = pt_walk_user_page((uint64_t *)(uintptr_t)table_base_addr,
+                                           far);
+            } else if (!from_lower_el &&
+                       is_in_range(far,
+                                   PROC_KERNEL_STACK_TOP - PROC_KERNEL_STACK_SIZE,
+                                   PROC_KERNEL_STACK_SIZE)) {
+                mapped = pt_walk_kernel_page((uint64_t *)(uintptr_t)table_base_addr,
+                                             far);
+            } else {
+                fatal_exception("Data Abort: Translation fault outside process lazy ranges");
+                return;
+            }
         }
 
-        if (!pt_walk((uint64_t *)(uintptr_t)table_base_addr, far)) {
+        if (!mapped) {
             fatal_exception("Data Abort: Translation Fault, failed to allocate new page");
+            return;
         }
+
+        invalidate_all_stage1_tlbs();
     } else if (fsc < ACCESS_FLAG_FAULT + 4) {
         if (!far_valid) {
             fatal_exception("Data Abort: Access Flag = 0 with Invalid FAR");

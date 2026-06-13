@@ -1,6 +1,27 @@
+#include "malloc.h"
 #include "syscall.h"
 
 static void *process_c(void *args);
+
+void malloc_lazy_test(void) {
+    char *buf = malloc(5000);
+    if (buf == NULL) {
+        putstr("[TEST] malloc failed\n");
+        return;
+    }
+
+    for (int i = 0; i < 5000; i++) {
+        buf[i] = (char)(i & 0x7f);
+    }
+
+    if (buf[4097] == (char)(4097 & 0x7f)) {
+        putstr("[TEST] malloc lazy allocation ok\n");
+    } else {
+        putstr("[TEST] malloc lazy allocation mismatch\n");
+    }
+
+    free(buf);
+}
 
 static void *process_a(void *args) {
     (void) args;

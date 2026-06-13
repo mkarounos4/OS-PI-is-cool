@@ -6,6 +6,7 @@ void *tests(void *args) {
 
     // TESTS HERE
     // scheduler_orphan_test();
+    malloc_lazy_test();
     waitpid_signal_test();
 
     return NULL;

@@ -1,5 +1,4 @@
 #include "scheduler/scheduler.h"
-#include "memory/malloc.h"
 #include "memory/page_table/page_table.h"
 #include "traps/traps.h"
 #include "uart/uart.h"
@@ -7,28 +6,11 @@
 #include "user_image.h"
 
 #define PA_MASK UINT64_C(0x0000ffffffffffff)
-#define PROC_STACK_PAGE_COUNT ((PROC_STACK_SIZE + PAGE_SIZE - 1) / PAGE_SIZE)
 
 static pcb_t processes[MAX_PROCESS_COUNT];
 
 static uint64_t kernel_phys_addr(uint64_t va) {
     return va & PA_MASK;
-}
-
-static uint8_t *alloc_kernel_stack(void) {
-    uint8_t *stack = alloc_page();
-    if (stack == NULL) {
-        return NULL;
-    }
-
-    for (uint64_t i = 1; i < PROC_STACK_PAGE_COUNT; i++) {
-        uint8_t *page = alloc_page();
-        if (page == NULL || page != stack + i * PAGE_SIZE) {
-            return NULL;
-        }
-    }
-
-    return stack;
 }
 
 static void __attribute__((noreturn)) process_first_run(void) {
@@ -170,19 +152,23 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     new_proc->exit_code = 0;
     new_proc->name = NULL;
 
-    // Get trap_frame with thread context
-    uint8_t *kernel_stack = alloc_kernel_stack();
-    if (kernel_stack == NULL) {
-        uart_puts("ERROR: failed to allocate process kernel stack");
+    uint64_t *user_l0 = initialize_user_page_table();
+    if (user_l0 == NULL) {
+        uart_puts("ERROR: failed to initialize user page table");
         return -1;
     }
 
-    new_proc->kernel_stack_base = (uint64_t)(uintptr_t)kernel_stack;
-    new_proc->kernel_stack_top = new_proc->kernel_stack_base +
-                                 PROC_STACK_PAGE_COUNT * PAGE_SIZE;
+    uint64_t kernel_stack_page_va = PROC_KERNEL_STACK_TOP - PAGE_SIZE;
+    uint8_t *kernel_stack_page = pt_seed_kernel_page(user_l0,
+                                                     kernel_stack_page_va);
+    if (kernel_stack_page == NULL) {
+        uart_puts("ERROR: failed to seed process kernel stack");
+        return -1;
+    }
 
+    uint64_t frame_va = PROC_KERNEL_STACK_TOP - sizeof(struct trap_frame);
     struct trap_frame *frame = (struct trap_frame *)(uintptr_t)
-        (new_proc->kernel_stack_top - sizeof(struct trap_frame));
+        (kernel_stack_page + (frame_va - kernel_stack_page_va));
 
     // Initialize all thread registers to 0.
     for (unsigned i = 0; i < 31; i++) {
@@ -202,7 +188,7 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     frame->intid = 0;
 
     // Initialize rest of tcb
-    new_proc->ctx.x19 = (uint64_t)(uintptr_t)frame;
+    new_proc->ctx.x19 = frame_va;
     new_proc->ctx.x20 = 0;
     new_proc->ctx.x21 = 0;
     new_proc->ctx.x22 = 0;
@@ -214,12 +200,7 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     new_proc->ctx.x28 = 0;
     new_proc->ctx.x29 = 0;
     new_proc->ctx.x30 = (uint64_t)(uintptr_t)process_first_run;
-    new_proc->ctx.sp = (uint64_t)(uintptr_t)frame;
-    uint64_t *user_l0 = initialize_user_page_table();
-    if (user_l0 == NULL) {
-        uart_puts("ERROR: failed to initialize user page table");
-        return -1;
-    }
+    new_proc->ctx.sp = frame_va;
     new_proc->ctx.ttbr0_el1 = kernel_phys_addr((uint64_t)(uintptr_t)user_l0);
 
     add_task_to_scheduler(new_proc);

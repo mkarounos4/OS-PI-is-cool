@@ -1,4 +1,4 @@
-#include "malloc.h"
+#include "kmalloc.h"
 
 #include "uart/uart.h"
 
@@ -14,7 +14,7 @@ typedef struct {
 
 
 /* Memset and Memcpy */
-void *memset(void *ptr, int value, size_t num)
+static void *kmalloc_memset(void *ptr, int value, size_t num)
 {
     unsigned char *p = ptr;
     while (num--)
@@ -22,7 +22,7 @@ void *memset(void *ptr, int value, size_t num)
     return ptr;
 }
 
-void *memcpy(void *dst, const void *src, size_t num)
+void *kmalloc_memcpy(void *dst, const void *src, size_t num)
 {
     unsigned char *d = dst;
     const unsigned char *s = src;
@@ -101,7 +101,7 @@ typedef struct free_block {
     struct free_block *next;
 } free_block;
 
-void insert_free(void *ptr) {
+static void insert_free(void *ptr) {
     // create free block struct at ptr
     free_block *block = (free_block *)((char *)ptr - WS);
     size_t size = *(size_t *)((char *)ptr - WS) & ~0xF;
@@ -125,7 +125,7 @@ void insert_free(void *ptr) {
     *list = block;
 }
 
-void *get_free_list(size_t size) {
+static void *get_free_list(size_t size) {
     free_block *fp = NULL; // fp = free_ptr
     if (size <= 16 && seg_lists_ptr->one_two_free_ptr != NULL) {
 	fp = (free_block *)seg_lists_ptr->one_two_free_ptr;
@@ -166,7 +166,7 @@ void *get_free_list(size_t size) {
     }
 }
  
-void remove_free(void *ptr, size_t size){
+static void remove_free(void *ptr, size_t size){
     // create free block struct at ptr
     free_block *block = (free_block *)((char *)ptr - WS);
 
@@ -194,7 +194,7 @@ void remove_free(void *ptr, size_t size){
     }
 }
 
-void *coalesce(void *ptr) {
+static void *coalesce(void *ptr) {
     size_t size = *(size_t *)((char *)ptr - WS) & ~0xF;
     
     // check footer of previous
@@ -235,7 +235,7 @@ void *coalesce(void *ptr) {
     return ptr;
 }
 
-void initialize_free(void *ptr, size_t size) {
+static void initialize_free(void *ptr, size_t size) {
     // store required information in free block: header (8), prev (8), next (8), open space (?), footer (8)
     *(size_t *)ptr = (size | 0); // create header
     *(size_t *)((char *)ptr + size - WS) = (size | 0); // create footer
@@ -246,7 +246,7 @@ void initialize_free(void *ptr, size_t size) {
     insert_free(ptr); // add to desired free list   
 }
 
-void *extend_heap(size_t size) {
+static void *extend_heap(size_t size) {
     size = align(size); // ensure size alignment
 
     // extend heap
@@ -271,7 +271,7 @@ bool kmm_init(void)
     if ( seg_lists_ptr == (void *)-1 ) {
 	return false;
     }
-    memset(seg_lists_ptr, 0, sizeof(Seg_Lists));
+    kmalloc_memset(seg_lists_ptr, 0, sizeof(Seg_Lists));
 
     // allocate 3 words (24 bytes) for intial prologue (16) and eqpilogue (8)
     heap_ptr = kmem_sbrk(3 * WS);
@@ -291,7 +291,7 @@ bool kmm_init(void)
     return true;
 }
 
-void *get_allocation(size_t size) {
+static void *get_allocation(size_t size) {
     void *ptr = get_free_list(size);
     if (ptr) {
 	// create free block struct at ptr

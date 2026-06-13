@@ -30,7 +30,10 @@ context_switch:
     ldp x27, x28, [x1, #CPU_CTX_X27]
     ldp x29, x30, [x1, #CPU_CTX_X29]
     ldr x2, [x1, #CPU_CTX_TTBR0_EL1]
+    dsb ishst
     msr ttbr0_el1, x2
+    tlbi vmalle1is
+    dsb ish
     isb
     ldr x2, [x1, #CPU_CTX_SP]
     mov sp, x2
@@ -45,7 +48,10 @@ context_switch_to:
     ldp x27, x28, [x0, #CPU_CTX_X27]
     ldp x29, x30, [x0, #CPU_CTX_X29]
     ldr x2, [x0, #CPU_CTX_TTBR0_EL1]
+    dsb ishst
     msr ttbr0_el1, x2
+    tlbi vmalle1is
+    dsb ish
     isb
     ldr x2, [x0, #CPU_CTX_SP]
     mov sp, x2

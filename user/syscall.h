@@ -45,7 +45,7 @@ long exit(int code);
 long getpid(void);
 long spawn(void *(*func)(void *), void *arg);
 long waitpid(pid_t pid, int *status, uint32_t flags);
-long sbrk(int64_t increment);
+long sbrk(uint64_t old_brk, uint64_t new_brk);
 long kill(pid_t pid, int signal);
 long block_until_event(uint32_t events);
 void putstr(const char *s);

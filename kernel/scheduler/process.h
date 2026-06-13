@@ -3,15 +3,11 @@
 #include <stdint.h>
 
 #include "data-structs/vec.h"
-#include "memory/malloc.h"
 #include "traps/traps.h"
 
 typedef int32_t pid_t;
 
 #define MAX_PROCESS_COUNT 16
-#define PROC_STACK_SIZE 8192u
-#define PROC_HEAP_SIZE 16384u
-
 #define WNOHANG 1
 #define WUNTRACED 2
 #define WCONTINUED 4
@@ -48,8 +44,6 @@ typedef struct pcb_st {
 
     // Thread parameters (implementation simplified to one thread per process)
     struct cpu_context ctx;
-    uint64_t kernel_stack_base;
-    uint64_t kernel_stack_top;
 
     uint8_t wait_stop_pending;
     uint8_t wait_cont_pending;

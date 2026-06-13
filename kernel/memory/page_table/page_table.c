@@ -6,10 +6,13 @@
 
 #define PAGE_TABLE_ENTRIES 512ULL
 #define PAGE_MASK         (PAGE_SIZE - 1ULL)
+#define L1_BLOCK_SIZE     UINT64_C(0x40000000)
 #define PA_MASK           UINT64_C(0x0000ffffffffffff)
 #define PTE_ADDR_MASK     UINT64_C(0x0000fffffffff000)
+#define BLOCK_ADDR_MASK   UINT64_C(0x0000ffffc0000000)
 
 #define DESC_VALID        (1ULL << 0)
+#define DESC_BLOCK        (0ULL << 1)
 #define DESC_TABLE        (1ULL << 1)
 #define DESC_PAGE         (1ULL << 1)
 
@@ -30,6 +33,11 @@
 #define ATTR_USER_RX      (ATTR_NORMAL | PTE_AP_EL0_RO | PTE_SH_INNER | PTE_AF | PTE_PXN)
 #define ATTR_USER_RO      (ATTR_USER_RX | PTE_UXN)
 #define ATTR_USER_RW      (ATTR_NORMAL | PTE_AP_EL0_RW | PTE_SH_INNER | PTE_AF | PTE_PXN | PTE_UXN)
+#define ATTR_DEVICE       (PTE_ATTRINDX(0) | PTE_AP_EL1_RW | PTE_AF | PTE_PXN | PTE_UXN)
+
+#define DEVICE_BLOCK_QEMU_LOCAL UINT64_C(0x40000000)
+#define DEVICE_BLOCK_RPI_GIC    UINT64_C(0x1040000000)
+#define DEVICE_BLOCK_RPI5_RP1   UINT64_C(0x1c00000000)
 
 extern uint8_t __text_start[];
 extern uint8_t __text_end[];
@@ -155,6 +163,30 @@ uint8_t pt_map_page(uint64_t *l0, uint64_t va, uint64_t pa, uint64_t attrs) {
     return 1;
 }
 
+static uint8_t pt_map_l1_block(uint64_t *l0, uint64_t va, uint64_t pa,
+                               uint64_t attrs) {
+    if (l0 == NULL || (va & (L1_BLOCK_SIZE - 1ULL)) != 0 ||
+        (pa & (L1_BLOCK_SIZE - 1ULL)) != 0) {
+        return 0;
+    }
+
+    uint64_t l0_index = (va >> 39) & 0x1ffULL;
+    uint64_t l1_index = (va >> 30) & 0x1ffULL;
+
+    uint64_t *l1 = next_table(l0, l0_index);
+    if (l1 == NULL) {
+        return 0;
+    }
+
+    if ((l1[l1_index] & DESC_VALID) != 0) {
+        return 0;
+    }
+
+    l1[l1_index] = (pa & BLOCK_ADDR_MASK) | (attrs & ~BLOCK_ADDR_MASK) |
+                   DESC_VALID | DESC_BLOCK;
+    return 1;
+}
+
 uint8_t pt_map_range(uint64_t *l0, uint64_t va_start, uint64_t pa_start,
                      uint64_t size, uint64_t attrs) {
     if (size == 0) {
@@ -176,15 +208,34 @@ uint8_t pt_map_range(uint64_t *l0, uint64_t va_start, uint64_t pa_start,
     return 1;
 }
 
-uint8_t pt_walk(uint64_t *l0, uint64_t va) {
+static void *pt_map_new_page(uint64_t *l0, uint64_t va, uint64_t attrs) {
     void *page = alloc_page();
     if (page == NULL) {
-        return 0;
+        return NULL;
     }
 
-    return pt_map_page(l0, align_down(va),
-                       kernel_phys_addr((uint64_t)(uintptr_t)page),
-                       ATTR_USER_RW);
+    if (!pt_map_page(l0, align_down(va),
+                     kernel_phys_addr((uint64_t)(uintptr_t)page), attrs)) {
+        return NULL;
+    }
+
+    return page;
+}
+
+uint8_t pt_walk(uint64_t *l0, uint64_t va) {
+    return pt_walk_user_page(l0, va);
+}
+
+uint8_t pt_walk_user_page(uint64_t *l0, uint64_t va) {
+    return pt_map_new_page(l0, va, ATTR_USER_RW) != NULL;
+}
+
+uint8_t pt_walk_kernel_page(uint64_t *l0, uint64_t va) {
+    return pt_map_new_page(l0, va, ATTR_KERNEL_RW) != NULL;
+}
+
+void *pt_seed_kernel_page(uint64_t *l0, uint64_t va) {
+    return pt_map_new_page(l0, va, ATTR_KERNEL_RW);
 }
 
 static uint8_t map_kernel_section(uint64_t *l0, uint8_t *va_start_ptr,
@@ -196,20 +247,27 @@ static uint8_t map_kernel_section(uint64_t *l0, uint8_t *va_start_ptr,
     return pt_map_range(l0, va_start, pa_start, va_end - va_start, attrs);
 }
 
-static uint8_t map_allocated_page_tables(uint64_t *l0) {
+static uint8_t map_page_pool(uint64_t *l0) {
     uint64_t pool_start_va = (uint64_t)(uintptr_t)__kernel_page_pool_start;
     uint64_t pool_start_pa = kernel_phys_addr(pool_start_va);
-    uint64_t mapped_end = 0;
+    uint64_t ram_end_va = (uint64_t)(uintptr_t)__RAM_end;
 
-    while (mapped_end != next_free_page) {
-        mapped_end = next_free_page;
-        if (!pt_map_range(l0, pool_start_va, pool_start_pa,
-                          mapped_end - pool_start_va, ATTR_KERNEL_RW)) {
-            return 0;
-        }
+    if (ram_end_va <= pool_start_va) {
+        return 1;
     }
 
-    return 1;
+    return pt_map_range(l0, pool_start_va, pool_start_pa,
+                        ram_end_va - pool_start_va, ATTR_KERNEL_RW);
+}
+
+static uint8_t map_device_block(uint64_t *l0, uint64_t pa) {
+    return pt_map_l1_block(l0, kernel_direct_map_va(pa), pa, ATTR_DEVICE);
+}
+
+static uint8_t map_kernel_devices(uint64_t *l0) {
+    return map_device_block(l0, DEVICE_BLOCK_QEMU_LOCAL) &&
+           map_device_block(l0, DEVICE_BLOCK_RPI_GIC) &&
+           map_device_block(l0, DEVICE_BLOCK_RPI5_RP1);
 }
 
 static uint8_t map_embedded_user_range(uint64_t *l0, uint64_t va_start,
@@ -308,7 +366,11 @@ uint64_t *initialize_kernel_page_table(void) {
         return NULL;
     }
 
-    if (!map_allocated_page_tables(l0)) {
+    if (!map_page_pool(l0)) {
+        return NULL;
+    }
+
+    if (!map_kernel_devices(l0)) {
         return NULL;
     }
 
@@ -341,16 +403,6 @@ uint64_t *initialize_user_page_table(void) {
     }
 
     if (!map_private_user_range(l0, USER_BSS_START, USER_BSS_END, NULL)) {
-        return NULL;
-    }
-
-    if (!map_private_user_range(l0, USER_HEAP_START,
-                                USER_HEAP_START + USER_HEAP_SIZE, NULL)) {
-        return NULL;
-    }
-
-    if (!map_private_user_range(l0, USER_STACK_TOP - USER_STACK_SIZE,
-                                USER_STACK_TOP, NULL)) {
         return NULL;
     }
 

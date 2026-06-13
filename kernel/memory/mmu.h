@@ -27,3 +27,4 @@ void handle_instruction_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t
 void handle_data_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t esr);
 void initialize_vm(void);
 void initialize_mmu(uint64_t ttbr0_el1, uint64_t ttbr1_el1);
+void install_kernel_page_table(void);

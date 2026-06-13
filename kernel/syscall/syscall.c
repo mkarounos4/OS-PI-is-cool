@@ -7,6 +7,7 @@
 #include "uart/uart.h"
 #include "scheduler/scheduler.h"
 #include "signals/signals.h"
+#include "memory/page_table/page_table.h"
 
 #define SYS_WRITE_CONSOLE_MAX 1024u
 #define SYS_USER_PTR_MIN      UINT64_C(0x1000)
@@ -82,6 +83,26 @@ static long s_block_until_event(uint32_t event) {
     return 0;
 }
 
+static long s_sbrk_validate(uint64_t old_brk, uint64_t new_brk) {
+    if (get_curr_process() == NULL) {
+        return SYS_EINVAL;
+    }
+
+    if (old_brk > new_brk) {
+        return SYS_EINVAL;
+    }
+
+    if (old_brk < USER_HEAP_START) {
+        return SYS_EINVAL;
+    }
+
+    if (new_brk > USER_HEAP_START + USER_HEAP_SIZE) {
+        return SYS_EINVAL;
+    }
+
+    return 0;
+}
+
 struct trap_frame *syscall_dispatch(struct trap_frame *frame) {
     uint64_t syscall_number = frame->regs[8];
     long ret = SYS_ENOSYS;
@@ -122,6 +143,9 @@ struct trap_frame *syscall_dispatch(struct trap_frame *frame) {
         ret = s_waitpid_impl((pid_t)frame->regs[0],
                              (int *)(uintptr_t)frame->regs[1],
                              (int32_t)frame->regs[2]);
+        break;
+    case S_SBRK:
+        ret = s_sbrk_validate(frame->regs[0], frame->regs[1]);
         break;
     case S_KILL:
         ret = s_kill((pid_t)frame->regs[0], (int)(uintptr_t)frame->regs[1]);

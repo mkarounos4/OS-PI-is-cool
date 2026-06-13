@@ -33,8 +33,8 @@ long waitpid(pid_t pid, int *status, uint32_t flags) {
     return sys_call3(S_WAITPID, pid, (long) status, flags);
 }
 
-long sbrk(int64_t increment) {
-    return sys_call1(S_SBRK, increment);
+long sbrk(uint64_t old_brk, uint64_t new_brk) {
+    return sys_call2(S_SBRK, old_brk, new_brk);
 }
 
 long kill(pid_t pid, int signal) {

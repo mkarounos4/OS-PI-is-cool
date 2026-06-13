@@ -4,15 +4,12 @@
 #include "scheduler/scheduler.h"
 #include "timer/timer.h"
 #include "traps/traps.h"
-#include "memory/malloc.h"
+#include "memory/kmalloc.h"
 #include "memory/page_table/page_table.h"
 #include "uart/uart.h"
 #include "syscall/syscall.h"
 #include "signals/signals.h"
 #include "memory/mmu.h"
-
-extern uint8_t __kernel_heap_start[];
-extern uint8_t __kernel_heap_end[];
 
 void kernel_main(void) {
     uart_init();
@@ -32,7 +29,11 @@ void kernel_main(void) {
     irq_enable();
     uart_puts("[boot] irq_enable done\n");
 
-    mem_init(__kernel_heap_start, __kernel_heap_end);
+    install_kernel_page_table();
+    uart_puts("[boot] final kernel page table installed\n");
+
+    kmem_init((void *)(uintptr_t)KERNEL_HEAP_START,
+              (void *)(uintptr_t)(KERNEL_HEAP_START + KERNEL_HEAP_SIZE));
     uart_puts("[boot] kernel heap ready\n");
     uart_puts("[boot] virtual memory enabled\n");
 

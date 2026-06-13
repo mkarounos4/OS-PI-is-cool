@@ -253,7 +253,9 @@ static void __attribute__((noreturn)) exception_halt(const char *reason, const s
     uart_puts("reason: ");
     uart_puts(reason);
     uart_puts("\n");
-    trap_frame_dump(frame);
+    if (frame != NULL) {
+        trap_frame_dump(frame);
+    }
 
     while (1) {
         asm volatile("wfe");

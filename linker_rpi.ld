@@ -42,6 +42,8 @@ SECTIONS
     .text : AT(ADDR(.text) - KERNEL_VA_BASE) {
         *(.text*)
     } :text
+
+    . = ALIGN(4096);
     __text_end = .;
     __text_start_phys = LOADADDR(.text);
     __text_end_phys = LOADADDR(.text) + SIZEOF(.text);
@@ -91,15 +93,6 @@ SECTIONS
     } :data
     _stack_bottom_phys = LOADADDR(.stack);
     _stack_top_phys = LOADADDR(.stack) + SIZEOF(.stack);
-
-    . = ALIGN(4096);
-    .heap (NOLOAD) : AT(ADDR(.heap) - KERNEL_VA_BASE) {
-        __kernel_heap_start = .;
-        . += 0x100000;
-        __kernel_heap_end = .;
-    } :data
-    __kernel_heap_start_phys = LOADADDR(.heap);
-    __kernel_heap_end_phys = LOADADDR(.heap) + SIZEOF(.heap);
 
     . = ALIGN(4096);
     __kernel_end = .;

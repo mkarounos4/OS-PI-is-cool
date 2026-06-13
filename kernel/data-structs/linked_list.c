@@ -1,10 +1,12 @@
 #include "linked_list.h"
 
+#include "memory/kmalloc.h"
+
 // Creates and returns a new list
 list_t* list_create()
 {
 	/* IMPLEMENT THIS IF YOU WANT TO USE LINKED LISTS */
-	list_t *list = malloc(sizeof(list_t));
+	list_t *list = kmalloc(sizeof(list_t));
 	list->head = NULL;
         return list; 
 }
@@ -13,7 +15,7 @@ list_t* list_create()
 void node_destroy(list_node_t *node) {
 	while (node != NULL) {
 		list_node_t *next = node->next;
-		free(node);
+		kfree(node);
 		node = next;
 	}
 }
@@ -24,7 +26,7 @@ void list_destroy(list_t* list)
     	/* IMPLEMENT THIS IF YOU WANT TO USE LINKED LISTS */
 	if (list == NULL) return;
 	node_destroy(list->head);
-	free(list);
+	kfree(list);
 	return;
     
 }
@@ -88,7 +90,7 @@ void list_insert(list_t* list, void* data)
 {
     	/* IMPLEMENT THIS IF YOU WANT TO USE LINKED LISTS */
 	if (list->head == NULL) {
-		list->head = malloc(sizeof(list_node_t));
+		list->head = kmalloc(sizeof(list_node_t));
 		list->head->prev = NULL;
 		list->head->next = NULL;
 		list->head->data = data;
@@ -97,7 +99,7 @@ void list_insert(list_t* list, void* data)
 		while (current->next != NULL) {
 			current = current->next;
 		}
-		current->next = malloc(sizeof(list_node_t));
+		current->next = kmalloc(sizeof(list_node_t));
 		current->next->prev = current;
 		current->next->next = NULL;
 		current->next->data = data;
@@ -109,16 +111,16 @@ void list_remove(list_t* list, list_node_t* node)
 {
 	/* IMPLEMENT THIS IF YOU WANT TO USE LINKED LISTS */
 	if (node->prev != NULL) {
-        	node->prev->next = node->next;
-    	} else {
-        	list->head = node->next;
-    	}
+		node->prev->next = node->next;
+	} else {
+		list->head = node->next;
+	}
 
-    	if (node->next != NULL) {
-        	node->next->prev = node->prev;
-    	}
+	if (node->next != NULL) {
+		node->next->prev = node->prev;
+	}
 
-    	free(node);
+	kfree(node);
 }
 
 // Executes a function for each element in the list

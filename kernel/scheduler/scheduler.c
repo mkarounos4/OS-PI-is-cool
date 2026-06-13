@@ -7,7 +7,7 @@
 #include "syscall/syscall.h"
 #include "data-structs/vec.h"
 #include "memory/page_table/page_table.h"
-#include "memory/malloc.h"
+#include "memory/kmalloc.h"
 
 #define SCHEDULER_QUANTUM_MS 1000u
 #define PA_MASK UINT64_C(0x0000ffffffffffff)
@@ -45,7 +45,7 @@ static void add_sched_queue_node(pcb_t *pcb) {
         return;
     }
 
-    struct sched_task_node *new_node = malloc(sizeof(struct sched_task_node));
+    struct sched_task_node *new_node = kmalloc(sizeof(struct sched_task_node));
     if (new_node == NULL) {
         uart_puts("ERROR: failed to allocate scheduler queue node\n");
         return;
@@ -79,7 +79,7 @@ static pcb_t *pop_sched_queue() {
     }
 
     pcb_t *ret = task_node->pcb;
-    free(task_node);
+    kfree(task_node);
     sched_queue_size--;
     if (ret->state != PROC_READY_STATE) {
         return pop_sched_queue();
