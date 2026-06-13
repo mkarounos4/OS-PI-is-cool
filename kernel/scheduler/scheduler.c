@@ -6,6 +6,7 @@
 #include "uart/uart.h"
 #include "syscall/syscall.h"
 #include "data-structs/vec.h"
+#include "memory/page_table/page_table.h"
 #include "memory/kernel_mem.h"
 #include "memory/malloc.h"
 #include "syscall/u_syscall.h"
@@ -116,8 +117,7 @@ void scheduler_init(void) {
     idle_ctx.x29 = 0;
     idle_ctx.x30 = (uint64_t)(uintptr_t)idle_task_fn;
     idle_ctx.sp = 8192ul;
-    idle_ctx.ttbr0_el1 = (uint64_t) alloc_page();
-    *idle_ctx.ttbr0_el1 |= 0xFFFF << 48;
+    idle_ctx.ttbr0_el1 = (uint64_t)(uintptr_t)initialize_user_page_table();
 }
 
 // Starts execution at thread 0. Does not return.

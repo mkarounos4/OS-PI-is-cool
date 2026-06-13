@@ -1,5 +1,12 @@
 #include "mmu.h"
 
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "memory/page_table/page_table.h"
+#include "scheduler/scheduler.h"
+#include "traps/traps.h"
+
 #define TCR_T0SZ_48BIT      (16ULL << 0)
 #define TCR_IRGN0_WB_RA_WA  (1ULL << 8)
 #define TCR_ORGN0_WB_RA_WA  (1ULL << 10)
@@ -19,12 +26,19 @@ static uint64_t ttbr1_el1;
 extern void initialize_mmu_asm(uint64_t ttbr0_el1, uint64_t ttbr1_el1,
                                uint64_t tcr_el1, uint64_t mair_el1);
 
-void intialize_vm() {
-    ttbr1_el1 = (uint64_t) alloc_page();
-    initialize_mmu();
+void initialize_vm(void) {
+    uint64_t *kernel_l0 = initialize_kernel_page_table();
+    uint64_t *boot_user_l0 = initialize_user_page_table();
+
+    if (kernel_l0 == NULL || boot_user_l0 == NULL) {
+        fatal_exception("Failed to initialize VM page tables");
+    }
+
+    ttbr1_el1 = (uint64_t)(uintptr_t)kernel_l0;
+    initialize_mmu((uint64_t)(uintptr_t)boot_user_l0, ttbr1_el1);
 }
 
-void initialize_mmu() {
+void initialize_mmu(uint64_t ttbr0_el1, uint64_t ttbr1_el1_value) {
     uint64_t mair_el1 = 0x000000000000ff00;
 
     uint64_t tcr =
@@ -42,7 +56,7 @@ void initialize_mmu() {
 
         TCR_IPS_36BIT;
 
-    initialize_mmu_asm(0, ttbr1_el1, tcr, mair_el1);
+    initialize_mmu_asm(ttbr0_el1, ttbr1_el1_value, tcr, mair_el1);
 }
 
 void handle_instruction_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t esr) {
@@ -50,19 +64,17 @@ void handle_instruction_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t
         fatal_exception("Instruction Abort: Address size fault");
     } else if (fsc < TRANSLATION_FAULT + 4) {
         fatal_exception("Instruction Abort: translation fault");
-        break;
     } else if (fsc < ACCESS_FLAG_FAULT + 4) {
         fatal_exception("Instruction Abort: access flag set to 0");
     } else if (fsc < PERMISSION_FAULT + 4) {
         fatal_exception("Instruction Abort: Permission fault");
-        break;
     } else if (fsc == SYNC_EXT_ABORT_NON_WALK) {
         fatal_exception("Instruction Abort: synchronous external abort");
-    } else if (fsc >= SYNC_EXT_ABORT_WALK && fs < SYNC_EXT_ABORT_WALK + 4) {
+    } else if (fsc >= SYNC_EXT_ABORT_WALK && fsc < SYNC_EXT_ABORT_WALK + 4) {
         fatal_exception("Synchronous external abort on page walk");
     } else if (fsc == SYNC_PARITY_ECC_ERR_ACCESS) {
         fatal_exception("Synchronous parity ECC ERR access");
-    } else if (fsc >= SYNC_PARITY_ECC_ERR_WALK && fs < SYNC_PARITY_ECC_ERR_WALK + 4) {
+    } else if (fsc >= SYNC_PARITY_ECC_ERR_WALK && fsc < SYNC_PARITY_ECC_ERR_WALK + 4) {
         fatal_exception("Synchronous parity ECC ERR on Page Walk");
     } else if (fsc == TLB_CONFLICT_ABORT) {
         fatal_exception("Instruction Abort: TLB Conflict Abort");
@@ -101,13 +113,12 @@ void handle_data_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t esr) {
                 fatal_exception("Data Abort: Translation fault user address with no process");
             }
 
-            tablel_base_addr = curr_proc->ctx.ttbr0_el1;
+            table_base_addr = curr_proc->ctx.ttbr0_el1;
         }
 
         if (!pt_walk(table_base_addr, far)) {
             fatal_exception("Data Abort: Translation Fault, failed to allocate new page");
         }
-        break;
     } else if (fsc < ACCESS_FLAG_FAULT + 4) {
         if (!far_valid) {
             fatal_exception("Data Abort: Access Flag = 0 with Invalid FAR");
@@ -116,16 +127,15 @@ void handle_data_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t esr) {
         fatal_exception("Data Abort: access flag set to 0");
     } else if (fsc < PERMISSION_FAULT + 4) {
         fatal_exception("Data Abort: Permission fault");
-        break;
     } else if (fsc == SYNC_EXT_ABORT_NON_WALK) {
         fatal_exception("Data Abort: synchronous external abort");
     } else if (fsc == SYNC_TAG_CHECK_FAULT) {
         fatal_exception("Data Abort: Synchronous tag check fault");
-    } else if (fsc >= SYNC_EXT_ABORT_WALK && fs < SYNC_EXT_ABORT_WALK + 4) {
+    } else if (fsc >= SYNC_EXT_ABORT_WALK && fsc < SYNC_EXT_ABORT_WALK + 4) {
         fatal_exception("Data Abort: Synchronous external abort on page walk");
     } else if (fsc == SYNC_PARITY_ECC_ERR_ACCESS) {
         fatal_exception("Data Abort: Synchronous parity ECC ERR access");
-    } else if (fsc >= SYNC_PARITY_ECC_ERR_WALK && fs < SYNC_PARITY_ECC_ERR_WALK + 4) {
+    } else if (fsc >= SYNC_PARITY_ECC_ERR_WALK && fsc < SYNC_PARITY_ECC_ERR_WALK + 4) {
         fatal_exception("Synchronous parity ECC ERR on Page Walk");
     } else if (fsc == ALIGNMENT_FAULT) {
         fatal_exception("Data Abort: misaligned data access");

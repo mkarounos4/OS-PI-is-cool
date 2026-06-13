@@ -80,4 +80,4 @@ uint64_t irq_save(void);
 // Restores previous interrupt mask state from flags returned by irq_save()
 void irq_restore(uint64_t flags);
 
-void fatal_exception(const char *reason, struct trap_frame *frame);
+void fatal_exception(const char *reason);

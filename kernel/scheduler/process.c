@@ -1,6 +1,7 @@
 #include "scheduler/scheduler.h"
 #include "memory/kernel_mem.h"
 #include "memory/malloc.h"
+#include "memory/page_table/page_table.h"
 #include "traps/traps.h"
 #include "syscall/u_syscall.h"
 #include "uart/uart.h"
@@ -203,10 +204,12 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     new_proc->ctx.x29 = 0;
     new_proc->ctx.x30 = (uint64_t)(uintptr_t)process_first_run;
     new_proc->ctx.sp = KERNEL_STACK_TOP - sizeof(struct trap_frame);
-    new_proc->ctx.ttbr0_el1 = (uint64_t) alloc_page();
-
-    // Put address space id at head of ttbr0_el1
-    *new_proc->ctx.ttbr0_el1 |= new_proc->pid << 48;
+    uint64_t *user_l0 = initialize_user_page_table();
+    if (user_l0 == NULL) {
+        uart_puts("ERROR: failed to initialize user page table");
+        return -1;
+    }
+    new_proc->ctx.ttbr0_el1 = (uint64_t)(uintptr_t)user_l0;
 
     add_task_to_scheduler(new_proc);
 
@@ -270,17 +273,6 @@ void processes_init() {
     }
 
     proc_create(init_process_entry, NULL, 0);
-}
-
-void *init_process_entry(void*) {
-    while (1) {
-        int ret = waitpid(-1, NULL, 0);
-        if (ret == ECHILD) {
-            block_until_event(BLOCK_UNTIL_NEW_CHILD);
-        }
-    }
-
-    return NULL;
 }
 
 // Add stop/terminate/block/unblock/continue process (but reqs signal mask and handlers)

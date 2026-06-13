@@ -1,7 +1,4 @@
-#include "scheduler/process.h"
-#include "syscall/u_syscall.h"
-#include "uart/uart.h"
-#include "signals/signals.h"
+#include "syscall.h"
 
 static void *process_c(void *args);
 
@@ -40,11 +37,11 @@ static void *process_b(void *args) {
 }
 
 void scheduler_orphan_test(void) {
-    uart_puts("[TEST] CREATING A\n");
+    write_console("[TEST] CREATING A\n");
     proc_create(process_a, NULL, 0);
-    uart_puts("[TEST] A CREATED. CREATING B:\n");
+    write_console("[TEST] A CREATED. CREATING B:\n");
     proc_create(process_b, NULL, 0);
-    uart_puts("PROCS CREATED\n");
+    write_console("PROCS CREATED\n");
 }
 
 static void *process_2(void *args) {
@@ -91,9 +88,4 @@ static void *process_1(void *args) {
     }
     write_console("[P1] Finished cleaning\n", 23);
     return NULL;
-}
-
-void waitpid_signal_test(void) {
-    uart_puts("[TEST] Creating processes\n");
-    proc_create(process_1, NULL, 0);
 }

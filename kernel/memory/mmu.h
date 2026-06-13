@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdint.h>
+
 #define ADDRESS_SIZE_FAULT 0x00
 #define TRANSLATION_FAULT 0x04
 #define ACCESS_FLAG_FAULT 0x08
@@ -11,8 +13,8 @@
 #define SYNC_PARITY_ECC_ERR_WALK 0x1c
 #define ALIGNMENT_FAULT 0x21
 #define TLB_CONFLICT_ABORT 0x30
-#define UNSUPORTED_ATOMIC_HW_UPDATE 0x31
-#define UNSUPPORTED_ATONIC_ACCESS 0x35
+#define UNSUPPORTED_ATOMIC_HW_UPDATE 0x31
+#define UNSUPPORTED_ATOMIC_ACCESS 0x35
 
 #define ESR_WNR   (1UL << 6)   // 1 = write, 0 = read
 #define ESR_S1PTW (1UL << 7)   // fault during stage-1 page-table walk
@@ -23,5 +25,5 @@
 
 void handle_instruction_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t esr);
 void handle_data_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t esr);
+void initialize_vm(void);
 void initialize_mmu(uint64_t ttbr0_el1, uint64_t ttbr1_el1);
-
