@@ -274,11 +274,11 @@ static struct trap_frame *handle_sync_exception(struct trap_frame *frame) {
             return frame;
         }
 
-        fatal_exception("brk exception", frame);
+        handle_fatal_exception("brk exception", frame);
 
     case ESR_EC_SVC64:
         if (frame->type != EXC_SYNC_LOWER_A64) {
-            fatal_exception("svc64 syscall invalid frame->type: not EXC_SYNC_LOWER_A64", frame);
+            handle_fatal_exception("svc64 syscall invalid frame->type: not EXC_SYNC_LOWER_A64", frame);
         }
 
         /*
@@ -300,16 +300,16 @@ static struct trap_frame *handle_sync_exception(struct trap_frame *frame) {
         handle_instruction_abort(fsc, frame->far, frame->elr, frame->esr);
         return frame;
     case ESR_EC_SYSREG_TRAP:
-        fatal_exception("system register access trap", frame);
+        handle_fatal_exception("system register access trap", frame);
 
     case ESR_EC_PC_ALIGN:
-        fatal_exception("pc alignment fault", frame);
+        handle_fatal_exception("pc alignment fault", frame);
 
     case ESR_EC_SP_ALIGN:
-        fatal_exception("sp alignment fault", frame);
+        handle_fatal_exception("sp alignment fault", frame);
 
     default:
-        fatal_exception(exception_class_name(ec), frame);
+        handle_fatal_exception(exception_class_name(ec), frame);
     }
 }
 
@@ -317,7 +317,7 @@ static struct trap_frame *handle_user_page_fault(struct trap_frame *frame) {
     
 }
 
-void fatal_exception(const char *reason, struct trap_frame *frame) {
+void handle_fatal_exception(const char *reason, struct trap_frame *frame) {
     pcb_t *proc = get_curr_process();
 
     uart_puts("\nFatal exception: ");
@@ -338,7 +338,7 @@ void fatal_exception(const char *reason, struct trap_frame *frame) {
 }
 
 void fatal_exception(const char *reason) {
-    fatal_exception(reason, NULL);
+    handle_fatal_exception(reason, NULL);
 }
 
 void exceptions_init(void) {
@@ -389,12 +389,12 @@ struct trap_frame *exception_dispatch(struct trap_frame *frame) {
     }
 
     if (is_serror_type(frame->type)) {
-        fatal_exception("serror exception", frame);
+        handle_fatal_exception("serror exception", frame);
     }
 
     if (is_sync_type(frame->type)) {
         return handle_sync_exception(frame);
     }
 
-    fatal_exception("unknown exception vector", frame);
+    handle_fatal_exception("unknown exception vector", frame);
 }

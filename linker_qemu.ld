@@ -40,13 +40,6 @@ SECTIONS
     . = ALIGN(16);
     _stack_top = .;
     
-    . = ALIGN(16);
-    .kernel_heap (NOLOAD) : {
-        __kernel_heap_start = .;
-        . += 0x100000; /* 1 MiB for now */
-        __kernel_heap_end = .;
-    }
-    
     __kernel_end = .;
 
 
@@ -59,4 +52,8 @@ SECTIONS
     . += 0x1000;
     __l3_table = .;
     . += 0x1000;
+
+    . = ALIGN(4096);
+    __kernel_page_pool_start = .;
+    __RAM_end = 0x80000000;
 }

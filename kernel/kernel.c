@@ -11,10 +11,9 @@
 #include "syscall/u_syscall.h"
 #include "signals/signals.h"
 #include "tests/tests.h"
-#include "memoory/mmu.h"
+#include "memory/mmu.h"
 
 void kernel_main(void) {
-    initialize_vm();
     uart_init();
     uart_puts("\nAArch64 bare-metal kernel entered\n");
 
@@ -37,10 +36,6 @@ void kernel_main(void) {
 
     scheduler_init();
     
-    // TESTS HERE
-    // scheduler_orphan_test();
-    waitpid_signal_test();
-
     scheduler_start();
 
     while (1) {
