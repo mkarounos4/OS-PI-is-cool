@@ -10,7 +10,7 @@ _start:
     cbnz x0, _hang
 
     // Load stack pointer
-    ldr  x0, =_stack_top
+    ldr  x0, =_stack_top_phys
     mov  sp, x0
 
     // Initialize other stack registers to 0
@@ -43,14 +43,14 @@ _start:
     eret
 
 _enter_el1:
-    ldr  x0, =_stack_top
+    ldr  x0, =_stack_top_phys
     mov  sp, x0
     mov  x29, xzr
     mov  x30, xzr
 
 _clear_bss:
-    ldr  x0, =__bss_start
-    ldr  x1, =__bss_end
+    ldr  x0, =__bss_start_phys
+    ldr  x1, =__bss_end_phys
 1:
     cmp  x0, x1
     b.hs 2f
@@ -58,7 +58,7 @@ _clear_bss:
     b    1b
 
 2:
-    bl kernel_main
+    bl initialize_vm
 
 _hang:
     wfe

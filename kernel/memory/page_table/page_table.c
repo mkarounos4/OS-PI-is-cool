@@ -4,6 +4,7 @@
 
 #define PAGE_TABLE_ENTRIES 512ULL
 #define PAGE_MASK         (PAGE_SIZE - 1ULL)
+#define PA_MASK           UINT64_C(0x0000ffffffffffff)
 #define PTE_ADDR_MASK     UINT64_C(0x0000fffffffff000)
 
 #define DESC_VALID        (1ULL << 0)
@@ -27,11 +28,18 @@
 
 extern uint8_t __text_start[];
 extern uint8_t __text_end[];
+extern uint8_t __text_start_phys[];
+extern uint8_t __text_end_phys[];
 extern uint8_t __rodata_start[];
 extern uint8_t __rodata_end[];
+extern uint8_t __rodata_start_phys[];
+extern uint8_t __rodata_end_phys[];
 extern uint8_t __data_start[];
 extern uint8_t __kernel_end[];
+extern uint8_t __data_start_phys[];
+extern uint8_t __kernel_end_phys[];
 extern uint8_t __kernel_page_pool_start[];
+extern uint8_t __kernel_page_pool_start_phys[];
 extern uint8_t __RAM_end[];
 
 typedef struct FreePage {
@@ -94,7 +102,11 @@ void free_page(void *page) {
 }
 
 uint64_t kernel_direct_map_va(uint64_t pa) {
-    return KERNEL_VA_BASE | (pa & UINT64_C(0x0000ffffffffffff));
+    return KERNEL_VA_BASE | (pa & PA_MASK);
+}
+
+static uint64_t kernel_phys_addr(uint64_t va) {
+    return va & PA_MASK;
 }
 
 static uint64_t table_desc(uint64_t *table) {
@@ -110,7 +122,7 @@ static uint64_t *next_table(uint64_t *table, uint64_t index) {
         table[index] = table_desc(next);
     }
 
-    return (uint64_t *)(uintptr_t)(table[index] & PTE_ADDR_MASK);
+    return (uint64_t *)(uintptr_t)kernel_direct_map_va(table[index] & PTE_ADDR_MASK);
 }
 
 uint8_t pt_map_page(uint64_t *l0, uint64_t va, uint64_t pa, uint64_t attrs) {
@@ -170,26 +182,30 @@ uint8_t pt_walk(uint64_t *l0, uint64_t va) {
         return 0;
     }
 
-    return pt_map_page(l0, align_down(va), (uint64_t)(uintptr_t)page, ATTR_USER_RW);
+    return pt_map_page(l0, align_down(va),
+                       kernel_phys_addr((uint64_t)(uintptr_t)page),
+                       ATTR_USER_RW);
 }
 
-static uint8_t map_kernel_section(uint64_t *l0, uint8_t *start, uint8_t *end,
+static uint8_t map_kernel_section(uint64_t *l0, uint8_t *va_start_ptr,
+                                  uint8_t *va_end_ptr, uint8_t *pa_start_ptr,
                                   uint64_t attrs) {
-    uint64_t pa_start = (uint64_t)(uintptr_t)start;
-    uint64_t pa_end = (uint64_t)(uintptr_t)end;
+    uint64_t va_start = (uint64_t)(uintptr_t)va_start_ptr;
+    uint64_t va_end = (uint64_t)(uintptr_t)va_end_ptr;
+    uint64_t pa_start = (uint64_t)(uintptr_t)pa_start_ptr;
 
-    return pt_map_range(l0, kernel_direct_map_va(pa_start), pa_start,
-                        pa_end - pa_start, attrs);
+    return pt_map_range(l0, va_start, pa_start, va_end - va_start, attrs);
 }
 
 static uint8_t map_allocated_page_tables(uint64_t *l0) {
-    uint64_t pool_start = (uint64_t)(uintptr_t)__kernel_page_pool_start;
+    uint64_t pool_start_va = (uint64_t)(uintptr_t)__kernel_page_pool_start;
+    uint64_t pool_start_pa = (uint64_t)(uintptr_t)__kernel_page_pool_start_phys;
     uint64_t mapped_end = 0;
 
     while (mapped_end != next_free_page) {
         mapped_end = next_free_page;
-        if (!pt_map_range(l0, kernel_direct_map_va(pool_start), pool_start,
-                          mapped_end - pool_start, ATTR_KERNEL_RW)) {
+        if (!pt_map_range(l0, pool_start_va, pool_start_pa,
+                          mapped_end - pool_start_va, ATTR_KERNEL_RW)) {
             return 0;
         }
     }
@@ -203,15 +219,18 @@ uint64_t *initialize_kernel_page_table(void) {
         return NULL;
     }
 
-    if (!map_kernel_section(l0, __text_start, __text_end, ATTR_KERNEL_RX)) {
+    if (!map_kernel_section(l0, __text_start, __text_end,
+                            __text_start_phys, ATTR_KERNEL_RX)) {
         return NULL;
     }
 
-    if (!map_kernel_section(l0, __rodata_start, __rodata_end, ATTR_KERNEL_RO)) {
+    if (!map_kernel_section(l0, __rodata_start, __rodata_end,
+                            __rodata_start_phys, ATTR_KERNEL_RO)) {
         return NULL;
     }
 
-    if (!map_kernel_section(l0, __data_start, __kernel_end, ATTR_KERNEL_RW)) {
+    if (!map_kernel_section(l0, __data_start, __kernel_end,
+                            __data_start_phys, ATTR_KERNEL_RW)) {
         return NULL;
     }
 

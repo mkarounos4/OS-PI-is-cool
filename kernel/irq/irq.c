@@ -2,6 +2,8 @@
 
 #include <stddef.h>
 
+#include "memory/page_table/page_table.h"
+
 #define GIC_MAX_INTIDS 1020u
 #define ARM_GENERIC_TIMER_INTID 30u
 #define IRQ_SPURIOUS_INTID 1023u
@@ -15,11 +17,11 @@ static struct irq_slot irq_table[GIC_MAX_INTIDS];
 static unsigned irq_depth;
 
 static inline void mmio_write32(uint64_t address, uint32_t value) {
-    *(volatile uint32_t *)(uintptr_t)address = value;
+    *(volatile uint32_t *)(uintptr_t)kernel_direct_map_va(address) = value;
 }
 
 static inline uint32_t mmio_read32(uint64_t address) {
-    return *(volatile uint32_t *)(uintptr_t)address;
+    return *(volatile uint32_t *)(uintptr_t)kernel_direct_map_va(address);
 }
 
 #if defined(PLATFORM_QEMU)

@@ -7,6 +7,30 @@
 #include "scheduler/scheduler.h"
 #include "traps/traps.h"
 
+#define BOOT_TEXT __attribute__((section(".text.boot")))
+#define BOOT_PAGE_TABLE __attribute__((section(".bss.boot_pgtables"), aligned(4096)))
+
+#define PAGE_TABLE_ENTRIES 512ULL
+#define L1_BLOCK_SIZE      UINT64_C(0x40000000)
+#define TABLE_ADDR_MASK    UINT64_C(0x0000fffffffff000)
+#define BLOCK_ADDR_MASK    UINT64_C(0x0000ffffc0000000)
+
+#define DESC_VALID         (1ULL << 0)
+#define DESC_TABLE         (1ULL << 1)
+#define DESC_BLOCK         (0ULL << 1)
+#define PTE_ATTR_NORMAL    (1ULL << 2)
+#define PTE_AF             (1ULL << 10)
+#define PTE_SH_INNER       (3ULL << 8)
+#define PTE_PXN            (1ULL << 53)
+#define PTE_UXN            (1ULL << 54)
+
+#define BOOT_NORMAL_BLOCK  (DESC_VALID | DESC_BLOCK | PTE_ATTR_NORMAL | PTE_AF | PTE_SH_INNER)
+#define BOOT_DEVICE_BLOCK  (DESC_VALID | DESC_BLOCK | PTE_AF | PTE_PXN | PTE_UXN)
+
+#define L1_INDEX_QEMU_LOCAL 1ULL
+#define L1_INDEX_RPI_GIC    65ULL
+#define L1_INDEX_RPI5_RP1   112ULL
+
 #define TCR_T0SZ_48BIT      (16ULL << 0)
 #define TCR_IRGN0_WB_RA_WA  (1ULL << 8)
 #define TCR_ORGN0_WB_RA_WA  (1ULL << 10)
@@ -19,26 +43,68 @@
 #define TCR_SH1_INNER       (3ULL << 28)
 #define TCR_TG1_4K          (2ULL << 30)
 
-#define TCR_IPS_36BIT       (1ULL << 32)
+#define TCR_IPS_40BIT       (2ULL << 32)
 
 static uint64_t ttbr1_el1;
+static uint64_t boot_ttbr0_l0[PAGE_TABLE_ENTRIES] BOOT_PAGE_TABLE;
+static uint64_t boot_ttbr0_l1[PAGE_TABLE_ENTRIES] BOOT_PAGE_TABLE;
+static uint64_t boot_ttbr1_l0[PAGE_TABLE_ENTRIES] BOOT_PAGE_TABLE;
+static uint64_t boot_ttbr1_l1[PAGE_TABLE_ENTRIES] BOOT_PAGE_TABLE;
 
 extern void initialize_mmu_asm(uint64_t ttbr0_el1, uint64_t ttbr1_el1,
                                uint64_t tcr_el1, uint64_t mair_el1);
 
-void initialize_vm(void) {
-    uint64_t *kernel_l0 = initialize_kernel_page_table();
-    uint64_t *boot_user_l0 = initialize_user_page_table();
-
-    if (kernel_l0 == NULL || boot_user_l0 == NULL) {
-        fatal_exception("Failed to initialize VM page tables");
+static void BOOT_TEXT zero_table(uint64_t *table) {
+    for (uint64_t i = 0; i < PAGE_TABLE_ENTRIES; i++) {
+        table[i] = 0;
     }
-
-    ttbr1_el1 = (uint64_t)(uintptr_t)kernel_l0;
-    initialize_mmu((uint64_t)(uintptr_t)boot_user_l0, ttbr1_el1);
 }
 
-void initialize_mmu(uint64_t ttbr0_el1, uint64_t ttbr1_el1_value) {
+static uint64_t BOOT_TEXT make_table_desc(uint64_t *table) {
+    return ((uint64_t)(uintptr_t)table & TABLE_ADDR_MASK) |
+           DESC_VALID | DESC_TABLE;
+}
+
+static uint64_t BOOT_TEXT make_l1_block_desc(uint64_t pa, uint64_t attrs) {
+    return (pa & BLOCK_ADDR_MASK) | attrs;
+}
+
+static void BOOT_TEXT map_l1_block(uint64_t *l1, uint64_t index,
+                                   uint64_t attrs) {
+    l1[index] = make_l1_block_desc(index * L1_BLOCK_SIZE, attrs);
+}
+
+static void BOOT_TEXT initialize_boot_tables(void) {
+    zero_table(boot_ttbr0_l0);
+    zero_table(boot_ttbr0_l1);
+    zero_table(boot_ttbr1_l0);
+    zero_table(boot_ttbr1_l1);
+
+    boot_ttbr0_l0[0] = make_table_desc(boot_ttbr0_l1);
+    boot_ttbr1_l0[0] = make_table_desc(boot_ttbr1_l1);
+
+    map_l1_block(boot_ttbr0_l1, 0, BOOT_NORMAL_BLOCK);
+    map_l1_block(boot_ttbr0_l1, L1_INDEX_QEMU_LOCAL, BOOT_DEVICE_BLOCK);
+    map_l1_block(boot_ttbr0_l1, L1_INDEX_RPI_GIC, BOOT_DEVICE_BLOCK);
+    map_l1_block(boot_ttbr0_l1, L1_INDEX_RPI5_RP1, BOOT_DEVICE_BLOCK);
+
+    map_l1_block(boot_ttbr1_l1, 0, BOOT_NORMAL_BLOCK);
+    map_l1_block(boot_ttbr1_l1, L1_INDEX_QEMU_LOCAL, BOOT_DEVICE_BLOCK);
+    map_l1_block(boot_ttbr1_l1, L1_INDEX_RPI_GIC, BOOT_DEVICE_BLOCK);
+    map_l1_block(boot_ttbr1_l1, L1_INDEX_RPI5_RP1, BOOT_DEVICE_BLOCK);
+}
+
+void BOOT_TEXT initialize_vm(void) {
+    initialize_boot_tables();
+    initialize_mmu((uint64_t)(uintptr_t)boot_ttbr0_l0,
+                   (uint64_t)(uintptr_t)boot_ttbr1_l0);
+
+    while (1) {
+        asm volatile("wfe");
+    }
+}
+
+void BOOT_TEXT initialize_mmu(uint64_t ttbr0_el1, uint64_t ttbr1_el1_value) {
     uint64_t mair_el1 = 0x000000000000ff00;
 
     uint64_t tcr =
@@ -54,7 +120,7 @@ void initialize_mmu(uint64_t ttbr0_el1, uint64_t ttbr1_el1_value) {
         TCR_SH1_INNER |
         TCR_TG1_4K |
 
-        TCR_IPS_36BIT;
+        TCR_IPS_40BIT;
 
     initialize_mmu_asm(ttbr0_el1, ttbr1_el1_value, tcr, mair_el1);
 }
@@ -78,7 +144,7 @@ void handle_instruction_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t
         fatal_exception("Synchronous parity ECC ERR on Page Walk");
     } else if (fsc == TLB_CONFLICT_ABORT) {
         fatal_exception("Instruction Abort: TLB Conflict Abort");
-    } else if (fsc == UNSUPORTED_ATOMIC_HW_UPDATE) {
+    } else if (fsc == UNSUPPORTED_ATOMIC_HW_UPDATE) {
         fatal_exception("Instruction Abort: Unsupported atomic hardware update");
     } else {
         fatal_exception("Instruction Abort: Unknown fsc.");
@@ -116,7 +182,7 @@ void handle_data_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t esr) {
             table_base_addr = curr_proc->ctx.ttbr0_el1;
         }
 
-        if (!pt_walk(table_base_addr, far)) {
+        if (!pt_walk((uint64_t *)(uintptr_t)table_base_addr, far)) {
             fatal_exception("Data Abort: Translation Fault, failed to allocate new page");
         }
     } else if (fsc < ACCESS_FLAG_FAULT + 4) {
