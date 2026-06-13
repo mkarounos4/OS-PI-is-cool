@@ -1,7 +1,7 @@
 // =============================================================
 //  boot.S  —  AArch64 bare-metal entry for Raspberry Pi 5
 // =============================================================
-.section .text.boot
+.section .text.boot.entry, "ax"
 .global _start
 _start:
     // Idle other 3 cores

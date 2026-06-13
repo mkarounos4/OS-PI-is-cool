@@ -3,6 +3,7 @@
 #include <stddef.h>
 
 #include "irq/irq.h"
+#include "memory/mmu.h"
 #include "scheduler/scheduler.h"
 #include "syscall/syscall.h"
 #include "uart/uart.h"
@@ -259,7 +260,7 @@ static void __attribute__((noreturn)) exception_halt(const char *reason, const s
     }
 }
 
-static struct trap_frame *handle_user_page_fault(struct trap_frame *frame, const char *reason);
+void handle_fatal_exception(const char *reason, struct trap_frame *frame);
 
 static struct trap_frame *handle_sync_exception(struct trap_frame *frame) {
     uint64_t ec = (frame->esr >> ESR_EC_SHIFT) & ESR_EC_MASK;
@@ -275,10 +276,12 @@ static struct trap_frame *handle_sync_exception(struct trap_frame *frame) {
         }
 
         handle_fatal_exception("brk exception", frame);
+        return frame;
 
     case ESR_EC_SVC64:
         if (frame->type != EXC_SYNC_LOWER_A64) {
             handle_fatal_exception("svc64 syscall invalid frame->type: not EXC_SYNC_LOWER_A64", frame);
+            return frame;
         }
 
         /*
@@ -301,20 +304,20 @@ static struct trap_frame *handle_sync_exception(struct trap_frame *frame) {
         return frame;
     case ESR_EC_SYSREG_TRAP:
         handle_fatal_exception("system register access trap", frame);
+        return frame;
 
     case ESR_EC_PC_ALIGN:
         handle_fatal_exception("pc alignment fault", frame);
+        return frame;
 
     case ESR_EC_SP_ALIGN:
         handle_fatal_exception("sp alignment fault", frame);
+        return frame;
 
     default:
         handle_fatal_exception(exception_class_name(ec), frame);
+        return frame;
     }
-}
-
-static struct trap_frame *handle_user_page_fault(struct trap_frame *frame) {
-    
 }
 
 void handle_fatal_exception(const char *reason, struct trap_frame *frame) {
@@ -390,6 +393,7 @@ struct trap_frame *exception_dispatch(struct trap_frame *frame) {
 
     if (is_serror_type(frame->type)) {
         handle_fatal_exception("serror exception", frame);
+        return frame;
     }
 
     if (is_sync_type(frame->type)) {
@@ -397,4 +401,5 @@ struct trap_frame *exception_dispatch(struct trap_frame *frame) {
     }
 
     handle_fatal_exception("unknown exception vector", frame);
+    return frame;
 }

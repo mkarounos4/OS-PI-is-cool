@@ -2,6 +2,8 @@
 
 #include <stddef.h>
 
+#include "user_image.h"
+
 #define PAGE_TABLE_ENTRIES 512ULL
 #define PAGE_MASK         (PAGE_SIZE - 1ULL)
 #define PA_MASK           UINT64_C(0x0000ffffffffffff)
@@ -15,6 +17,7 @@
 #define PTE_AP_EL1_RW     (0ULL << 6)
 #define PTE_AP_EL1_RO     (2ULL << 6)
 #define PTE_AP_EL0_RW     (1ULL << 6)
+#define PTE_AP_EL0_RO     (3ULL << 6)
 #define PTE_SH_INNER      (3ULL << 8)
 #define PTE_AF            (1ULL << 10)
 #define PTE_PXN           (1ULL << 53)
@@ -24,22 +27,19 @@
 #define ATTR_KERNEL_RX    (ATTR_NORMAL | PTE_AP_EL1_RO | PTE_SH_INNER | PTE_AF | PTE_UXN)
 #define ATTR_KERNEL_RO    (ATTR_KERNEL_RX | PTE_PXN)
 #define ATTR_KERNEL_RW    (ATTR_NORMAL | PTE_AP_EL1_RW | PTE_SH_INNER | PTE_AF | PTE_PXN | PTE_UXN)
+#define ATTR_USER_RX      (ATTR_NORMAL | PTE_AP_EL0_RO | PTE_SH_INNER | PTE_AF | PTE_PXN)
+#define ATTR_USER_RO      (ATTR_USER_RX | PTE_UXN)
 #define ATTR_USER_RW      (ATTR_NORMAL | PTE_AP_EL0_RW | PTE_SH_INNER | PTE_AF | PTE_PXN | PTE_UXN)
 
 extern uint8_t __text_start[];
 extern uint8_t __text_end[];
-extern uint8_t __text_start_phys[];
-extern uint8_t __text_end_phys[];
 extern uint8_t __rodata_start[];
 extern uint8_t __rodata_end[];
-extern uint8_t __rodata_start_phys[];
-extern uint8_t __rodata_end_phys[];
+extern uint8_t __user_image_start[];
+extern uint8_t __user_image_end[];
 extern uint8_t __data_start[];
 extern uint8_t __kernel_end[];
-extern uint8_t __data_start_phys[];
-extern uint8_t __kernel_end_phys[];
 extern uint8_t __kernel_page_pool_start[];
-extern uint8_t __kernel_page_pool_start_phys[];
 extern uint8_t __RAM_end[];
 
 typedef struct FreePage {
@@ -188,18 +188,17 @@ uint8_t pt_walk(uint64_t *l0, uint64_t va) {
 }
 
 static uint8_t map_kernel_section(uint64_t *l0, uint8_t *va_start_ptr,
-                                  uint8_t *va_end_ptr, uint8_t *pa_start_ptr,
-                                  uint64_t attrs) {
+                                  uint8_t *va_end_ptr, uint64_t attrs) {
     uint64_t va_start = (uint64_t)(uintptr_t)va_start_ptr;
     uint64_t va_end = (uint64_t)(uintptr_t)va_end_ptr;
-    uint64_t pa_start = (uint64_t)(uintptr_t)pa_start_ptr;
+    uint64_t pa_start = kernel_phys_addr(va_start);
 
     return pt_map_range(l0, va_start, pa_start, va_end - va_start, attrs);
 }
 
 static uint8_t map_allocated_page_tables(uint64_t *l0) {
     uint64_t pool_start_va = (uint64_t)(uintptr_t)__kernel_page_pool_start;
-    uint64_t pool_start_pa = (uint64_t)(uintptr_t)__kernel_page_pool_start_phys;
+    uint64_t pool_start_pa = kernel_phys_addr(pool_start_va);
     uint64_t mapped_end = 0;
 
     while (mapped_end != next_free_page) {
@@ -213,24 +212,99 @@ static uint8_t map_allocated_page_tables(uint64_t *l0) {
     return 1;
 }
 
+static uint8_t map_embedded_user_range(uint64_t *l0, uint64_t va_start,
+                                       uint64_t va_end, uint64_t attrs) {
+    if (va_end <= va_start) {
+        return 1;
+    }
+
+    uint64_t va = align_down(va_start);
+    uint64_t end = align_up(va_end);
+    uint64_t image_start = (uint64_t)(uintptr_t)__user_image_start;
+
+    while (va < end) {
+        uint64_t image_offset = va - USER_IMAGE_START;
+        uint64_t pa = kernel_phys_addr(image_start + image_offset);
+
+        if (!pt_map_page(l0, va, pa, attrs)) {
+            return 0;
+        }
+
+        va += PAGE_SIZE;
+    }
+
+    return 1;
+}
+
+static void copy_user_page(uint8_t *page, uint64_t page_va,
+                           uint64_t copy_start, uint64_t copy_end,
+                           const uint8_t *source) {
+    zero_page(page);
+
+    if (source == NULL || copy_end <= copy_start) {
+        return;
+    }
+
+    uint64_t start = page_va > copy_start ? page_va : copy_start;
+    uint64_t end = page_va + PAGE_SIZE;
+    if (end > copy_end) {
+        end = copy_end;
+    }
+
+    for (uint64_t va = start; va < end; va++) {
+        page[va - page_va] = source[va - USER_IMAGE_START];
+    }
+}
+
+static uint8_t map_private_user_range(uint64_t *l0, uint64_t va_start,
+                                      uint64_t va_end,
+                                      const uint8_t *source) {
+    if (va_end <= va_start) {
+        return 1;
+    }
+
+    uint64_t va = align_down(va_start);
+    uint64_t end = align_up(va_end);
+
+    while (va < end) {
+        uint8_t *page = alloc_page();
+        if (page == NULL) {
+            return 0;
+        }
+
+        copy_user_page(page, va, va_start, va_end, source);
+
+        if (!pt_map_page(l0, va, kernel_phys_addr((uint64_t)(uintptr_t)page),
+                         ATTR_USER_RW)) {
+            return 0;
+        }
+
+        va += PAGE_SIZE;
+    }
+
+    return 1;
+}
+
 uint64_t *initialize_kernel_page_table(void) {
     uint64_t *l0 = alloc_page();
     if (l0 == NULL) {
         return NULL;
     }
 
-    if (!map_kernel_section(l0, __text_start, __text_end,
-                            __text_start_phys, ATTR_KERNEL_RX)) {
+    if (!map_kernel_section(l0, __text_start, __text_end, ATTR_KERNEL_RX)) {
         return NULL;
     }
 
-    if (!map_kernel_section(l0, __rodata_start, __rodata_end,
-                            __rodata_start_phys, ATTR_KERNEL_RO)) {
+    if (!map_kernel_section(l0, __rodata_start, __rodata_end, ATTR_KERNEL_RO)) {
         return NULL;
     }
 
-    if (!map_kernel_section(l0, __data_start, __kernel_end,
-                            __data_start_phys, ATTR_KERNEL_RW)) {
+    if (!map_kernel_section(l0, __user_image_start, __user_image_end,
+                            ATTR_KERNEL_RO)) {
+        return NULL;
+    }
+
+    if (!map_kernel_section(l0, __data_start, __kernel_end, ATTR_KERNEL_RW)) {
         return NULL;
     }
 
@@ -242,9 +316,43 @@ uint64_t *initialize_kernel_page_table(void) {
 }
 
 uint64_t *initialize_user_page_table(void) {
-    /*
-     * EL0 gets its own TTBR0 table. There is no kernel direct map here; the
-     * shared high-half kernel mapping lives in TTBR1_EL1.
-     */
-    return alloc_page();
+    uint64_t *l0 = alloc_page();
+    if (l0 == NULL) {
+        return NULL;
+    }
+
+    if (USER_IMAGE_END > USER_HEAP_START) {
+        return NULL;
+    }
+
+    if (!map_embedded_user_range(l0, USER_TEXT_START, USER_TEXT_END,
+                                 ATTR_USER_RX)) {
+        return NULL;
+    }
+
+    if (!map_embedded_user_range(l0, USER_RODATA_START, USER_RODATA_END,
+                                 ATTR_USER_RO)) {
+        return NULL;
+    }
+
+    if (!map_private_user_range(l0, USER_DATA_START, USER_DATA_END,
+                                __user_image_start)) {
+        return NULL;
+    }
+
+    if (!map_private_user_range(l0, USER_BSS_START, USER_BSS_END, NULL)) {
+        return NULL;
+    }
+
+    if (!map_private_user_range(l0, USER_HEAP_START,
+                                USER_HEAP_START + USER_HEAP_SIZE, NULL)) {
+        return NULL;
+    }
+
+    if (!map_private_user_range(l0, USER_STACK_TOP - USER_STACK_SIZE,
+                                USER_STACK_TOP, NULL)) {
+        return NULL;
+    }
+
+    return l0;
 }

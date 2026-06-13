@@ -18,6 +18,7 @@ SECTIONS
     __boot_start_phys = .;
 
     .text.boot : {
+        KEEP(*(.text.boot.entry))
         KEEP(*(.text.boot))
         KEEP(*(.text.boot.*))
         KEEP(*(.text.mmu))
@@ -53,6 +54,16 @@ SECTIONS
     __rodata_start_phys = LOADADDR(.rodata);
     __rodata_end_phys = LOADADDR(.rodata) + SIZEOF(.rodata);
 
+    . = ALIGN(4096);
+    __user_image_start = .;
+    .user_image : AT(ADDR(.user_image) - KERNEL_VA_BASE) {
+        KEEP(*(.user_image))
+    } :text
+    __user_image_end = .;
+    __user_image_start_phys = LOADADDR(.user_image);
+    __user_image_end_phys = LOADADDR(.user_image) + SIZEOF(.user_image);
+
+    . = ALIGN(4096);
     __data_start = .;
     .data : AT(ADDR(.data) - KERNEL_VA_BASE) {
         *(.data*)
@@ -80,6 +91,15 @@ SECTIONS
     } :data
     _stack_bottom_phys = LOADADDR(.stack);
     _stack_top_phys = LOADADDR(.stack) + SIZEOF(.stack);
+
+    . = ALIGN(4096);
+    .heap (NOLOAD) : AT(ADDR(.heap) - KERNEL_VA_BASE) {
+        __kernel_heap_start = .;
+        . += 0x100000;
+        __kernel_heap_end = .;
+    } :data
+    __kernel_heap_start_phys = LOADADDR(.heap);
+    __kernel_heap_end_phys = LOADADDR(.heap) + SIZEOF(.heap);
 
     . = ALIGN(4096);
     __kernel_end = .;

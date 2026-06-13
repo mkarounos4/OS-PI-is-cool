@@ -1,34 +1,34 @@
 #include "scheduler/scheduler.h"
-#include "memory/kernel_mem.h"
 #include "memory/malloc.h"
 #include "memory/page_table/page_table.h"
 #include "traps/traps.h"
-#include "syscall/u_syscall.h"
 #include "uart/uart.h"
 #include "signals/signals.h"
+#include "user_image.h"
 
-#define USER_STACK_TOP PROC_STACK_SIZE
-#define KERNEL_STACK_TOP USER_STACK_TOP + PROC_STACK_SIZE
-#define USER_HEAP_END KERNEL_STACK_TOP + PROC_HEAP_SIZE
-#define USER_HEAP_START KERNEL_STACK_TOP + 1
+#define PA_MASK UINT64_C(0x0000ffffffffffff)
+#define PROC_STACK_PAGE_COUNT ((PROC_STACK_SIZE + PAGE_SIZE - 1) / PAGE_SIZE)
 
 static pcb_t processes[MAX_PROCESS_COUNT];
 
-void *init_process_entry(void*);
-
-// Aligns the given value down to the nearest multiple of the given alignment, which must be a power of 2.
-static uintptr_t align_down(uintptr_t value, uintptr_t alignment) {
-    return value & ~(alignment - 1u);
+static uint64_t kernel_phys_addr(uint64_t va) {
+    return va & PA_MASK;
 }
 
-static void process_trampoline(void *(*func)(void *), void *arg) {
-    void *ret = func(arg);
-    exit((int)(uintptr_t)ret);
-
-    // Should not reach.
-    while (1) {
-        asm volatile ("wfe");
+static uint8_t *alloc_kernel_stack(void) {
+    uint8_t *stack = alloc_page();
+    if (stack == NULL) {
+        return NULL;
     }
+
+    for (uint64_t i = 1; i < PROC_STACK_PAGE_COUNT; i++) {
+        uint8_t *page = alloc_page();
+        if (page == NULL || page != stack + i * PAGE_SIZE) {
+            return NULL;
+        }
+    }
+
+    return stack;
 }
 
 static void __attribute__((noreturn)) process_first_run(void) {
@@ -171,7 +171,18 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     new_proc->name = NULL;
 
     // Get trap_frame with thread context
-    struct trap_frame *frame = (struct trap_frame *)(KERNEL_STACK_TOP - sizeof(struct trap_frame));
+    uint8_t *kernel_stack = alloc_kernel_stack();
+    if (kernel_stack == NULL) {
+        uart_puts("ERROR: failed to allocate process kernel stack");
+        return -1;
+    }
+
+    new_proc->kernel_stack_base = (uint64_t)(uintptr_t)kernel_stack;
+    new_proc->kernel_stack_top = new_proc->kernel_stack_base +
+                                 PROC_STACK_PAGE_COUNT * PAGE_SIZE;
+
+    struct trap_frame *frame = (struct trap_frame *)(uintptr_t)
+        (new_proc->kernel_stack_top - sizeof(struct trap_frame));
 
     // Initialize all thread registers to 0.
     for (unsigned i = 0; i < 31; i++) {
@@ -183,7 +194,7 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
 
     // Initialize all special registers.
     frame->sp = USER_STACK_TOP;
-    frame->elr = (uint64_t)(uintptr_t)process_trampoline;
+    frame->elr = USER_THREAD_START;
     frame->spsr = 0; // Initialize to SP_EL0 for user exception level
     frame->esr = 0;
     frame->far = 0;
@@ -203,13 +214,13 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     new_proc->ctx.x28 = 0;
     new_proc->ctx.x29 = 0;
     new_proc->ctx.x30 = (uint64_t)(uintptr_t)process_first_run;
-    new_proc->ctx.sp = KERNEL_STACK_TOP - sizeof(struct trap_frame);
+    new_proc->ctx.sp = (uint64_t)(uintptr_t)frame;
     uint64_t *user_l0 = initialize_user_page_table();
     if (user_l0 == NULL) {
         uart_puts("ERROR: failed to initialize user page table");
         return -1;
     }
-    new_proc->ctx.ttbr0_el1 = (uint64_t)(uintptr_t)user_l0;
+    new_proc->ctx.ttbr0_el1 = kernel_phys_addr((uint64_t)(uintptr_t)user_l0);
 
     add_task_to_scheduler(new_proc);
 
@@ -272,7 +283,7 @@ void processes_init() {
         processes[i].pid = i;
     }
 
-    proc_create(init_process_entry, NULL, 0);
+    proc_create((void *(*)(void *))(uintptr_t)USER_INIT_PROCESS_ENTRY, NULL, 0);
 }
 
 // Add stop/terminate/block/unblock/continue process (but reqs signal mask and handlers)

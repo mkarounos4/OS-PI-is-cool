@@ -55,8 +55,10 @@ extern void initialize_mmu_asm(uint64_t ttbr0_el1, uint64_t ttbr1_el1,
                                uint64_t tcr_el1, uint64_t mair_el1);
 
 static void BOOT_TEXT zero_table(uint64_t *table) {
+    volatile uint64_t *entries = table;
+
     for (uint64_t i = 0; i < PAGE_TABLE_ENTRIES; i++) {
-        table[i] = 0;
+        entries[i] = 0;
     }
 }
 
@@ -71,7 +73,8 @@ static uint64_t BOOT_TEXT make_l1_block_desc(uint64_t pa, uint64_t attrs) {
 
 static void BOOT_TEXT map_l1_block(uint64_t *l1, uint64_t index,
                                    uint64_t attrs) {
-    l1[index] = make_l1_block_desc(index * L1_BLOCK_SIZE, attrs);
+    volatile uint64_t *entries = l1;
+    entries[index] = make_l1_block_desc(index * L1_BLOCK_SIZE, attrs);
 }
 
 static void BOOT_TEXT initialize_boot_tables(void) {
@@ -179,7 +182,7 @@ void handle_data_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t esr) {
                 fatal_exception("Data Abort: Translation fault user address with no process");
             }
 
-            table_base_addr = curr_proc->ctx.ttbr0_el1;
+            table_base_addr = kernel_direct_map_va(curr_proc->ctx.ttbr0_el1);
         }
 
         if (!pt_walk((uint64_t *)(uintptr_t)table_base_addr, far)) {

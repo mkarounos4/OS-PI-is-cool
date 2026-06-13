@@ -1,5 +1,4 @@
-#include "syscall/syscall.h"
-#include "scheduler/process.h"
+#include "syscall.h"
 
 long write_console(const char *s, uint64_t len) {
     return sys_call2(S_WRITE_CONSOLE, (long)(uintptr_t)s, (long)len);
@@ -44,4 +43,22 @@ long kill(pid_t pid, int signal) {
 
 long block_until_event(uint32_t events) {
     return sys_call1(S_BLOCK_UNTIL_EVENT, events);
+}
+
+void putstr(const char *s) {
+    uint64_t len = 0;
+    while (s[len] != '\0') {
+        len++;
+    }
+
+    write_console(s, len);
+}
+
+void puthex(uint64_t value) {
+    const char *hex = "0123456789abcdef";
+
+    write_console("0x", 2);
+    for (int shift = 60; shift >= 0; shift -= 4) {
+        putc(hex[(value >> shift) & 0xf]);
+    }
 }

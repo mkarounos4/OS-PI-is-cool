@@ -39,14 +39,14 @@ static void *HeapMemoryEnd = NULL;
 static void *heap_ptr = NULL;
 static Seg_Lists *seg_lists_ptr = NULL;
 
-void mem_init(void *start, void *end) {
+void kmem_init(void *start, void *end) {
     HeapMemory = start;
     HeapMemoryBrk = HeapMemory;
     HeapMemoryEnd = end; 
     heap_ptr = NULL;
     seg_lists_ptr = NULL;
     
-    if (!mm_init()) {
+    if (!kmm_init()) {
         uart_puts("ERROR: failed to initialize heap\n");
         while (1) {
             asm volatile ("wfe");
@@ -54,7 +54,7 @@ void mem_init(void *start, void *end) {
     }
 }
 
-void *mem_sbrk(intptr_t incr)
+void *kmem_sbrk(intptr_t incr)
 {
     void *prevBrk = HeapMemoryBrk;
     if (HeapMemoryBrk == NULL || HeapMemoryEnd == NULL || incr < 0) {
@@ -71,12 +71,12 @@ void *mem_sbrk(intptr_t incr)
     return prevBrk;
 }
 
-void *mem_heap_lo()
+void *kmem_heap_lo()
 {
     return HeapMemory;
 }
 
-void *mem_heap_hi()
+void *kmem_heap_hi()
 {
     return (char *)HeapMemoryBrk - 1;
 }
@@ -250,7 +250,7 @@ void *extend_heap(size_t size) {
     size = align(size); // ensure size alignment
 
     // extend heap
-    void *old_brk = mem_sbrk(size);
+    void *old_brk = kmem_sbrk(size);
     if (old_brk == (void *)-1) return NULL;
 
     void *header_ptr = (char *)old_brk - WS;
@@ -264,17 +264,17 @@ void *extend_heap(size_t size) {
 
 }
 
-bool mm_init(void)
+bool kmm_init(void)
 {
     // allocate space for segregated lists
-    seg_lists_ptr = mem_sbrk(sizeof(Seg_Lists));
+    seg_lists_ptr = kmem_sbrk(sizeof(Seg_Lists));
     if ( seg_lists_ptr == (void *)-1 ) {
 	return false;
     }
     memset(seg_lists_ptr, 0, sizeof(Seg_Lists));
 
     // allocate 3 words (24 bytes) for intial prologue (16) and eqpilogue (8)
-    heap_ptr = mem_sbrk(3 * WS);
+    heap_ptr = kmem_sbrk(3 * WS);
     if ( heap_ptr == (void *)-1 ) {
 	   return false;
     }
@@ -333,7 +333,7 @@ void *get_allocation(size_t size) {
 }
 
 
-void *malloc(size_t size)
+void *kmalloc(size_t size)
 {
     if (size == 0) return NULL;
 
@@ -354,7 +354,7 @@ void *malloc(size_t size)
     return ptr;
 }
 
-void free(void *ptr)
+void kfree(void *ptr)
 {
 
     if (!ptr) return; // ptr is NULL -> do nothing

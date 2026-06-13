@@ -8,10 +8,11 @@
 #include "memory/page_table/page_table.h"
 #include "uart/uart.h"
 #include "syscall/syscall.h"
-#include "syscall/u_syscall.h"
 #include "signals/signals.h"
-#include "tests/tests.h"
 #include "memory/mmu.h"
+
+extern uint8_t __kernel_heap_start[];
+extern uint8_t __kernel_heap_end[];
 
 void kernel_main(void) {
     uart_init();
@@ -31,8 +32,9 @@ void kernel_main(void) {
     irq_enable();
     uart_puts("[boot] irq_enable done\n");
 
+    mem_init(__kernel_heap_start, __kernel_heap_end);
     uart_puts("[boot] kernel heap ready\n");
-    uart_puts("[boot] virtual memory disabled for this test run\n");
+    uart_puts("[boot] virtual memory enabled\n");
 
     scheduler_init();
     

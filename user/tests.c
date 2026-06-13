@@ -5,20 +5,20 @@ static void *process_c(void *args);
 static void *process_a(void *args) {
     (void) args;
     for (int i = 0; i < 4; i++) {
-        write_console("PROC A WRITING\n", 16);
-        uart_puthex(i);
+        putstr("PROC A WRITING\n");
+        puthex(i);
         delay(3000);
     }
-    write_console("PROC A DONE. SPAWNING!!!!\n", 36);
+    putstr("PROC A DONE. SPAWNING!!!!\n");
     spawn(process_c, NULL);
-    write_console("PROC A SPAWNED C.\n", 18);
+    putstr("PROC A SPAWNED C.\n");
     return NULL;
 }
 
 static void *process_c(void *args) {
     (void) args;
     for (int i = 0; i < 5; i++) {
-        write_console("PROC c WRITING\n", 16);
+        putstr("PROC c WRITING\n");
         delay(300);
     }
     return NULL;
@@ -27,21 +27,21 @@ static void *process_c(void *args) {
 static void *process_b(void *args) {
     (void) args;
     for (int i = 0; i < 5; i++) {
-        write_console("PROC B WRITING\n", 16);
-        uart_puthex(i);
+        putstr("PROC B WRITING\n");
+        puthex(i);
         delay(500);
     }
-    write_console("B DONE\n", 7);
+    putstr("B DONE\n");
     exit(0);
     return NULL;
 }
 
 void scheduler_orphan_test(void) {
-    write_console("[TEST] CREATING A\n");
-    proc_create(process_a, NULL, 0);
-    write_console("[TEST] A CREATED. CREATING B:\n");
-    proc_create(process_b, NULL, 0);
-    write_console("PROCS CREATED\n");
+    putstr("[TEST] CREATING A\n");
+    spawn(process_a, NULL);
+    putstr("[TEST] A CREATED. CREATING B:\n");
+    spawn(process_b, NULL);
+    putstr("PROCS CREATED\n");
 }
 
 static void *process_2(void *args) {
@@ -54,13 +54,13 @@ static void *process_2(void *args) {
 
 static void *process_3(void *args) {
     pid_t other_pid = (pid_t)(uintptr_t) args;
-    write_console("Got child1. Stopping:\n", 22);
+    putstr("Got child1. Stopping:\n");
     kill(other_pid, SIGSTOP);
     delay(2000);
-    write_console("Now Continuing\n", 15);
+    putstr("Now Continuing\n");
     kill(other_pid, SIGCONT);
     delay(2000);
-    write_console("Now killing.\n", 13);
+    putstr("Now killing.\n");
     kill(other_pid, SIGKILL);
     exit(0);
     return NULL;
@@ -71,21 +71,25 @@ static void *process_1(void *args) {
     pid_t pid1 = spawn(process_2, NULL);
     pid_t pid2 = spawn(process_3, (ptr_t) (uintptr_t) pid1);
 
-    write_console("[P1] Spawned in child1: ", 24);
-    uart_puthex(pid1);
-    write_console("\n[P1] Spawned in child2: ", 25);
-    uart_puthex(pid2);
-    uart_putc('\n');
+    putstr("[P1] Spawned in child1: ");
+    puthex(pid1);
+    putstr("\n[P1] Spawned in child2: ");
+    puthex(pid2);
+    putc('\n');
 
     while (1) {
         pid_t cleaned = waitpid(-1, NULL, WUNTRACED);
         if (cleaned == ECHILD) {
             break;
         }
-        write_console("[P1] GOT UPDATE FROM: ", 22);
-        uart_puthex(cleaned);
-        write_console("\n", 1);
+        putstr("[P1] GOT UPDATE FROM: ");
+        puthex(cleaned);
+        putstr("\n");
     }
-    write_console("[P1] Finished cleaning\n", 23);
+    putstr("[P1] Finished cleaning\n");
     return NULL;
+}
+
+void waitpid_signal_test(void) {
+    spawn(process_1, NULL);
 }

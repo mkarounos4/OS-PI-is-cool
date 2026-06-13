@@ -6,7 +6,6 @@
 #include "traps/traps.h"
 #include "uart/uart.h"
 #include "scheduler/scheduler.h"
-#include "memory/kernel_mem.h"
 #include "signals/signals.h"
 
 #define SYS_WRITE_CONSOLE_MAX 1024u
@@ -57,9 +56,6 @@ static long s_exit_impl(int code) {
 }
 
 static long s_spawn(void* (*func)(void*), void *argv) {
-    struct mem_ctx prev_ctx;
-    mem_fetch_heap_vals(&prev_ctx);
-
     pid_t ppid = s_getpid();
     
     pid_t new_proc = proc_create(func, argv, ppid);
@@ -71,7 +67,6 @@ static long s_spawn(void* (*func)(void*), void *argv) {
         return -1;
     }
 
-    mem_load_heap(&prev_ctx);
     return new_pcb->pid;
 }
 

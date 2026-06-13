@@ -1,13 +1,19 @@
 #include "syscall.h"
+#include "tests.h"
 
 void *tests(void *args) {
+    (void)args;
+
     // TESTS HERE
     // scheduler_orphan_test();
     waitpid_signal_test();
 
+    return NULL;
 }
 
-void *init_process_entry(void*) {
+void *init_process_entry(void *args) {
+    (void)args;
+
     spawn(tests, NULL);
 
     while (1) {
@@ -19,4 +25,3 @@ void *init_process_entry(void*) {
 
     return NULL;
 }
-

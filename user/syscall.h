@@ -1,7 +1,25 @@
 
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
+
+typedef int32_t pid_t;
+typedef void *ptr_t;
+
+#define WNOHANG 1
+#define WUNTRACED 2
+#define WCONTINUED 4
+
+#define ECHILD -2
+
+#define BLOCK_UNTIL_NEW_CHILD 1
+
+#define SIGKILL 9
+#define SIGSTOP 10
+#define SIGTERM 11
+#define SIGCONT 12
+#define SIGCHLD 13
 
 enum syscall_type {
     S_WRITE_CONSOLE = 1,
@@ -30,6 +48,8 @@ long waitpid(pid_t pid, int *status, uint32_t flags);
 long sbrk(int64_t increment);
 long kill(pid_t pid, int signal);
 long block_until_event(uint32_t events);
+void putstr(const char *s);
+void puthex(uint64_t value);
 
 static inline long sys_call6(long nr, long a0, long a1, long a2, long a3, long a4, long a5) {
     register long x0 asm("x0") = a0;

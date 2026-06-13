@@ -7,11 +7,10 @@
 #include "syscall/syscall.h"
 #include "data-structs/vec.h"
 #include "memory/page_table/page_table.h"
-#include "memory/kernel_mem.h"
 #include "memory/malloc.h"
-#include "syscall/u_syscall.h"
 
 #define SCHEDULER_QUANTUM_MS 1000u
+#define PA_MASK UINT64_C(0x0000ffffffffffff)
 
 struct sched_task_node {
     pcb_t *pcb;
@@ -30,6 +29,10 @@ static volatile int ready_to_schedule = 0;
 static void *ready_ctx = NULL;
 
 static void scheduler_tick(void *ctx);
+
+static uint64_t kernel_phys_addr(uint64_t va) {
+    return va & PA_MASK;
+}
 
 static void set_ready_to_schedule(void *ctx) {
     ready_to_schedule = 1;
@@ -116,8 +119,18 @@ void scheduler_init(void) {
     idle_ctx.x28 = 0;
     idle_ctx.x29 = 0;
     idle_ctx.x30 = (uint64_t)(uintptr_t)idle_task_fn;
-    idle_ctx.sp = 8192ul;
-    idle_ctx.ttbr0_el1 = (uint64_t)(uintptr_t)initialize_user_page_table();
+    uint8_t *idle_stack = alloc_page();
+    if (idle_stack == NULL) {
+        uart_puts("ERROR: failed to allocate idle stack\n");
+        return;
+    }
+    idle_ctx.sp = (uint64_t)(uintptr_t)(idle_stack + PAGE_SIZE);
+    uint64_t *idle_l0 = initialize_user_page_table();
+    if (idle_l0 == NULL) {
+        uart_puts("ERROR: failed to initialize idle page table\n");
+        return;
+    }
+    idle_ctx.ttbr0_el1 = kernel_phys_addr((uint64_t)(uintptr_t)idle_l0);
 }
 
 // Starts execution at thread 0. Does not return.

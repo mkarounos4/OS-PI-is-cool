@@ -4,6 +4,11 @@
 
 #define PAGE_SIZE 4096ULL
 #define KERNEL_VA_BASE UINT64_C(0xffff000000000000)
+#define USER_VA_BASE UINT64_C(0x10000)
+#define USER_HEAP_START UINT64_C(0x400000)
+#define USER_HEAP_SIZE 16384ULL
+#define USER_STACK_SIZE 8192ULL
+#define USER_STACK_TOP UINT64_C(0x800000)
 
 void *alloc_page(void);
 void free_page(void *page);
