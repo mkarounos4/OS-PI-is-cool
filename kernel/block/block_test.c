@@ -10,9 +10,12 @@
 #define BLOCK_TEST_SECTOR_SIZE UINT32_C(512)
 #define BLOCK_TEST_WORDS       (BLOCK_TEST_SECTOR_SIZE / sizeof(uint32_t))
 #define BLOCK_TEST_SEED        UINT32_C(0x5480cafe)
+#define BLOCK_TEST_MULTI_COUNT UINT32_C(4)
 
 static uint32_t expected_block[BLOCK_TEST_WORDS] __attribute__((aligned(16)));
 static uint32_t read_block_buf[BLOCK_TEST_WORDS] __attribute__((aligned(16)));
+static uint32_t multi_expected[BLOCK_TEST_MULTI_COUNT * BLOCK_TEST_WORDS] __attribute__((aligned(16)));
+static uint32_t multi_read_buf[BLOCK_TEST_MULTI_COUNT * BLOCK_TEST_WORDS] __attribute__((aligned(16)));
 
 static void print_label_hex(const char *label, uint64_t value) {
     uart_puts(label);
@@ -130,4 +133,61 @@ void block_test_verify_persistence(uint64_t lba) {
     } else {
         uart_puts("[block-test] FAIL persistence\n");
     }
+}
+
+void block_test_multi_write_read(uint64_t lba) {
+    uart_puts("[block-test] begin multi write-read\n");
+    print_label_hex("[block-test] scratch lba=", lba);
+    print_label_hex("[block-test] block count=", BLOCK_TEST_MULTI_COUNT);
+    uart_puts("[block-test] WARNING: overwriting consecutive scratch sectors\n");
+
+    for (uint32_t block = 0; block < BLOCK_TEST_MULTI_COUNT; block++) {
+        fill_expected_block(lba + block);
+        for (uint32_t i = 0; i < BLOCK_TEST_WORDS; i++) {
+            multi_expected[(block * BLOCK_TEST_WORDS) + i] = expected_block[i];
+            multi_read_buf[(block * BLOCK_TEST_WORDS) + i] = 0;
+        }
+    }
+
+    print_label_hex("[block-test] first checksum=", multi_expected[7]);
+    print_label_hex("[block-test] last checksum=",
+                    multi_expected[((BLOCK_TEST_MULTI_COUNT - 1u) * BLOCK_TEST_WORDS) + 7u]);
+
+    if (block_write(lba, BLOCK_TEST_MULTI_COUNT, multi_expected) != 0) {
+        uart_puts("[block-test] multi block_write failed\n");
+        return;
+    }
+
+    if (block_read(lba, BLOCK_TEST_MULTI_COUNT, multi_read_buf) != 0) {
+        uart_puts("[block-test] multi block_read failed\n");
+        return;
+    }
+
+    for (uint32_t block = 0; block < BLOCK_TEST_MULTI_COUNT; block++) {
+        const uint32_t *actual = &multi_read_buf[block * BLOCK_TEST_WORDS];
+        const uint32_t *expected = &multi_expected[block * BLOCK_TEST_WORDS];
+
+        if (actual[0] != BLOCK_TEST_MAGIC) {
+            print_label_hex("[block-test] multi missing magic block=", block);
+            print_label_hex("[block-test] word0=", actual[0]);
+            uart_puts("[block-test] FAIL multi write-read\n");
+            return;
+        }
+
+        if (actual[7] != checksum_words(actual)) {
+            print_label_hex("[block-test] multi checksum mismatch block=", block);
+            print_label_hex("[block-test] stored=", actual[7]);
+            print_label_hex("[block-test] computed=", checksum_words(actual));
+            uart_puts("[block-test] FAIL multi write-read\n");
+            return;
+        }
+
+        if (!blocks_match(actual, expected)) {
+            print_label_hex("[block-test] multi mismatch block=", block);
+            uart_puts("[block-test] FAIL multi write-read\n");
+            return;
+        }
+    }
+
+    uart_puts("[block-test] PASS multi write-read\n");
 }

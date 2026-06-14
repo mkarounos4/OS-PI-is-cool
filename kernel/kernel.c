@@ -48,6 +48,8 @@ void kernel_main(void) {
         // block_test_write_read(UINT64_C(1048576));
         // Second boot after power-off/unplug/replug: verify the same sector persisted.
         block_test_verify_persistence(UINT64_C(1048576));
+        // Milestone 2: multi-block write/read starting at the same scratch range.
+        block_test_multi_write_read(UINT64_C(1048576));
     } else {
         uart_puts("[boot] block_init failed\n");
     }

@@ -31,6 +31,8 @@
 
 #define SDHCI_STATE_CMD_INHIBIT    (1u << 0)
 #define SDHCI_STATE_DAT_INHIBIT    (1u << 1)
+#define SDHCI_STATE_WRITE_READY    (1u << 10)
+#define SDHCI_STATE_READ_READY     (1u << 11)
 
 #define SDHCI_INT_CMD_COMPLETE     (1u << 0)
 #define SDHCI_INT_TRANSFER_DONE    (1u << 1)
@@ -67,6 +69,8 @@
 #define SD_CMD_INDEX_CHECK         (1u << 4)
 #define SD_CMD_DATA_PRESENT        (1u << 5)
 
+#define SD_TM_BLOCK_COUNT_ENABLE   (1u << 1)
+#define SD_TM_MULTI_BLOCK          (1u << 5)
 #define SD_TM_READ                 (1u << 4)
 
 #define SD_OCR_BUSY                (1u << 31)
@@ -165,6 +169,19 @@ static void log_command_failure(uint32_t index) {
     uart_puts("\n");
 }
 
+static void log_transfer_state(const char *label) {
+    uart_puts(label);
+    uart_puts(" status=");
+    uart_puthex(reg_read32(SDHCI_INT_STATUS));
+    uart_puts(" present=");
+    uart_puthex(reg_read32(SDHCI_PRESENT_STATE));
+    uart_puts(" transfer=");
+    uart_puthex(reg_read16(SDHCI_TRANSFER_MODE));
+    uart_puts(" count=");
+    uart_puthex(reg_read16(SDHCI_BLOCK_COUNT));
+    uart_puts("\n");
+}
+
 static int wait_clear32(uint32_t reg, uint32_t mask) {
     for (uint32_t i = 0; i < SDHCI_WAIT_LIMIT; i++) {
         if ((reg_read32(reg) & mask) == 0) {
@@ -186,6 +203,22 @@ static int wait_int_status(uint32_t mask) {
         }
         asm volatile("yield" ::: "memory");
     }
+    return -1;
+}
+
+static int wait_buffer_ready(uint32_t interrupt_mask, uint32_t present_mask) {
+    for (uint32_t i = 0; i < SDHCI_WAIT_LIMIT; i++) {
+        uint32_t status = reg_read32(SDHCI_INT_STATUS);
+        if ((status & SDHCI_INT_ERROR) != 0) {
+            return -2;
+        }
+        if ((status & interrupt_mask) != 0 ||
+            (reg_read32(SDHCI_PRESENT_STATE) & present_mask) != 0) {
+            return 0;
+        }
+        asm volatile("yield" ::: "memory");
+    }
+
     return -1;
 }
 
@@ -329,6 +362,17 @@ static int wait_card_ready_for_data(void) {
     uart_puts("[sdhci] card did not return to transfer state\n");
     log_hex("[sdhci] card status=", reg_read32(SDHCI_RESPONSE0));
     return -1;
+}
+
+static int stop_transmission(void) {
+    if (send_command(12, 0, SD_CMD_RESP_48_BUSY,
+                     SD_CMD_CRC_CHECK | SD_CMD_INDEX_CHECK, 0) != 0) {
+        uart_puts("[sdhci] CMD12 stop failed\n");
+        reset_data_line();
+        return -1;
+    }
+
+    return wait_card_ready_for_data();
 }
 
 static int reset_controller(void) {
@@ -533,72 +577,104 @@ int sdhci_block_init(void) {
 }
 
 int sdhci_block_read(uint64_t lba, uint32_t count, void *buf) {
-    if (!sd.initialized || buf == NULL || count != 1 || lba > UINT32_MAX) {
+    if (!sd.initialized || buf == NULL || count == 0 || count > UINT16_MAX ||
+        lba > UINT32_MAX) {
         return -1;
     }
 
     uint32_t arg = sd.high_capacity ? (uint32_t)lba : (uint32_t)(lba * SD_BLOCK_SIZE_BYTES);
     uint32_t *dst = (uint32_t *)buf;
+    uint32_t command = (count == 1) ? 17u : 18u;
+    uint16_t transfer_mode = SD_TM_READ;
+    if (count > 1) {
+        transfer_mode |= SD_TM_BLOCK_COUNT_ENABLE | SD_TM_MULTI_BLOCK;
+    }
 
-    set_block_transfer(SD_BLOCK_SIZE_BYTES, 1u);
-    if (send_command(17, arg, SD_CMD_RESP_48,
+    set_block_transfer(SD_BLOCK_SIZE_BYTES, (uint16_t)count);
+    if (send_command(command, arg, SD_CMD_RESP_48,
                      SD_CMD_CRC_CHECK | SD_CMD_INDEX_CHECK | SD_CMD_DATA_PRESENT,
-                     SD_TM_READ) != 0) {
+                     transfer_mode) != 0) {
         return -1;
     }
 
-    if (wait_int_status(SDHCI_INT_BUF_READ_READY) != 0) {
-        log_hex("[sdhci] read wait status=", reg_read32(SDHCI_INT_STATUS));
-        reset_data_line();
-        return -1;
-    }
+    for (uint32_t block = 0; block < count; block++) {
+        if (wait_buffer_ready(SDHCI_INT_BUF_READ_READY, SDHCI_STATE_READ_READY) != 0) {
+            log_transfer_state("[sdhci] read wait failed");
+            reset_data_line();
+            return -1;
+        }
 
-    for (uint32_t i = 0; i < SD_WORDS_PER_BLOCK; i++) {
-        dst[i] = reg_read32(SDHCI_BUFFER_DATA);
+        for (uint32_t i = 0; i < SD_WORDS_PER_BLOCK; i++) {
+            dst[(block * SD_WORDS_PER_BLOCK) + i] = reg_read32(SDHCI_BUFFER_DATA);
+        }
+
+        reg_write32(SDHCI_INT_STATUS, SDHCI_INT_BUF_READ_READY);
     }
 
     if (wait_int_status(SDHCI_INT_TRANSFER_DONE) != 0) {
-        log_hex("[sdhci] read done status=", reg_read32(SDHCI_INT_STATUS));
+        log_transfer_state("[sdhci] read done failed");
         reset_data_line();
         return -1;
     }
 
     reg_write32(SDHCI_INT_STATUS, SDHCI_INT_ALL);
-    return 0;
+    if (count > 1) {
+        return stop_transmission();
+    }
+
+    return wait_card_ready_for_data();
 }
 
 int sdhci_block_write(uint64_t lba, uint32_t count, const void *buf) {
-    if (!sd.initialized || buf == NULL || count != 1 || lba > UINT32_MAX) {
+    if (!sd.initialized || buf == NULL || count == 0 || count > UINT16_MAX ||
+        lba > UINT32_MAX) {
         return -1;
     }
 
     uint32_t arg = sd.high_capacity ? (uint32_t)lba : (uint32_t)(lba * SD_BLOCK_SIZE_BYTES);
     const uint32_t *src = (const uint32_t *)buf;
+    uint32_t command = (count == 1) ? 24u : 25u;
+    uint16_t transfer_mode = 0;
+    if (count > 1) {
+        transfer_mode |= SD_TM_BLOCK_COUNT_ENABLE | SD_TM_MULTI_BLOCK;
+        if (send_app_command(23, count, SD_CMD_RESP_48,
+                             SD_CMD_CRC_CHECK | SD_CMD_INDEX_CHECK, 0) != 0) {
+            return -1;
+        }
+    }
 
-    set_block_transfer(SD_BLOCK_SIZE_BYTES, 1u);
-    if (send_command(24, arg, SD_CMD_RESP_48,
+    set_block_transfer(SD_BLOCK_SIZE_BYTES, (uint16_t)count);
+    if (send_command(command, arg, SD_CMD_RESP_48,
                      SD_CMD_CRC_CHECK | SD_CMD_INDEX_CHECK | SD_CMD_DATA_PRESENT,
-                     0) != 0) {
+                     transfer_mode) != 0) {
         return -1;
     }
 
-    if (wait_int_status(SDHCI_INT_BUF_WRITE_READY) != 0) {
-        log_hex("[sdhci] write wait status=", reg_read32(SDHCI_INT_STATUS));
-        reset_data_line();
-        return -1;
-    }
+    for (uint32_t block = 0; block < count; block++) {
+        if (wait_buffer_ready(SDHCI_INT_BUF_WRITE_READY, SDHCI_STATE_WRITE_READY) != 0) {
+            log_transfer_state("[sdhci] write wait failed");
+            reset_data_line();
+            return -1;
+        }
 
-    for (uint32_t i = 0; i < SD_WORDS_PER_BLOCK; i++) {
-        reg_write32(SDHCI_BUFFER_DATA, src[i]);
+        for (uint32_t i = 0; i < SD_WORDS_PER_BLOCK; i++) {
+            reg_write32(SDHCI_BUFFER_DATA, src[(block * SD_WORDS_PER_BLOCK) + i]);
+        }
+
+        reg_write32(SDHCI_INT_STATUS, SDHCI_INT_BUF_WRITE_READY);
     }
 
     if (wait_int_status(SDHCI_INT_TRANSFER_DONE) != 0) {
-        log_hex("[sdhci] write done status=", reg_read32(SDHCI_INT_STATUS));
+        log_transfer_state("[sdhci] write done failed");
         reset_data_line();
         return -1;
     }
 
     reg_write32(SDHCI_INT_STATUS, SDHCI_INT_ALL);
+    if (count > 1 && stop_transmission() != 0) {
+        return -1;
+    }
+
     return wait_card_ready_for_data();
 }
 
