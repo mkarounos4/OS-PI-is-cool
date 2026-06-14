@@ -10,6 +10,8 @@
 #include "syscall/syscall.h"
 #include "signals/signals.h"
 #include "memory/mmu.h"
+#include "block/block.h"
+#include "block/block_test.h"
 
 void kernel_main(void) {
     uart_init();
@@ -36,6 +38,20 @@ void kernel_main(void) {
               (void *)(uintptr_t)(KERNEL_HEAP_START + KERNEL_HEAP_SIZE));
     uart_puts("[boot] kernel heap ready\n");
     uart_puts("[boot] virtual memory enabled\n");
+
+#if defined(PLATFORM_RPI5)
+    uart_puts("[boot] block_init begin\n");
+    if (block_init() == 0) {
+        uart_puts("[boot] block_init done\n");
+        // WARNING: this writes exactly one sector. Pick an LBA that is not used by a partition/filesystem.
+        // First boot: write and immediately read back.
+        // block_test_write_read(UINT64_C(1048576));
+        // Second boot after power-off/unplug/replug: verify the same sector persisted.
+        block_test_verify_persistence(UINT64_C(1048576));
+    } else {
+        uart_puts("[boot] block_init failed\n");
+    }
+#endif
 
     scheduler_init();
     
