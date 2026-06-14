@@ -102,6 +102,18 @@ typedef struct sdhci_device {
     block_device_info_t info;
 } sdhci_device_t;
 
+#if defined(PLATFORM_QEMU)
+static int qemu_sdhci_setup(void);
+
+static const sdhci_platform_t active_platform = {
+    .name = "qemu-raspi3b-sdhci",
+    .base = UINT64_C(0x3f300000),
+    .base_clock_hz = 52000000u,
+    .init_clock_hz = 400000u,
+    .transfer_clock_hz = 400000u,
+    .platform_setup = qemu_sdhci_setup,
+};
+#else
 static int rpi5_sdhci_setup(void);
 
 static const sdhci_platform_t rpi5_platform = {
@@ -112,9 +124,11 @@ static const sdhci_platform_t rpi5_platform = {
     .transfer_clock_hz = 400000u,
     .platform_setup = rpi5_sdhci_setup,
 };
+#define active_platform rpi5_platform
+#endif
 
 static sdhci_device_t sd = {
-    .platform = &rpi5_platform,
+    .platform = &active_platform,
     .rca = 0,
     .initialized = 0,
     .high_capacity = 0,
@@ -487,6 +501,7 @@ static int init_card(void) {
     return 0;
 }
 
+#if !defined(PLATFORM_QEMU)
 static void rpi5_aon_gpio_set_output(unsigned pin, uint32_t high) {
     uint32_t mask = 1u << pin;
     uint32_t iodir = rpi5_mmio_read32(RPI5_AON_GPIO_IODIR);
@@ -532,6 +547,14 @@ static int rpi5_sdhci_setup(void) {
     rpi5_mmio_barrier();
     return 0;
 }
+#endif
+
+#if defined(PLATFORM_QEMU)
+static int qemu_sdhci_setup(void) {
+    uart_puts("[sdhci] qemu raspi3b setup: using emulated SDHCI slot\n");
+    return 0;
+}
+#endif
 
 int sdhci_block_init(void) {
     if (sd.initialized) {

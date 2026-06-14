@@ -39,7 +39,7 @@ void kernel_main(void) {
     uart_puts("[boot] kernel heap ready\n");
     uart_puts("[boot] virtual memory enabled\n");
 
-#if defined(PLATFORM_RPI5)
+#if defined(PLATFORM_RPI5) || defined(PLATFORM_QEMU)
     uart_puts("[boot] block_init begin\n");
     if (block_init() == 0) {
         uart_puts("[boot] block_init done\n");
