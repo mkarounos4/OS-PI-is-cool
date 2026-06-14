@@ -1,4 +1,4 @@
-#include "../../headers/fat-helpers/dirs.h"
+#include "dirs.h"
 
 err_t add_dirent(const char* name, uint16_t ino_id, uint8_t type, uint8_t perm, ino_id_t curr_dir) {
     struct fs_dirent *dir = malloc(get_bytes_per_block());
@@ -389,4 +389,3 @@ err_t remove_dirent_by_f_name_and_type(const char* f_name, uint8_t file_type, in
     free(next_dir);
     return FILE_NOT_FOUND;
 }
-

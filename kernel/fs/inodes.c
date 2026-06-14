@@ -1,4 +1,4 @@
-#include "../../headers/fat-helpers/inodes.h"
+#include "inodes.h"
 
 err_t mkfs_inode(int file_d, int blocks_in_fat, int bytes_per_block) {
     // Add superblock data

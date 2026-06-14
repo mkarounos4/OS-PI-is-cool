@@ -4,10 +4,11 @@ struct oft_entry;
 
 #include <stdint.h>
 #include <fcntl.h>
+
+#include "data-structs/vec.h"
 #include "disk.h"
-#include "../other-helpers/inode_cache.h"
+#include "fs/caches/inode_cache.h"
 #include "inodes.h"
-#include "../shell-helpers/Vec.h"
 #include "dirs.h"
 
 // Open modes stored in oft_entry::mode.

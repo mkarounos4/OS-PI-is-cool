@@ -3,7 +3,6 @@
 #include <errno.h>
 
 #include "errors.h"
-#include "../os-helpers/s_funcs/s_helpers.h"
 
 /**
  * @brief Create each file in a NULL-terminated list if it does not yet

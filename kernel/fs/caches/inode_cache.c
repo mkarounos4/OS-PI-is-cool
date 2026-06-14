@@ -1,4 +1,4 @@
-#include "../../headers/other-helpers/inode_cache.h"
+#include "inode_cache.h"
 
 // Static helper functions
 static int find_inode_in_cache(ino_id_t id, struct cache_ll_node_st **node);

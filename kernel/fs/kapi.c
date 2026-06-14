@@ -1,4 +1,4 @@
-#include "../../headers/fat-helpers/kapi.h"
+#include "kapi.h"
 
 int k_open(const char *fname, int mode) {
     // Return if not mounted

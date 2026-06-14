@@ -1,4 +1,5 @@
-#include "../../headers/other-helpers/lru_cache.h"
+#include "lru_cache.h"
+
 #include "disk/block.h"
 
 // Linked list static variables
@@ -13,13 +14,36 @@ static err_t lru_cache_remove_back();
 
 static err_t write_block_data(void *data, block_no_t num);
 static err_t read_block_data(void *data, block_no_t num);
+static err_t map_fs_block_to_disk_block(block_no_t num, uint64_t *disk_block);
+
+static err_t map_fs_block_to_disk_block(block_no_t num, uint64_t *disk_block) {
+    uint64_t fs_block_count = fs_get_block_count();
+    if (fs_block_count == 0 || (uint64_t)num >= fs_block_count) {
+        return INVALID_ARGS;
+    }
+
+    *disk_block = fs_get_base_block() + num;
+    return SUCCESS;
+}
 
 static err_t read_block_data(void *data, block_no_t num) {
-    return block_read(num, 1, data);
+    uint64_t disk_block;
+    err_t err = map_fs_block_to_disk_block(num, &disk_block);
+    if (err != SUCCESS) {
+        return FILE_READ_ERROR;
+    }
+
+    return block_read(disk_block, 1, data) == 0 ? SUCCESS : FILE_READ_ERROR;
 }
 
 static err_t write_block_data(void *data, block_no_t num) {
-    return block_write(num, 1, data);
+    uint64_t disk_block;
+    err_t err = map_fs_block_to_disk_block(num, &disk_block);
+    if (err != SUCCESS) {
+        return FILE_WRITE_ERROR;
+    }
+
+    return block_write(disk_block, 1, data) == 0 ? SUCCESS : FILE_WRITE_ERROR;
 }
 
 static void lru_cache_remove_node(struct node_st *node) {

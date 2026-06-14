@@ -15,8 +15,8 @@ typedef uint16_t block_no_t;
 
 #include "inodes.h"
 #include "oft.h"
-#include "../other-helpers/lru_cache.h"
-#include "../other-helpers/inode_cache.h"
+#include "fs/caches/lru_cache.h"
+#include "fs/caches/inode_cache.h"
 #include "errors.h"
 #include "inodes.h"
 
@@ -62,6 +62,12 @@ err_t mount(const char *fs_name);
  * or a negative error code on failure.
  */
 err_t unmount();
+
+err_t fs_set_block_region(uint64_t base_block, uint64_t block_count);
+
+uint64_t fs_get_base_block(void);
+
+uint64_t fs_get_block_count(void);
 
 /**
  * @brief Get the (relative) block number of the block at position

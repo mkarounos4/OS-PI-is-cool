@@ -1,4 +1,4 @@
-#include "../../headers/fat-helpers/disk.h"
+#include "disk.h"
 
 static int is_mounted = 0;
 static char *mounted_file_name = NULL;
@@ -6,6 +6,30 @@ static int mounted_file_d = -1;
 static int bytes_per_block = 0;
 static int num_table_blocks = 0;
 static uint16_t curr_dir = 1;
+static uint64_t fs_base_block = 0;
+static uint64_t fs_block_count = 0;
+
+err_t fs_set_block_region(uint64_t base_block, uint64_t block_count) {
+    if (block_count == 0) {
+        return INVALID_ARGS;
+    }
+
+    if (base_block + block_count < base_block) {
+        return INVALID_ARGS;
+    }
+
+    fs_base_block = base_block;
+    fs_block_count = block_count;
+    return SUCCESS;
+}
+
+uint64_t fs_get_base_block(void) {
+    return fs_base_block;
+}
+
+uint64_t fs_get_block_count(void) {
+    return fs_block_count;
+}
 
 err_t mkfs(const char *fs_name, int blocks_in_fat, int block_size_config) {
     // Create disk image

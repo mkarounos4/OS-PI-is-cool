@@ -1,4 +1,4 @@
-#include "../../headers/fat-helpers/errors.h"
+#include "errors.h"
 
 void print_error(err_t error) {
     switch(error) {

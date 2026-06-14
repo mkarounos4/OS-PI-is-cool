@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../fat-helpers/inodes.h"
+#include "fs/inodes.h"
 
 struct cached_inode_st {
     struct inode_st inode; // Actual cached inode data

@@ -1,5 +1,5 @@
-#include "../../headers/fat-helpers/cmds.h"
-#include "../../headers/fat-helpers/kapi.h"
+#include "cmds.h"
+#include "kapi.h"
 
 #include <unistd.h>
 

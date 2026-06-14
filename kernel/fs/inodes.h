@@ -27,7 +27,7 @@ struct cached_inode_st;
 
 #include "errors.h"
 #include "disk.h"
-#include "../other-helpers/inode_cache.h"
+#include "fs/caches/inode_cache.h"
 
 
 // Constants

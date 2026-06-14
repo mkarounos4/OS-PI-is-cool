@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../fat-helpers/disk.h"
+#include "fs/disk.h"
 
 #define MAX_SIZE 12
 

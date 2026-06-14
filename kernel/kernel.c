@@ -10,8 +10,8 @@
 #include "syscall/syscall.h"
 #include "signals/signals.h"
 #include "memory/mmu.h"
-#include "block/block.h"
-#include "block/block_test.h"
+#include "disk/block.h"
+#include "disk/block_test.h"
 
 void kernel_main(void) {
     uart_init();

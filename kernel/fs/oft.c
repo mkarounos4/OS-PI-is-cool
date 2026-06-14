@@ -1,4 +1,4 @@
-#include "../../headers/fat-helpers/oft.h"
+#include "oft.h"
 
 static Vec open_file_table;
 
