@@ -151,6 +151,8 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     new_proc->waiting_for_flags = 0;
     new_proc->exit_code = 0;
     new_proc->name = NULL;
+    new_proc->entry_func = func;
+    new_proc->args = args;
 
     uint64_t *user_l0 = initialize_user_page_table();
     if (user_l0 == NULL) {
@@ -265,6 +267,39 @@ void processes_init() {
     }
 
     proc_create((void *(*)(void *))(uintptr_t)USER_INIT_PROCESS_ENTRY, NULL, 0);
+}
+
+void cpy_address_space(pcb_t *src, pcb_t *dst) {
+    uint64_t *src_l0 = (uint64_t *)(uintptr_t)src->ctx.ttbr0_el1;
+
+    /* TODO: walk table, allocating a new page in dst for each page in src, 
+     * copying over the contents to dst */
+}
+
+pid_t fork() {
+    // create child process off of parent
+    parent = get_curr_process();
+    child = proc_create(parent->entry_func, parent->args, parent->pid);
+    
+    // cpy parent trap frame over to child
+    uint64_t parent_frame_va = src_pcb->ctx.x19;
+    struct trap_frame *parent_frame = (struct trap_frame *)(uintptr_t)parent_frame_va;
+    uint64_t child_frame_va = dst_pcb->ctx.x19;
+    struct trap_frame *child_frame = (struct trap_frame *)(uintptr_t)child_frame_va;
+    *child_frame = *parent_frame;
+
+    // modify child return register
+    child_frame->regs[0] = 0;
+
+    cpy_address_space(child, parent);
+
+    child->file_descriptors = parent->file_descriptors;
+
+    // make child runnable
+    add_task_to_scheduler(child);
+
+    // return child pid to parent's call
+    return child->pid;
 }
 
 // Add stop/terminate/block/unblock/continue process (but reqs signal mask and handlers)

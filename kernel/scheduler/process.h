@@ -41,6 +41,8 @@ typedef struct pcb_st {
     enum process_state state;
     int exit_code;
     uint32_t blocked_until;
+    void *(*entry_func)(void*);
+    void *args;
 
     // Thread parameters (implementation simplified to one thread per process)
     struct cpu_context ctx;
@@ -57,6 +59,7 @@ void processes_init();
 pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid);
 void proc_destroy(pcb_t *p);
 long s_waitpid_impl(pid_t pid, int *status, int32_t flags);
+pid_t fork();
 
 void terminate_process(pcb_t *pcb);
 void stop_process(pcb_t *pcb);
