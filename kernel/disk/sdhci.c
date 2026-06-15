@@ -84,7 +84,6 @@
 
 #define SDHCI_WAIT_LIMIT           1000000u
 #define SDHCI_ACMD41_RETRIES       200u
-#define SDHCI_TRANSFER_RETRIES     3u
 
 typedef struct sdhci_platform {
     const char *name;
@@ -666,11 +665,6 @@ int sdhci_block_init(void) {
         return -1;
     }
 
-    if (wait_card_ready_for_data() != 0) {
-        uart_puts("[sdhci] card not ready after transfer clock\n");
-        return -1;
-    }
-
     sd.initialized = 1;
     uart_puts("[sdhci] card ready\n");
     return 0;
@@ -692,14 +686,11 @@ static int block_request_valid(uint64_t lba, uint32_t count, const void *buf) {
     return 0;
 }
 
-static void recover_transfer(void) {
-    reset_command_line();
-    reset_data_line();
-    timer_delay_ms(2);
-    (void)wait_card_ready_for_data();
-}
+int sdhci_block_read(uint64_t lba, uint32_t count, void *buf) {
+    if (block_request_valid(lba, count, buf) != 0) {
+        return -1;
+    }
 
-static int sdhci_block_read_once(uint64_t lba, uint32_t count, void *buf) {
     uint32_t arg = sd.high_capacity ? (uint32_t)lba : (uint32_t)(lba * SD_BLOCK_SIZE_BYTES);
     uint32_t *dst = (uint32_t *)buf;
     uint32_t command = (count == 1) ? 17u : 18u;
@@ -743,29 +734,11 @@ static int sdhci_block_read_once(uint64_t lba, uint32_t count, void *buf) {
     return wait_card_ready_for_data();
 }
 
-int sdhci_block_read(uint64_t lba, uint32_t count, void *buf) {
+int sdhci_block_write(uint64_t lba, uint32_t count, const void *buf) {
     if (block_request_valid(lba, count, buf) != 0) {
         return -1;
     }
 
-    for (uint32_t attempt = 0; attempt < SDHCI_TRANSFER_RETRIES; attempt++) {
-        if (attempt != 0) {
-            recover_transfer();
-        }
-
-        if (sdhci_block_read_once(lba, count, buf) == 0) {
-            return 0;
-        }
-
-        uart_puts("[sdhci] retrying read attempt=");
-        uart_puthex(attempt + 1u);
-        uart_puts("\n");
-    }
-
-    return -1;
-}
-
-static int sdhci_block_write_once(uint64_t lba, uint32_t count, const void *buf) {
     uint32_t arg = sd.high_capacity ? (uint32_t)lba : (uint32_t)(lba * SD_BLOCK_SIZE_BYTES);
     const uint32_t *src = (const uint32_t *)buf;
     uint32_t command = (count == 1) ? 24u : 25u;
@@ -811,28 +784,6 @@ static int sdhci_block_write_once(uint64_t lba, uint32_t count, const void *buf)
     }
 
     return wait_card_ready_for_data();
-}
-
-int sdhci_block_write(uint64_t lba, uint32_t count, const void *buf) {
-    if (block_request_valid(lba, count, buf) != 0) {
-        return -1;
-    }
-
-    for (uint32_t attempt = 0; attempt < SDHCI_TRANSFER_RETRIES; attempt++) {
-        if (attempt != 0) {
-            recover_transfer();
-        }
-
-        if (sdhci_block_write_once(lba, count, buf) == 0) {
-            return 0;
-        }
-
-        uart_puts("[sdhci] retrying write attempt=");
-        uart_puthex(attempt + 1u);
-        uart_puts("\n");
-    }
-
-    return -1;
 }
 
 const block_device_info_t *sdhci_block_get_info(void) {

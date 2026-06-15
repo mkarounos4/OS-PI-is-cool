@@ -274,10 +274,11 @@ static err_t validate_root_directory(void) {
         return FS_INVALID;
     }
 
+    uint32_t total_blocks = get_total_fs_blocks();
     if (root_inode.metadata.i_blocks == 0 ||
         root_inode.metadata.i_blocks > 12 ||
         root_inode.blocks[0] != get_data_start_block() ||
-        root_inode.blocks[0] >= get_total_fs_blocks()) {
+        root_inode.blocks[0] >= total_blocks) {
         return FS_INVALID;
     }
 
@@ -286,10 +287,13 @@ static err_t validate_root_directory(void) {
         return FILE_READ_ERROR;
     }
 
-    int valid = 0;
-    for (uint32_t block_idx = 0; block_idx < root_inode.metadata.i_blocks; block_idx++) {
+    int dirents_per_block = get_bytes_per_block() / (int)sizeof(struct fs_dirent);
+    int found_end = 0;
+    for (uint32_t block_idx = 0;
+         block_idx < root_inode.metadata.i_blocks;
+         block_idx++) {
         block_no_t block = root_inode.blocks[block_idx];
-        if (block == 0 || block >= get_total_fs_blocks()) {
+        if (block == 0 || block >= total_blocks) {
             kfree(dir);
             return FS_INVALID;
         }
@@ -300,8 +304,6 @@ static err_t validate_root_directory(void) {
             return FS_INVALID;
         }
 
-        int dirents_per_block =
-            get_bytes_per_block() / (int)sizeof(struct fs_dirent);
         int start_idx = 0;
         if (block_idx == 0) {
             if (strcmp(dir[0].name, ".") != 0 ||
@@ -318,18 +320,18 @@ static err_t validate_root_directory(void) {
 
         for (int i = start_idx; i < dirents_per_block; i++) {
             if (strcmp(dir[i].name, "\0") == 0) {
-                valid = 1;
+                found_end = 1;
                 break;
             }
         }
 
-        if (valid) {
+        if (found_end) {
             break;
         }
     }
 
     kfree(dir);
-    return valid ? SUCCESS : FS_INVALID;
+    return found_end ? SUCCESS : FS_INVALID;
 }
 
 err_t fs_set_block_region(uint64_t base_block, uint64_t block_count) {
