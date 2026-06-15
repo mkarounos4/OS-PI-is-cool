@@ -1,9 +1,9 @@
 #pragma once
 
-#include <math.h>
-#include <time.h>
 #include "disk.h"
 #include "kapi.h"
+#include "memory/kmalloc.h"
+#include "uart/uart.h"
 
 // Flag bits for update_dirent_by_f_name, indicating which of the
 // optional parameters should actually overwrite the existing dirent.
@@ -46,13 +46,13 @@ struct fs_dirent {
     /** @brief NUL-padded file name (at most 31 chars + terminator). */
     char name[32];
     /** @brief inode id. */
-    uint16_t ino_id;
+    ino_id_t ino_id;
     /** @brief Entry kind: UNKNOWN_F_TYPE, REGULAR_F_TYPE, DIRECTORY_F_TYPE, or SYMBOLIC_F_TYPE. */
     uint8_t type;
     /** @brief Permission bits (typically rwx-style low 3 bits). */
     uint8_t perm;
     /** @brief Last modification time. */
-    time_t mtime;
+    fs_time_t mtime;
     /** @brief Padding reserved for future fields; keep struct size stable. */
     uint8_t reserved[16];
 };
@@ -76,7 +76,7 @@ struct fs_dirent {
  * @param new_id New first block / inode id (used only if EDIT_ID is set).
  * @return SUCCESS on success, or a negative error code on failure.
  */
-err_t update_dirent_by_f_name(const char* f_name, ino_id_t parent_id, uint8_t curr_type, int flags, uint8_t perm, uint8_t new_file_type, const char* new_f_name, uint16_t new_id);
+err_t update_dirent_by_f_name(const char* f_name, ino_id_t parent_id, uint8_t curr_type, int flags, uint8_t perm, uint8_t new_file_type, const char* new_f_name, ino_id_t new_id);
 
 /**
  * @brief Look up a dirent by name within the given directory and
@@ -118,7 +118,7 @@ err_t get_dirent_by_path(const char* f_path, struct fs_dirent* dirent, int file_
  * @param out_fd File descriptor to write the listing to.
  * @return SUCCESS on success, or a negative error code on failure.
  */
-err_t list_dirents(uint16_t ino_id, int out_fd);
+err_t list_dirents(ino_id_t ino_id, int out_fd);
 
 /**
  * @brief Remove the dirent matching f_name and file_type from the
@@ -132,7 +132,7 @@ err_t list_dirents(uint16_t ino_id, int out_fd);
  * @return SUCCESS on success, FILE_NOT_FOUND if no matching entry,
  * or a negative error code on failure.
  */
-err_t remove_dirent_by_f_name_and_type(const char* f_name, uint8_t file_type, int parent_dir);
+err_t remove_dirent_by_f_name_and_type(const char* f_name, uint8_t file_type, ino_id_t parent_dir);
 
 /**
  * @brief Create a new dirent at the given path, allocating any missing

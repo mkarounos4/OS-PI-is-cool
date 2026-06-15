@@ -1,6 +1,5 @@
 #pragma once
-
-#include <stdio.h>
+#include "uart/uart.h"
 
 #define SUCCESS 0
 #define FILE_WRITE_ERROR -1
@@ -23,6 +22,7 @@
 #define PID_NOT_FOUND -18
 #define FILE_NOT_CREATED -19
 #define CAT_SAME_INPUT_OUTPUT -20
+#define FS_INVALID -21
 
 typedef int err_t;
 

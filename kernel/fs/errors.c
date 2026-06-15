@@ -53,5 +53,8 @@ void print_error(err_t error) {
         case CAT_SAME_INPUT_OUTPUT:
             printf("Error: cat input and output file cannot be the same.\n");
             break;
+        case FS_INVALID:
+            printf("Error: invalid or missing file system.\n");
+            break;
     }
 }

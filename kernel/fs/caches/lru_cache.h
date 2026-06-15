@@ -1,6 +1,7 @@
 #pragma once
 
 #include "fs/disk.h"
+#include "memory/kmalloc.h"
 
 #define MAX_SIZE 12
 

@@ -84,6 +84,7 @@
 
 #define SDHCI_WAIT_LIMIT           1000000u
 #define SDHCI_ACMD41_RETRIES       200u
+#define SDHCI_TRANSFER_RETRIES     3u
 
 typedef struct sdhci_platform {
     const char *name;
@@ -110,7 +111,7 @@ static const sdhci_platform_t active_platform = {
     .base = UINT64_C(0x3f300000),
     .base_clock_hz = 52000000u,
     .init_clock_hz = 400000u,
-    .transfer_clock_hz = 400000u,
+    .transfer_clock_hz = 25000000u,
     .platform_setup = qemu_sdhci_setup,
 };
 #else
@@ -121,7 +122,7 @@ static const sdhci_platform_t rpi5_platform = {
     .base = RPI5_BCM2712_SDIO1_BASE,
     .base_clock_hz = 50000000u,
     .init_clock_hz = 400000u,
-    .transfer_clock_hz = 400000u,
+    .transfer_clock_hz = 12500000u,
     .platform_setup = rpi5_sdhci_setup,
 };
 #define active_platform rpi5_platform
@@ -340,6 +341,9 @@ static int send_command(uint32_t index, uint32_t arg, uint32_t response,
     if (wait_int_status(SDHCI_INT_CMD_COMPLETE) != 0) {
         log_command_failure(index);
         reset_command_line();
+        if ((flags & SD_CMD_DATA_PRESENT) != 0) {
+            reset_data_line();
+        }
         return -1;
     }
 
@@ -355,6 +359,67 @@ static int send_app_command(uint32_t acmd, uint32_t arg, uint32_t response,
     }
 
     return send_command(acmd, arg, response, flags, transfer_mode);
+}
+
+static uint32_t get_csd_bits(const uint32_t csd[4], uint32_t high, uint32_t low) {
+    uint32_t value = 0;
+
+    for (uint32_t bit = low; bit <= high; bit++) {
+        uint32_t word = 3u - (bit / 32u);
+        uint32_t bit_in_word = bit % 32u;
+        if ((csd[word] & (1u << bit_in_word)) != 0) {
+            value |= 1u << (bit - low);
+        }
+    }
+
+    return value;
+}
+
+static int read_card_capacity(void) {
+    if (send_command(9, SD_RCA_ARG(sd.rca), SD_CMD_RESP_136,
+                     SD_CMD_CRC_CHECK, 0) != 0) {
+        return -1;
+    }
+
+    uint32_t resp[4] = {
+        reg_read32(SDHCI_RESPONSE3),
+        reg_read32(SDHCI_RESPONSE2),
+        reg_read32(SDHCI_RESPONSE1),
+        reg_read32(SDHCI_RESPONSE0),
+    };
+    uint32_t csd[4] = {
+        (resp[0] << 8) | (resp[1] >> 24),
+        (resp[1] << 8) | (resp[2] >> 24),
+        (resp[2] << 8) | (resp[3] >> 24),
+        resp[3] << 8,
+    };
+
+    uint32_t csd_structure = get_csd_bits(csd, 127, 126);
+    uint64_t sectors = 0;
+    if (csd_structure == 1) {
+        uint32_t c_size = get_csd_bits(csd, 69, 48);
+        sectors = ((uint64_t)c_size + 1u) * 1024u;
+    } else if (csd_structure == 0) {
+        uint32_t read_bl_len = get_csd_bits(csd, 83, 80);
+        uint32_t c_size = get_csd_bits(csd, 73, 62);
+        uint32_t c_size_mult = get_csd_bits(csd, 49, 47);
+        uint64_t block_len = UINT64_C(1) << read_bl_len;
+        uint64_t block_count =
+            ((uint64_t)c_size + 1u) * (UINT64_C(1) << (c_size_mult + 2u));
+        sectors = (block_count * block_len) / SD_BLOCK_SIZE_BYTES;
+    } else {
+        uart_puts("[sdhci] unsupported CSD structure\n");
+        return -1;
+    }
+
+    if (sectors == 0) {
+        uart_puts("[sdhci] invalid CSD capacity\n");
+        return -1;
+    }
+
+    sd.info.sector_count = sectors;
+    log_hex("[sdhci] sectors=", sectors);
+    return 0;
 }
 
 static int wait_card_ready_for_data(void) {
@@ -484,6 +549,10 @@ static int init_card(void) {
     sd.rca = (reg_read32(SDHCI_RESPONSE0) >> 16) & 0xffffu;
     log_hex("[sdhci] RCA=", sd.rca);
 
+    if (read_card_capacity() != 0) {
+        return -1;
+    }
+
     if (send_command(7, SD_RCA_ARG(sd.rca), SD_CMD_RESP_48_BUSY,
                      SD_CMD_CRC_CHECK | SD_CMD_INDEX_CHECK, 0) != 0) {
         return -1;
@@ -497,8 +566,11 @@ static int init_card(void) {
         return -1;
     }
 
-    (void)read_scr();
-    return 0;
+    if (read_scr() != 0) {
+        reset_data_line();
+    }
+
+    return wait_card_ready_for_data();
 }
 
 #if !defined(PLATFORM_QEMU)
@@ -594,17 +666,40 @@ int sdhci_block_init(void) {
         return -1;
     }
 
+    if (wait_card_ready_for_data() != 0) {
+        uart_puts("[sdhci] card not ready after transfer clock\n");
+        return -1;
+    }
+
     sd.initialized = 1;
     uart_puts("[sdhci] card ready\n");
     return 0;
 }
 
-int sdhci_block_read(uint64_t lba, uint32_t count, void *buf) {
-    if (!sd.initialized || buf == NULL || count == 0 || count > UINT16_MAX ||
-        lba > UINT32_MAX) {
+static int block_request_valid(uint64_t lba, uint32_t count, const void *buf) {
+    if (!sd.initialized || buf == NULL || count == 0 || count > UINT16_MAX) {
         return -1;
     }
 
+    if (lba > UINT32_MAX || lba + count < lba) {
+        return -1;
+    }
+
+    if (sd.info.sector_count != 0 && lba + count > sd.info.sector_count) {
+        return -1;
+    }
+
+    return 0;
+}
+
+static void recover_transfer(void) {
+    reset_command_line();
+    reset_data_line();
+    timer_delay_ms(2);
+    (void)wait_card_ready_for_data();
+}
+
+static int sdhci_block_read_once(uint64_t lba, uint32_t count, void *buf) {
     uint32_t arg = sd.high_capacity ? (uint32_t)lba : (uint32_t)(lba * SD_BLOCK_SIZE_BYTES);
     uint32_t *dst = (uint32_t *)buf;
     uint32_t command = (count == 1) ? 17u : 18u;
@@ -648,12 +743,29 @@ int sdhci_block_read(uint64_t lba, uint32_t count, void *buf) {
     return wait_card_ready_for_data();
 }
 
-int sdhci_block_write(uint64_t lba, uint32_t count, const void *buf) {
-    if (!sd.initialized || buf == NULL || count == 0 || count > UINT16_MAX ||
-        lba > UINT32_MAX) {
+int sdhci_block_read(uint64_t lba, uint32_t count, void *buf) {
+    if (block_request_valid(lba, count, buf) != 0) {
         return -1;
     }
 
+    for (uint32_t attempt = 0; attempt < SDHCI_TRANSFER_RETRIES; attempt++) {
+        if (attempt != 0) {
+            recover_transfer();
+        }
+
+        if (sdhci_block_read_once(lba, count, buf) == 0) {
+            return 0;
+        }
+
+        uart_puts("[sdhci] retrying read attempt=");
+        uart_puthex(attempt + 1u);
+        uart_puts("\n");
+    }
+
+    return -1;
+}
+
+static int sdhci_block_write_once(uint64_t lba, uint32_t count, const void *buf) {
     uint32_t arg = sd.high_capacity ? (uint32_t)lba : (uint32_t)(lba * SD_BLOCK_SIZE_BYTES);
     const uint32_t *src = (const uint32_t *)buf;
     uint32_t command = (count == 1) ? 24u : 25u;
@@ -699,6 +811,28 @@ int sdhci_block_write(uint64_t lba, uint32_t count, const void *buf) {
     }
 
     return wait_card_ready_for_data();
+}
+
+int sdhci_block_write(uint64_t lba, uint32_t count, const void *buf) {
+    if (block_request_valid(lba, count, buf) != 0) {
+        return -1;
+    }
+
+    for (uint32_t attempt = 0; attempt < SDHCI_TRANSFER_RETRIES; attempt++) {
+        if (attempt != 0) {
+            recover_transfer();
+        }
+
+        if (sdhci_block_write_once(lba, count, buf) == 0) {
+            return 0;
+        }
+
+        uart_puts("[sdhci] retrying write attempt=");
+        uart_puthex(attempt + 1u);
+        uart_puts("\n");
+    }
+
+    return -1;
 }
 
 const block_device_info_t *sdhci_block_get_info(void) {

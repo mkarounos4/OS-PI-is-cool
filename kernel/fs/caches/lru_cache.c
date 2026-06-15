@@ -84,9 +84,9 @@ err_t lru_cache_add_to_front(struct node_st **ret_node, block_no_t block_num) {
         lru_cache_remove_node(to_add);
     } else {
         // If not, read in block data and create new Linked List node
-        to_add = malloc(sizeof(struct node_st));
+        to_add = kmalloc(sizeof(struct node_st));
         *to_add = (struct node_st) {
-            .data = malloc(get_bytes_per_block()),
+            .data = kmalloc(get_bytes_per_block()),
             .dirty = 0,
             .block = block_num,
             .next_node = NULL,
@@ -96,8 +96,8 @@ err_t lru_cache_add_to_front(struct node_st **ret_node, block_no_t block_num) {
         // Read in the block data to cache'd node
         err_t err_code = read_block_data(to_add->data, block_num);
         if (err_code) {
-            free(to_add->data);
-            free(to_add);
+            kfree(to_add->data);
+            kfree(to_add);
             return err_code;
         }
     }
@@ -152,30 +152,72 @@ static err_t lru_cache_remove_back() {
     if (to_remove->dirty) {
         err_t err_code = write_block_data(to_remove->data, to_remove->block);
         if (err_code) {
+            kfree(to_remove->data);
+            kfree(to_remove);
             return err_code;
         }
     }
 
     // Free from memory
-    free(to_remove->data);
-    free(to_remove);
+    kfree(to_remove->data);
+    kfree(to_remove);
 
     return SUCCESS;
 }
 
 err_t lru_cache_update_data(void *data, block_no_t block_num) {
-    // Get block from cache (or add if necessary) and add to front of LRU
-    struct node_st *to_update;
-    err_t err_code = lru_cache_add_to_front(&to_update, block_num);
-    if (err_code) {
-        return err_code;
+    struct node_st *to_update = lru_cache_get_block(block_num);
+
+    if (to_update != NULL) {
+        lru_cache_remove_node(to_update);
+    } else {
+        to_update = kmalloc(sizeof(struct node_st));
+        if (to_update == NULL) {
+            return FILE_WRITE_ERROR;
+        }
+
+        unsigned char *node_data = kmalloc(get_bytes_per_block());
+        if (node_data == NULL) {
+            kfree(to_update);
+            return FILE_WRITE_ERROR;
+        }
+
+        *to_update = (struct node_st) {
+            .data = node_data,
+            .dirty = 0,
+            .block = block_num,
+            .next_node = NULL,
+            .prev_node = NULL
+        };
     }
-    
-    // Write data from data to cache'd block's data
+
     memcpy(to_update->data, data, get_bytes_per_block());
 
-    // Flag block as dirty
-    to_update->dirty = 1;
+    err_t err_code = write_block_data(to_update->data, block_num);
+    if (err_code != SUCCESS) {
+        kfree(to_update->data);
+        kfree(to_update);
+        return err_code;
+    }
+
+    to_update->dirty = 0;
+
+    to_update->next_node = head;
+    to_update->prev_node = NULL;
+    if (head == NULL) {
+        tail = to_update;
+    } else {
+        head->prev_node = to_update;
+    }
+    head = to_update;
+    size++;
+
+    if (size > MAX_SIZE) {
+        err_code = lru_cache_remove_back();
+        if (err_code != SUCCESS) {
+            return err_code;
+        }
+    }
 
     return SUCCESS;
 }

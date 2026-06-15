@@ -1,60 +1,120 @@
 #include "oft.h"
 
 static Vec open_file_table;
+static int oft_initialized = 0;
+
+static char *copy_oft_name(const char *name) {
+    size_t len = 0;
+    while (name[len] != '\0') {
+        len++;
+    }
+
+    char *copy = kmalloc(len + 1);
+    if (copy == NULL) {
+        return NULL;
+    }
+    for (size_t i = 0; i <= len; i++) {
+        copy[i] = name[i];
+    }
+    return copy;
+}
 
 static void entry_deletor(void *entry) {
     if (entry != NULL) {
         struct oft_entry *oentry = (struct oft_entry*) entry;
-        free(oentry->file_name);
+        kfree(oentry->file_name);
         if (oentry->ino_id > 0) {
             remove_ref_from_cache(oentry->ino_id);
         }
-        free(entry);
+        kfree(entry);
     }
 }
 
 err_t initialize_oft() {
+    if (oft_initialized) {
+        empty_oft();
+    }
+
     open_file_table = vec_new(3, entry_deletor);
-    struct oft_entry *stdin_file_entry = malloc(sizeof(struct oft_entry));
+    oft_initialized = 1;
+
+    struct oft_entry *stdin_file_entry = kmalloc(sizeof(struct oft_entry));
+    if (stdin_file_entry == NULL) {
+        empty_oft();
+        return FILE_OPEN_ERROR;
+    }
     *stdin_file_entry = (struct oft_entry) {
         .mode = F_READ,
         .cursor = 0,
         .ref_count = 1,
-        .file_name = "STDIN",
-        .ino_id = -1,
-        .parent_id = -1,
+        .file_name = copy_oft_name("STDIN"),
+        .ino_id = 0,
+        .parent_id = 0,
         .inode = NULL
     };
+    if (stdin_file_entry->file_name == NULL) {
+        kfree(stdin_file_entry);
+        empty_oft();
+        return FILE_OPEN_ERROR;
+    }
     vec_push_back(&open_file_table, stdin_file_entry);
 
-    struct oft_entry *stdout_file_entry = malloc(sizeof(struct oft_entry));
+    struct oft_entry *stdout_file_entry = kmalloc(sizeof(struct oft_entry));
+    if (stdout_file_entry == NULL) {
+        empty_oft();
+        return FILE_OPEN_ERROR;
+    }
     *stdout_file_entry = (struct oft_entry) {
         .mode = F_WRITE,
         .cursor = 0,
         .ref_count = 1,
-        .file_name = "STDOUT",
-        .ino_id = -1,
-        .parent_id = -1,
+        .file_name = copy_oft_name("STDOUT"),
+        .ino_id = 0,
+        .parent_id = 0,
         .inode = NULL
     };
+    if (stdout_file_entry->file_name == NULL) {
+        kfree(stdout_file_entry);
+        empty_oft();
+        return FILE_OPEN_ERROR;
+    }
     vec_push_back(&open_file_table, stdout_file_entry);
 
-    struct oft_entry *stderr_file_entry = malloc(sizeof(struct oft_entry));
+    struct oft_entry *stderr_file_entry = kmalloc(sizeof(struct oft_entry));
+    if (stderr_file_entry == NULL) {
+        empty_oft();
+        return FILE_OPEN_ERROR;
+    }
     *stderr_file_entry = (struct oft_entry) {
         .mode = F_WRITE,
         .cursor = 0,
         .ref_count = 1,
-        .file_name = "STDERR",
-        .ino_id = -1,
-        .parent_id = -1,
+        .file_name = copy_oft_name("STDERR"),
+        .ino_id = 0,
+        .parent_id = 0,
         .inode = NULL
     };
+    if (stderr_file_entry->file_name == NULL) {
+        kfree(stderr_file_entry);
+        empty_oft();
+        return FILE_OPEN_ERROR;
+    }
     vec_push_back(&open_file_table, stderr_file_entry);
 
     return SUCCESS;
 }
 
-int oft_open_file(int mode, const char *file_name, ino_id_t ino_id, uint16_t dir_block) {
+err_t empty_oft(void) {
+    if (!oft_initialized) {
+        return SUCCESS;
+    }
+
+    vec_destroy(&open_file_table);
+    oft_initialized = 0;
+    return SUCCESS;
+}
+
+int oft_open_file(int mode, const char *file_name, ino_id_t ino_id, ino_id_t dir_block) {
     int oft_id;
     int err = find_file_in_table(ino_id, file_name, dir_block, mode, &oft_id);
 
@@ -70,7 +130,7 @@ int oft_open_file(int mode, const char *file_name, ino_id_t ino_id, uint16_t dir
         return oft_id;
     } else {
         // if file we're trying to open doesn't have a dirent yet (i.e. id_in_fs is 0, do that)
-        struct oft_entry *new_entry = malloc(sizeof(struct oft_entry));
+        struct oft_entry *new_entry = kmalloc(sizeof(struct oft_entry));
         *new_entry = (struct oft_entry) {
             .mode = mode,
             .cursor = 0,
@@ -78,7 +138,7 @@ int oft_open_file(int mode, const char *file_name, ino_id_t ino_id, uint16_t dir
             .ino_id = ino_id,
             .inode = NULL,
             .parent_id = dir_block,
-            .file_name = malloc(sizeof(char) * (strlen(file_name)+1))
+            .file_name = kmalloc(sizeof(char) * (strlen(file_name)+1))
         };
         
         // Create new file if applicable

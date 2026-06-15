@@ -18,7 +18,7 @@ struct cached_inode_st *get_inode_from_cache(ino_id_t id) {
     }
 
     // If not in cache yet, create it
-    node = malloc(sizeof(struct cache_ll_node_st));
+    node = kmalloc(sizeof(struct cache_ll_node_st));
     *node = (struct cache_ll_node_st) {
         .num_refs = 1,
         .next = NULL,
@@ -51,7 +51,7 @@ struct cached_inode_st *get_inode_from_cache(ino_id_t id) {
         } else {
             node->next->prev = node->prev;
         }
-        free(node);
+        kfree(node);
         print_error(error);
         return NULL;
     }
@@ -108,12 +108,12 @@ static int remove_cache_inode(struct cache_ll_node_st *node) {
     if (node->cache_node.dirty) {
         err_t error = write_inode(&node->cache_node.inode, node->cache_node.id);
         if (error != SUCCESS) {
-            free(node);
+            kfree(node);
             return error;
         }
     }
 
-    free(node);
+    kfree(node);
     return SUCCESS;
 }
 

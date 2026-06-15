@@ -167,7 +167,7 @@ err_t cat(char **file, char *output_file, int flag) {
             return in_fd;
         }
 
-        char *data_read = malloc(BUFF_SIZE);
+        char *data_read = kmalloc(BUFF_SIZE);
         if (data_read == NULL) {
             if (in_fd != 0) {
                 k_close(in_fd);
@@ -180,8 +180,7 @@ err_t cat(char **file, char *output_file, int flag) {
 
         int bytes_read;
         do {
-            bytes_read = reading_stdin ? read(in_fd, data_read, BUFF_SIZE)
-                                       : k_read(in_fd, data_read, BUFF_SIZE);
+            bytes_read = k_read(in_fd, data_read, BUFF_SIZE);
             if (bytes_read < 0) {
                 if (in_fd != 0) {
                     k_close(in_fd);
@@ -189,7 +188,7 @@ err_t cat(char **file, char *output_file, int flag) {
                 if (out_fd != 1) {
                     k_close(out_fd);
                 }
-                free(data_read);
+                kfree(data_read);
                 return FILE_READ_ERROR;
             }
             if (bytes_read > 0) {
@@ -201,12 +200,12 @@ err_t cat(char **file, char *output_file, int flag) {
                     if (out_fd != 1) {
                         k_close(out_fd);
                     }
-                    free(data_read);
+                    kfree(data_read);
                     return FILE_WRITE_ERROR;
                 }
             }
         } while (bytes_read > 0);
-        free(data_read);
+        kfree(data_read);
 
         if (in_fd != 0) {
             k_close(in_fd);
@@ -246,7 +245,7 @@ err_t cp(char *src_path, char *dest_path, int flag) {
     dest_fd = k_open(dest_path, F_WRITE);
 
     const int BUF_SIZE = 1024;
-    char* buf = malloc(BUF_SIZE);
+    char* buf = kmalloc(BUF_SIZE);
 
     while (1) {
         int bytes_read;
@@ -272,7 +271,7 @@ err_t cp(char *src_path, char *dest_path, int flag) {
     return SUCCESS;
 }
 
-err_t chmod(char *file_name, char *new_perms, int flag) {
+err_t fs_chmod(char *file_name, char *new_perms, int flag) {
     // Return if not mounted
     if (!get_is_mounted()) {
         return FS_NOT_MOUNTED;
@@ -283,9 +282,10 @@ err_t chmod(char *file_name, char *new_perms, int flag) {
     }
 
     uint8_t perm_to_add = 0;
-    errno = 0;
-    int perm_as_int = atoi(new_perms);
-    if (perm_as_int != 0) {
+    int perm_as_int;
+    int err = atoi(new_perms, &perm_as_int);
+
+    if (err == SUCCESS) {
         perm_to_add = perm_as_int;
         if (perm_to_add > 7) {
             return INVALID_ARGS;

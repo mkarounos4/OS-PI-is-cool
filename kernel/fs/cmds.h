@@ -1,8 +1,7 @@
 #pragma once
 
-#include <errno.h>
-
 #include "errors.h"
+#include "memory/kmalloc.h"
 
 /**
  * @brief Create each file in a NULL-terminated list if it does not yet
@@ -84,7 +83,7 @@ err_t cp(char *src_path, char *dest_path, int flag);
  * FILE_NOT_FOUND if file_name does not exist, INVALID_ARGS if new_perms
  * is malformed, or an error code propagated from k_chmod.
  */
-err_t chmod(char *file_name, char *new_perms, int flag);
+err_t fs_chmod(char *file_name, char *new_perms, int flag);
 
 /**
  * @brief List the directory entries of dir_path and write a formatted

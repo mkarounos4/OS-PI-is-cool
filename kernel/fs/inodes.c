@@ -1,98 +1,261 @@
 #include "inodes.h"
 
-err_t mkfs_inode(int file_d, int blocks_in_fat, int bytes_per_block) {
-    // Add superblock data
-    unsigned char *data = malloc(bytes_per_block);
-    for (int i = 0; i < bytes_per_block; i++) {
-        data[i] = 0x00;
+#include "disk/block.h"
+#include "timer/timer.h"
+
+#define MKFS_FILL_CHUNK_BLOCKS 32u
+
+static void set_bitmap_bit_in_memory(unsigned char *data, uint32_t bit_idx) {
+    data[bit_idx / 8u] |= (unsigned char)(1u << (7u - (bit_idx % 8u)));
+}
+
+static uint32_t get_inode_capacity(void) {
+    return (uint32_t)get_num_table_blocks() * (uint32_t)INODES_PER_BLOCK;
+}
+
+static err_t set_block_allocated(block_no_t block_num, int allocated) {
+    return set_bit_in_bitmap_range(get_block_bitmap_start(),
+                                   get_block_bitmap_blocks(),
+                                   get_total_fs_blocks(),
+                                   block_num,
+                                   allocated);
+}
+
+static err_t set_inode_allocated(ino_id_t inode_id, int allocated) {
+    if (inode_id == 0) {
+        return INVALID_ARGS;
+    }
+    return set_bit_in_bitmap_range(get_inode_bitmap_start(),
+                                   get_inode_bitmap_blocks(),
+                                   get_inode_capacity(),
+                                   inode_id - 1u,
+                                   allocated);
+}
+
+static err_t write_filled_blocks(block_no_t start_block,
+                                 uint32_t block_count,
+                                 unsigned char value,
+                                 int bytes_per_block) {
+    if (block_count == 0) {
+        return SUCCESS;
     }
 
-    // Initialize Superblock
+    if ((uint32_t)bytes_per_block != block_get_size()) {
+        return INVALID_ARGS;
+    }
+
+    uint32_t chunk_blocks = MKFS_FILL_CHUNK_BLOCKS;
+    unsigned char *data = kmalloc((uint32_t)bytes_per_block * chunk_blocks);
+    if (data == NULL) {
+        return FILE_WRITE_ERROR;
+    }
+
+    memset(data, value, (uint32_t)bytes_per_block * chunk_blocks);
+
+    uint32_t remaining = block_count;
+    block_no_t current = start_block;
+    while (remaining > 0) {
+        uint32_t chunk = remaining < chunk_blocks ? remaining : chunk_blocks;
+        if (block_write(fs_get_base_block() + current, chunk, data) != 0) {
+            kfree(data);
+            return FILE_WRITE_ERROR;
+        }
+        current += chunk;
+        remaining -= chunk;
+    }
+
+    kfree(data);
+    return SUCCESS;
+}
+
+static err_t write_block_bitmap(int bytes_per_block) {
+    unsigned char *data = kmalloc(bytes_per_block);
+    if (data == NULL) {
+        return FILE_WRITE_ERROR;
+    }
+
+    uint32_t bits_per_block = (uint32_t)bytes_per_block * 8u;
+    uint64_t used_blocks = (uint64_t)get_data_start_block() + 1u;
+    uint64_t total_blocks = get_total_fs_blocks();
+    uint32_t bitmap_blocks = get_block_bitmap_blocks();
+    uint32_t block = 0;
+
+    while (block < bitmap_blocks) {
+        uint64_t first_bit = (uint64_t)block * bits_per_block;
+        uint64_t end_bit = first_bit + bits_per_block;
+
+        if (end_bit <= used_blocks || first_bit >= total_blocks) {
+            uint32_t run = 1;
+            while (block + run < bitmap_blocks) {
+                uint64_t run_first = (uint64_t)(block + run) * bits_per_block;
+                uint64_t run_end = run_first + bits_per_block;
+                if (!(run_end <= used_blocks || run_first >= total_blocks)) {
+                    break;
+                }
+                run++;
+            }
+            err_t err = write_filled_blocks(get_block_bitmap_start() + block,
+                                            run, 0xFF, bytes_per_block);
+            if (err != SUCCESS) {
+                kfree(data);
+                return err;
+            }
+            block += run;
+            continue;
+        }
+
+        if (first_bit >= used_blocks && end_bit <= total_blocks) {
+            uint32_t run = 1;
+            while (block + run < bitmap_blocks) {
+                uint64_t run_first = (uint64_t)(block + run) * bits_per_block;
+                uint64_t run_end = run_first + bits_per_block;
+                if (!(run_first >= used_blocks && run_end <= total_blocks)) {
+                    break;
+                }
+                run++;
+            }
+            err_t err = write_filled_blocks(get_block_bitmap_start() + block,
+                                            run, 0x00, bytes_per_block);
+            if (err != SUCCESS) {
+                kfree(data);
+                return err;
+            }
+            block += run;
+            continue;
+        }
+
+        memset(data, 0, bytes_per_block);
+        for (uint32_t bit = 0; bit < bits_per_block; bit++) {
+            uint64_t global_bit = first_bit + bit;
+            if (global_bit < used_blocks || global_bit >= total_blocks) {
+                set_bitmap_bit_in_memory(data, bit);
+            }
+        }
+
+        err_t err = write_block(data, get_block_bitmap_start() + block);
+        if (err != SUCCESS) {
+            kfree(data);
+            return err;
+        }
+        block++;
+    }
+
+    kfree(data);
+    return SUCCESS;
+}
+
+static err_t write_inode_bitmap(int bytes_per_block) {
+    unsigned char *data = kmalloc(bytes_per_block);
+    if (data == NULL) {
+        return FILE_WRITE_ERROR;
+    }
+
+    uint32_t bits_per_block = (uint32_t)bytes_per_block * 8u;
+    uint32_t inode_count = get_inode_capacity();
+    for (uint32_t block = 0; block < get_inode_bitmap_blocks(); block++) {
+        memset(data, 0, bytes_per_block);
+        uint32_t first_bit = block * bits_per_block;
+        for (uint32_t bit = 0; bit < bits_per_block; bit++) {
+            uint32_t global_bit = first_bit + bit;
+            if (global_bit == 0 || global_bit >= inode_count) {
+                set_bitmap_bit_in_memory(data, bit);
+            }
+        }
+        err_t err = write_block(data, get_inode_bitmap_start() + block);
+        if (err != SUCCESS) {
+            kfree(data);
+            return err;
+        }
+    }
+
+    kfree(data);
+    return SUCCESS;
+}
+
+err_t mkfs_inode(int inode_table_blocks, int bytes_per_block) {
+    unsigned char *data = kmalloc(bytes_per_block);
+    if (data == NULL) {
+        return FILE_WRITE_ERROR;
+    }
+    memset(data, 0, bytes_per_block);
+
     struct superblock_st super;
-    super.inodes_indicator = INODES_INDICATOR;
-    super.bytes_per_block = bytes_per_block;
-    super.num_fat_inode_blocks = blocks_in_fat;
-    ssize_t bytes_written = write(file_d, &super, sizeof(struct superblock_st));
-    if (bytes_written < sizeof(struct superblock_st)) {
-        close(file_d);
-        free(data);
-        return FILE_WRITE_ERROR;
-    }
-    
-    // Write padding for superblock's block
-    ssize_t size_to_write = bytes_per_block - sizeof(struct superblock_st);
-    bytes_written = write(file_d, data, size_to_write);
-    if (bytes_written < size_to_write) {
-        close(file_d);
-        free(data);
-        return FILE_WRITE_ERROR;
-    }
-    
-    free(data);
+    memset(&super, 0, sizeof(super));
+    memcpy(super.signature, FS_SIGNATURE, FS_SIGNATURE_SIZE);
+    super.bytes_per_block = (uint32_t)bytes_per_block;
+    super.total_blocks = get_total_fs_blocks();
+    super.block_bitmap_start = get_block_bitmap_start();
+    super.block_bitmap_blocks = get_block_bitmap_blocks();
+    super.inode_bitmap_start = get_inode_bitmap_start();
+    super.inode_bitmap_blocks = get_inode_bitmap_blocks();
+    super.inode_table_start = get_inode_table_start();
+    super.inode_table_blocks = (uint32_t)inode_table_blocks;
+    super.data_start_block = get_data_start_block();
+    super.root_inode_id = ROOT_INO;
 
-    // Initializez block bitmap
-    data = malloc(bytes_per_block);
-    for (int i = 0; i < bytes_per_block; i++) {
-        data[i] = 0x00;
+    memset(data, 0, bytes_per_block);
+    err_t err = write_block(data, SUPERBLOCK_BLOCK);
+    if (err != SUCCESS) {
+        kfree(data);
+        return err;
     }
 
-    for (int i = 0; i < blocks_in_fat + INODE_TABLE_START_BLOCK + 1; i++) {
-        data[i / 8] |= (1 << (7-(i % 8)));
-    }
-    
-    bytes_written = write(file_d, data, bytes_per_block);
-    if (bytes_written < bytes_per_block) {
-        close(file_d);
-        free(data);
-        return FILE_WRITE_ERROR;
-    }
-    
-    // initialize inode bitmap
-    data[0] = 0x80;
-    for (int i = 1; i < bytes_per_block; i++) {
-        data[i] = 0x00;
-    }
-    
-    bytes_written = write(file_d, data, bytes_per_block);
-    if (bytes_written < bytes_per_block) {
-        close(file_d);
-        free(data);
-        return FILE_WRITE_ERROR;
+    err = write_block_bitmap(bytes_per_block);
+    if (err != SUCCESS) {
+        kfree(data);
+        return err;
     }
 
-    // Initialize root directory inode
-    struct inode_st *data_inodes = malloc(bytes_per_block);
+    err = write_inode_bitmap(bytes_per_block);
+    if (err != SUCCESS) {
+        kfree(data);
+        return err;
+    }
+
+    // Initialize inode table and root directory inode.
+    struct inode_st *data_inodes = kmalloc(bytes_per_block);
+    if (data_inodes == NULL) {
+        kfree(data);
+        return FILE_WRITE_ERROR;
+    }
     memset(data_inodes, 0, bytes_per_block);
     struct inode_st root_node;
+    memset(&root_node, 0, sizeof(root_node));
     attributes_t meta = {
+        .i_links_count = 2,
         .i_blocks = 1
     };
     root_node.metadata = meta;
-    for (int i = 1; i < 12; i++) { root_node.blocks[i] = 0; }
-    root_node.blocks[0] = INODE_TABLE_START_BLOCK + blocks_in_fat;
+    root_node.blocks[0] = get_data_start_block();
     data_inodes[0] = root_node;
-    bytes_written = write(file_d, data_inodes, bytes_per_block);
-    if (bytes_written < bytes_per_block) {
-        close(file_d);
-        free(data_inodes);
-        free(data);
-        return FILE_WRITE_ERROR;
+
+    err = write_block(data_inodes, get_inode_table_start());
+    if (err != SUCCESS) {
+        kfree(data_inodes);
+        kfree(data);
+        return err;
     }
 
-    data[0] = 0x00;
-    for (int i = 1; i < blocks_in_fat; i++) {
-        bytes_written = write(file_d, data, bytes_per_block);
-        if (bytes_written < bytes_per_block) {
-            close(file_d);
-            free(data);
-            return FILE_WRITE_ERROR;
+    if (inode_table_blocks > 1) {
+        err = write_filled_blocks(get_inode_table_start() + 1u,
+                                  (uint32_t)inode_table_blocks - 1u,
+                                  0x00, bytes_per_block);
+        if (err != SUCCESS) {
+            kfree(data_inodes);
+            kfree(data);
+            return err;
         }
     }
 
     // add dirent root
-    struct fs_dirent* data_root = malloc(bytes_per_block);
+    struct fs_dirent* data_root = kmalloc(bytes_per_block);
+    if (data_root == NULL) {
+        kfree(data_inodes);
+        kfree(data);
+        return FILE_WRITE_ERROR;
+    }
     memset(data_root, 0, bytes_per_block);
-    time_t now = time(NULL);
+    fs_time_t now = timer_get_ticks();
     data_root[0] = (struct fs_dirent) {
         .name =  ".",
         .ino_id = 1,
@@ -111,44 +274,52 @@ err_t mkfs_inode(int file_d, int blocks_in_fat, int bytes_per_block) {
         .name = "\0",
     };
 
-    bytes_written = write(file_d, data_root, bytes_per_block);
-    free(data_root);
-    if (bytes_written < bytes_per_block) {
-        close(file_d);
-        free(data_inodes);
-        free(data);
-        return FILE_WRITE_ERROR;
+    err = write_block(data_root, get_data_start_block());
+    kfree(data_root);
+    if (err != SUCCESS) {
+        kfree(data_inodes);
+        kfree(data);
+        return err;
     }
 
-    // Initialize remaining blocks
-    for (int i = INODE_TABLE_START_BLOCK + blocks_in_fat + 1; i < bytes_per_block * 8; i++) {
-        bytes_written = write(file_d, data, bytes_per_block);
-        if (bytes_written < bytes_per_block) {
-            close(file_d);
-            free(data_inodes);
-            free(data);
-            return FILE_WRITE_ERROR;
-        }
+    memset(data, 0, bytes_per_block);
+    memcpy(data, &super, sizeof(super));
+    err = write_block(data, SUPERBLOCK_BLOCK);
+    if (err != SUCCESS) {
+        kfree(data_inodes);
+        kfree(data);
+        return err;
     }
 
-    free(data);
-    free(data_inodes);
-    close(file_d);
+    kfree(data);
+    kfree(data_inodes);
 
     return SUCCESS;
 }
 
-// Returns SUCCESS, FS_ALREADY_MOUNTED, FILE_OPEN_ERROR, FILE_READ_ERROR, unmount's errors, and get_inode's errors
-err_t mount_inode(int *bytes_per_block, int *num_inode_blocks) {
-    // Read in superblock
-    struct superblock_st superblock;
-    ssize_t bytes_read = read(get_mounted_file_d(), &superblock, sizeof(struct superblock_st));
-    if (bytes_read < sizeof(struct superblock_st)) {
-        return FILE_READ_ERROR;
+err_t mount_inode(const struct superblock_st *superblock,
+                  int *bytes_per_block,
+                  int *num_inode_blocks) {
+    if (superblock == NULL || bytes_per_block == NULL ||
+        num_inode_blocks == NULL) {
+        return INVALID_ARGS;
     }
 
-    *bytes_per_block = superblock.bytes_per_block;
-    *num_inode_blocks = superblock.num_fat_inode_blocks;
+    err_t err = fs_set_layout(superblock->bytes_per_block,
+                              superblock->total_blocks,
+                              superblock->block_bitmap_start,
+                              superblock->block_bitmap_blocks,
+                              superblock->inode_bitmap_start,
+                              superblock->inode_bitmap_blocks,
+                              superblock->inode_table_start,
+                              superblock->inode_table_blocks,
+                              superblock->data_start_block);
+    if (err != SUCCESS) {
+        return err;
+    }
+
+    *bytes_per_block = (int)superblock->bytes_per_block;
+    *num_inode_blocks = (int)superblock->inode_table_blocks;
 
     return SUCCESS;
 }
@@ -161,21 +332,21 @@ err_t unmount_inode() {
 
 err_t get_inode_raw(struct inode_st *node, ino_id_t id) {
     block_no_t block_with_inode =
-        (id - 1) / INODES_PER_BLOCK + INODE_TABLE_START_BLOCK;
+        (id - 1) / INODES_PER_BLOCK + get_inode_table_start();
 
     int inode_num_in_block =
         (id - 1) % INODES_PER_BLOCK;
-    void *data = malloc(get_bytes_per_block());
+    void *data = kmalloc(get_bytes_per_block());
     int err = read_block(data, block_with_inode);
     if (err != 0) {
-        free(data);
+        kfree(data);
         return err;
     }
 
     struct inode_st *inodes = (struct inode_st*) data;
     *node = inodes[inode_num_in_block];
     
-    free(data);
+    kfree(data);
     return SUCCESS;
 }
 
@@ -186,57 +357,63 @@ err_t get_inode(struct cached_inode_st** node, ino_id_t id) {
 
 err_t write_inode(struct inode_st *node, ino_id_t id) {
     block_no_t block_with_inode =
-        (id - 1) / INODES_PER_BLOCK + INODE_TABLE_START_BLOCK;
+        (id - 1) / INODES_PER_BLOCK + get_inode_table_start();
 
     int inode_num_in_block =
         (id - 1) % INODES_PER_BLOCK;
-    struct inode_st *data = malloc(get_bytes_per_block());
+    struct inode_st *data = kmalloc(get_bytes_per_block());
     int err = read_block(data, block_with_inode);
     if (err != 0) {
-        free(data);
+        kfree(data);
         return err;
     }
 
     data[inode_num_in_block] = *node;
     err = write_block(data, block_with_inode);
     if (err != SUCCESS) {
-        free(data);
+        kfree(data);
         return err;
     }
 
-    free(data);
+    kfree(data);
     return SUCCESS;
 }
 
 err_t find_free_block(block_no_t *free_block, int update_taken) {
-    unsigned int free_block_u = 0;
-    err_t err_code = find_free_from_bitmap(&free_block_u, BLOCK_BITMAP, update_taken);
+    uint32_t free_block_u = 0;
+    err_t err_code = find_free_from_bitmap_range(&free_block_u,
+                                                 get_block_bitmap_start(),
+                                                 get_block_bitmap_blocks(),
+                                                 get_total_fs_blocks(),
+                                                 update_taken);
     if (err_code != SUCCESS) {
         return err_code;
     }
-    *free_block = (block_no_t) free_block_u - 1;
+    *free_block = (block_no_t)free_block_u;
     return SUCCESS;
 }
 
 err_t find_free_inode(ino_id_t *free_block, int update_taken) {
-    unsigned int free_block_u = 0;
-    err_t err_code = find_free_from_bitmap(&free_block_u, INODE_BITMAP, update_taken);
+    uint32_t free_block_u = 0;
+    uint32_t inode_capacity = get_inode_capacity();
+    err_t err_code = find_free_from_bitmap_range(&free_block_u,
+                                                 get_inode_bitmap_start(),
+                                                 get_inode_bitmap_blocks(),
+                                                 inode_capacity,
+                                                 update_taken);
     if (err_code != SUCCESS) {
         return err_code;
     }
-    *free_block = (ino_id_t) free_block_u;
-    if (free_block_u >= INODES_PER_BLOCK * get_num_table_blocks()) {
-        return NO_FREE_BLOCKS;
-    }
+    *free_block = (ino_id_t)(free_block_u + 1u);
     return SUCCESS;
 }
 
 block_no_t get_block_num_from_disk_ptr(block_no_t ptr_block_num, unsigned int desired_block_idx) {
-    void *data = malloc(get_bytes_per_block());
+    void *data = kmalloc(get_bytes_per_block());
     read_block(data, ptr_block_num);
     block_no_t *blocks_ptr_arr = (block_no_t*) data;
     block_no_t to_return = blocks_ptr_arr[desired_block_idx];
-    free(data);
+    kfree(data);
     return to_return;
 }
 
@@ -323,7 +500,7 @@ err_t allocate_block_for_file_inode(struct inode_st *inode, block_no_t *returned
         // Single block storage
         inode->blocks[inode->metadata.i_blocks] = block_was_alloc;
     } else if (inode->metadata.i_blocks < 12 + BLOCKS_IN_SINGLE_PTR) {
-        block_no_t *ptr_data = malloc(get_bytes_per_block());
+        block_no_t *ptr_data = kmalloc(get_bytes_per_block());
         
         // Create new single pointer if at 15
         if (inode->metadata.i_blocks == 15) {
@@ -340,7 +517,7 @@ err_t allocate_block_for_file_inode(struct inode_st *inode, block_no_t *returned
         } else {
             err_code = read_block(ptr_data, inode->blocks[12]);
             if (err_code != SUCCESS) {
-                free(ptr_data);
+                kfree(ptr_data);
                 return err_code;
             }
         }
@@ -348,7 +525,7 @@ err_t allocate_block_for_file_inode(struct inode_st *inode, block_no_t *returned
         // Add block to single pointer
         ptr_data[inode->metadata.i_blocks - 12] = block_was_alloc;
         err_code = write_block(ptr_data, inode->blocks[12]);
-        free(ptr_data);
+        kfree(ptr_data);
         if (err_code != SUCCESS) {
             return err_code;
         }
@@ -358,62 +535,62 @@ err_t allocate_block_for_file_inode(struct inode_st *inode, block_no_t *returned
         unsigned int index_in_single_ptr = num_in_double_ptr % BLOCKS_IN_SINGLE_PTR;
         unsigned int single_ptr_idx_in_double_ptr = num_in_double_ptr / BLOCKS_IN_SINGLE_PTR;
         
-        block_no_t *ptr_data = malloc(get_bytes_per_block());
+        block_no_t *ptr_data = kmalloc(get_bytes_per_block());
         block_no_t single_ptr_block;
         
         // Create new single or double block if necessary
         if (index_in_single_ptr == 0) {
             err_code = find_free_block(&single_ptr_block, 1);
             if (err_code != SUCCESS) {
-                free(ptr_data);
+                kfree(ptr_data);
                 return err_code;
             }
             
-            block_no_t *double_ptr_data = malloc(get_bytes_per_block());
+            block_no_t *double_ptr_data = kmalloc(get_bytes_per_block());
             if (single_ptr_idx_in_double_ptr == 0) {
                 err_code = find_free_block(&inode->blocks[13], 1);
                 if (err_code != SUCCESS) {
-                    free(ptr_data);
-                    free(double_ptr_data);
+                    kfree(ptr_data);
+                    kfree(double_ptr_data);
                     return err_code;
                 }
             } else {
                 err_code = read_block(double_ptr_data, inode->blocks[13]);
                 if (err_code != SUCCESS) {
-                    free(ptr_data);
-                    free(double_ptr_data);
+                    kfree(ptr_data);
+                    kfree(double_ptr_data);
                     return err_code;
                 }
             }
 
             double_ptr_data[single_ptr_idx_in_double_ptr] = single_ptr_block;
             err_code = write_block(double_ptr_data, inode->blocks[13]);
-            free(double_ptr_data);
+            kfree(double_ptr_data);
             if (err_code != SUCCESS) {
-                free(ptr_data);
+                kfree(ptr_data);
                 return err_code;
             }
         } else {
-            block_no_t *double_ptr_data = malloc(get_bytes_per_block());
+            block_no_t *double_ptr_data = kmalloc(get_bytes_per_block());
             err_code = read_block(double_ptr_data, inode->blocks[13]);
             if (err_code != SUCCESS) {
-                free(double_ptr_data);
-                free(ptr_data);
+                kfree(double_ptr_data);
+                kfree(ptr_data);
                 return err_code;
             }
 
             single_ptr_block = double_ptr_data[single_ptr_idx_in_double_ptr];
             err_code = read_block(ptr_data, single_ptr_block);
-            free(double_ptr_data);
+            kfree(double_ptr_data);
             if (err_code != SUCCESS) {
-                free(ptr_data);
+                kfree(ptr_data);
                 return err_code;
             }
         }
 
         ptr_data[index_in_single_ptr] = block_was_alloc;
         err_code = write_block(ptr_data, single_ptr_block);
-        free(ptr_data);
+        kfree(ptr_data);
         if (err_code != SUCCESS) {
             return err_code;
         }
@@ -426,7 +603,7 @@ err_t allocate_block_for_file_inode(struct inode_st *inode, block_no_t *returned
         unsigned int index_in_single_pointer = index_in_double_ptr % BLOCKS_IN_SINGLE_PTR;
         unsigned int single_ptr_idx_in_double_ptr = index_in_double_ptr / BLOCKS_IN_SINGLE_PTR;
 
-        block_no_t *ptr_data = malloc(get_bytes_per_block());
+        block_no_t *ptr_data = kmalloc(get_bytes_per_block());
         block_no_t single_ptr_block; 
 
         // Create new triple or double or single block if necessary
@@ -434,38 +611,38 @@ err_t allocate_block_for_file_inode(struct inode_st *inode, block_no_t *returned
             // new single pointer
             err_code = find_free_block(&single_ptr_block, 1);
             if (err_code != SUCCESS) {
-                free(ptr_data);
+                kfree(ptr_data);
                 return err_code;
             }
 
-            block_no_t *double_ptr_data = malloc(get_bytes_per_block());
+            block_no_t *double_ptr_data = kmalloc(get_bytes_per_block());
             block_no_t double_ptr_block;
             if (single_ptr_idx_in_double_ptr == 0) {
                 // New double pointer
                 err_code = find_free_block(&double_ptr_block, 1);
                 if (err_code != SUCCESS) {
-                    free(ptr_data);
-                    free(double_ptr_data);
+                    kfree(ptr_data);
+                    kfree(double_ptr_data);
                     return err_code;
                 }
 
-                block_no_t *triple_ptr_data = malloc(get_bytes_per_block());
+                block_no_t *triple_ptr_data = kmalloc(get_bytes_per_block());
                 if (double_ptr_idx_in_triple_ptr == 0) {
                     // New triple pointer
                     err_code = find_free_block(&inode->blocks[14], 1);
                     if (err_code != SUCCESS) {
-                        free(triple_ptr_data);
-                        free(double_ptr_data);
-                        free(ptr_data);
+                        kfree(triple_ptr_data);
+                        kfree(double_ptr_data);
+                        kfree(ptr_data);
                         return err_code;
                     }
                 } else {
                     // Old triple pointer, to place new double pointer
                     err_code = read_block(triple_ptr_data, inode->blocks[14]);
                     if (err_code != SUCCESS) {
-                        free(triple_ptr_data);
-                        free(double_ptr_data);
-                        free(ptr_data);
+                        kfree(triple_ptr_data);
+                        kfree(double_ptr_data);
+                        kfree(ptr_data);
                         return err_code;
                     }
                 }
@@ -473,67 +650,67 @@ err_t allocate_block_for_file_inode(struct inode_st *inode, block_no_t *returned
                 // Add double pointer to triple pointer block and write
                 triple_ptr_data[double_ptr_idx_in_triple_ptr] = double_ptr_block;
                 err_code = write_block(triple_ptr_data, inode->blocks[14]);
-                free(triple_ptr_data);
+                kfree(triple_ptr_data);
                 if (err_code != SUCCESS) {
-                    free(double_ptr_data);
-                    free(ptr_data);
+                    kfree(double_ptr_data);
+                    kfree(ptr_data);
                     return err_code;
                 }
             } else {
                 // Read data from existing double pointer block
-                block_no_t *triple_ptr_data = malloc(get_bytes_per_block());
+                block_no_t *triple_ptr_data = kmalloc(get_bytes_per_block());
                 err_code = read_block(triple_ptr_data, inode->blocks[14]);
                 if (err_code != SUCCESS) {
-                    free(triple_ptr_data);
-                    free(double_ptr_data);
-                    free(ptr_data);
+                    kfree(triple_ptr_data);
+                    kfree(double_ptr_data);
+                    kfree(ptr_data);
                     return err_code;
                 }
 
                 double_ptr_block = triple_ptr_data[double_ptr_idx_in_triple_ptr];
                 err_code = read_block(double_ptr_data, double_ptr_block);
-                free(triple_ptr_data);
+                kfree(triple_ptr_data);
                 if (err_code != SUCCESS) {
-                    free(double_ptr_data);
-                    free(ptr_data);
+                    kfree(double_ptr_data);
+                    kfree(ptr_data);
                     return err_code;
                 }
             }
 
             double_ptr_data[single_ptr_idx_in_double_ptr] = single_ptr_block;
             err_code = write_block(double_ptr_data, double_ptr_block);
-            free(double_ptr_data);
+            kfree(double_ptr_data);
             if (err_code != SUCCESS) {
-                free(ptr_data);
+                kfree(ptr_data);
             }
         } else {
             // Read from existing single ptr block
-            block_no_t *triple_ptr_data = malloc(get_bytes_per_block());
+            block_no_t *triple_ptr_data = kmalloc(get_bytes_per_block());
             err_code = read_block(triple_ptr_data, inode->blocks[14]);
             if (err_code != SUCCESS) {
-                free(triple_ptr_data);
-                free(ptr_data);
+                kfree(triple_ptr_data);
+                kfree(ptr_data);
                 return err_code;
             }
 
             block_no_t double_ptr_block = triple_ptr_data[double_ptr_idx_in_triple_ptr];
-            free(triple_ptr_data);
+            kfree(triple_ptr_data);
 
             
-            block_no_t *double_ptr_data = malloc(get_bytes_per_block());
+            block_no_t *double_ptr_data = kmalloc(get_bytes_per_block());
             err_code = read_block(double_ptr_data, double_ptr_block);
             if (err_code != SUCCESS) {
-                free(double_ptr_data);
-                free(ptr_data);
+                kfree(double_ptr_data);
+                kfree(ptr_data);
                 return err_code;
             }
 
             single_ptr_block = double_ptr_data[single_ptr_idx_in_double_ptr];
-            free(double_ptr_data);
+            kfree(double_ptr_data);
 
             err_code = read_block(ptr_data, single_ptr_block);
             if (err_code != SUCCESS) {
-                free(ptr_data);
+                kfree(ptr_data);
                 return err_code;
             }
         }
@@ -541,7 +718,7 @@ err_t allocate_block_for_file_inode(struct inode_st *inode, block_no_t *returned
         // Add block to single pointer and write
         ptr_data[index_in_single_pointer] = block_was_alloc;
         err_code = write_block(ptr_data, single_ptr_block);
-        free(ptr_data);
+        kfree(ptr_data);
         if (err_code != SUCCESS) {
             return err_code;
         }
@@ -554,86 +731,100 @@ err_t allocate_block_for_file_inode(struct inode_st *inode, block_no_t *returned
     return SUCCESS;
 }
 
-int free_from_single_ptr(block_no_t single_block, struct inode_st *inode, unsigned char *block_bitmap_data, int *total_removed) {
-    toggle_in_bitmap_data(block_bitmap_data, single_block);
-    block_no_t *single_ptr_data = malloc(get_bytes_per_block());
-    err_t err_code = read_block(single_ptr_data, single_block);
+int free_from_single_ptr(block_no_t single_block, struct inode_st *inode, int *total_removed) {
+    err_t err_code = set_block_allocated(single_block, 0);
     if (err_code != SUCCESS) {
-        free(single_ptr_data);
+        return err_code;
+    }
+    block_no_t *single_ptr_data = kmalloc(get_bytes_per_block());
+    err_code = read_block(single_ptr_data, single_block);
+    if (err_code != SUCCESS) {
+        kfree(single_ptr_data);
         return err_code;
     }
     for (int i = 0; i < BLOCKS_IN_SINGLE_PTR; i++) {
-        toggle_in_bitmap_data(block_bitmap_data, single_ptr_data[i]);
+        err_code = set_block_allocated(single_ptr_data[i], 0);
+        if (err_code != SUCCESS) {
+            kfree(single_ptr_data);
+            return err_code;
+        }
         (*total_removed)++;
         if ((*total_removed) == inode->metadata.i_blocks) {
-            free(single_ptr_data);
+            kfree(single_ptr_data);
             return -1;
         }
     }
 
-    free(single_ptr_data);
+    kfree(single_ptr_data);
     return SUCCESS;
 }
 
-int free_from_double_ptr(block_no_t double_block, struct inode_st *inode, unsigned char *block_bitmap_data, int *total_removed) {
-    toggle_in_bitmap_data(block_bitmap_data, double_block);
-    block_no_t *double_ptr_data = malloc(get_bytes_per_block());
-    err_t err_code = read_block(double_ptr_data, double_block);
+int free_from_double_ptr(block_no_t double_block, struct inode_st *inode, int *total_removed) {
+    err_t err_code = set_block_allocated(double_block, 0);
     if (err_code != SUCCESS) {
-        free(double_ptr_data);
+        return err_code;
+    }
+    block_no_t *double_ptr_data = kmalloc(get_bytes_per_block());
+    err_code = read_block(double_ptr_data, double_block);
+    if (err_code != SUCCESS) {
+        kfree(double_ptr_data);
         return err_code;
     }
 
     for (int i = 0; i < BLOCKS_IN_SINGLE_PTR; i++) {
-        int ret_val = free_from_single_ptr(double_ptr_data[i], inode, block_bitmap_data, total_removed);
+        int ret_val = free_from_single_ptr(double_ptr_data[i], inode, total_removed);
         if (ret_val != SUCCESS) {
-            free(double_ptr_data);
+            kfree(double_ptr_data);
             return ret_val;
         }
     }
 
-    free(double_ptr_data);
+    kfree(double_ptr_data);
     return SUCCESS;
 }
 
-int free_from_triple_ptr(block_no_t triple_block, struct inode_st *inode, unsigned char *block_bitmap_data, int *total_removed) {
-    toggle_in_bitmap_data(block_bitmap_data, triple_block);
-    block_no_t *triple_ptr_data = malloc(get_bytes_per_block());
-    err_t err_code = read_block(triple_ptr_data, triple_block);
+int free_from_triple_ptr(block_no_t triple_block, struct inode_st *inode, int *total_removed) {
+    err_t err_code = set_block_allocated(triple_block, 0);
     if (err_code != SUCCESS) {
-        free(triple_ptr_data);
+        return err_code;
+    }
+    block_no_t *triple_ptr_data = kmalloc(get_bytes_per_block());
+    err_code = read_block(triple_ptr_data, triple_block);
+    if (err_code != SUCCESS) {
+        kfree(triple_ptr_data);
         return err_code;
     }
 
     for (int i = 0; i < BLOCKS_IN_SINGLE_PTR; i++) {
-        int ret_val = free_from_double_ptr(triple_ptr_data[i], inode, block_bitmap_data, total_removed);
+        int ret_val = free_from_double_ptr(triple_ptr_data[i], inode, total_removed);
         if (ret_val != SUCCESS) {
-            free(triple_ptr_data);
+            kfree(triple_ptr_data);
             return ret_val;
         }
     }
 
-    free(triple_ptr_data);
+    kfree(triple_ptr_data);
     return SUCCESS;
 }
 
 err_t clear_blocks_of_inode(struct inode_st *inode, int skip_first) {
-    // Get bitmap data
-    unsigned char *block_bitmap_data = malloc(get_bytes_per_block());
-    int err_code = read_block(block_bitmap_data, BLOCK_BITMAP);
-    if (err_code != SUCCESS) {
-        return err_code;
-    }
-
     // Remove all single blocks
     int total_removed = skip_first;
-    int single_blocks = inode->metadata.i_blocks < 16 ? 15 : 0;
-    for (int i = skip_first; i < single_blocks; i++) {
-        toggle_in_bitmap_data(block_bitmap_data, inode->blocks[i]);
+    int total_blocks = (int)inode->metadata.i_blocks;
+    if (total_removed >= total_blocks) {
+        inode->metadata.i_blocks = skip_first;
+        inode->metadata.i_size = 0;
+        return SUCCESS;
+    }
+
+    int direct_blocks = total_blocks < 16 ? total_blocks : 12;
+    for (int i = skip_first; i < direct_blocks; i++) {
+        err_t err_code = set_block_allocated(inode->blocks[i], 0);
+        if (err_code != SUCCESS) {
+            return err_code;
+        }
         total_removed++;
-        if (total_removed == inode->metadata.i_blocks) {
-            write_block(block_bitmap_data, BLOCK_BITMAP);
-            free(block_bitmap_data);
+        if (total_removed == total_blocks) {
             inode->metadata.i_blocks = skip_first;
             inode->metadata.i_size = 0;
             return SUCCESS;
@@ -641,46 +832,34 @@ err_t clear_blocks_of_inode(struct inode_st *inode, int skip_first) {
     }
     
     // Remove all blocks in single pointer from bitmap
-    int ret_val = free_from_single_ptr(inode->blocks[12], inode, block_bitmap_data, &total_removed);
+    int ret_val = free_from_single_ptr(inode->blocks[12], inode, &total_removed);
     if (ret_val == -1) {
-        write_block(block_bitmap_data, BLOCK_BITMAP);
-        free(block_bitmap_data);
         inode->metadata.i_blocks = skip_first;
         inode->metadata.i_size = 0;
         return SUCCESS;
     } else if (ret_val != SUCCESS) {
-        free(block_bitmap_data);
         return ret_val;
     }
 
     // Remove all blocks in double pointer from bitmap
-    ret_val = free_from_double_ptr(inode->blocks[13], inode, block_bitmap_data, &total_removed);
+    ret_val = free_from_double_ptr(inode->blocks[13], inode, &total_removed);
     if (ret_val == -1) {
-        write_block(block_bitmap_data, BLOCK_BITMAP);
-        free(block_bitmap_data);
         inode->metadata.i_blocks = skip_first;
         inode->metadata.i_size = 0;
         return SUCCESS;
     } else if (ret_val != SUCCESS) {
-        free(block_bitmap_data);
-        return err_code;
+        return ret_val;
     }
     
-    ret_val = free_from_triple_ptr(inode->blocks[14], inode, block_bitmap_data, &total_removed);
+    ret_val = free_from_triple_ptr(inode->blocks[14], inode, &total_removed);
     if (ret_val == -1) {
-        write_block(block_bitmap_data, BLOCK_BITMAP);
-        free(block_bitmap_data);
         inode->metadata.i_blocks = skip_first;
         inode->metadata.i_size = 0;
         return SUCCESS;
     } else if (ret_val != SUCCESS) {
-        free(block_bitmap_data);
-        return err_code;
+        return ret_val;
     }
 
-
-    write_block(block_bitmap_data, BLOCK_BITMAP);
-    free(block_bitmap_data);
     inode->metadata.i_blocks = skip_first;
     inode->metadata.i_size = 0;
     return SUCCESS;
@@ -688,16 +867,10 @@ err_t clear_blocks_of_inode(struct inode_st *inode, int skip_first) {
 
 err_t free_file_inode(struct cached_inode_st *cache_inode) {
     // Remove inode from inode bitmap
-    unsigned char *inode_bitmap_data = malloc(get_bytes_per_block());
-    err_t err_code = read_block(inode_bitmap_data, INODE_BITMAP);
+    err_t err_code = set_inode_allocated(cache_inode->id, 0);
     if (err_code != SUCCESS) {
-        free(inode_bitmap_data);
         return err_code;
     }
-
-    toggle_in_bitmap_data(inode_bitmap_data, cache_inode->id-1);
-    write_block(inode_bitmap_data, INODE_BITMAP);
-    free(inode_bitmap_data);
 
     // Get inode struct
     struct inode_st *inode = &cache_inode->inode;
@@ -719,13 +892,13 @@ err_t add_new_file_inode(ino_id_t *inode_num, int file_type) {
     }
 
     // Read in block containing this inode num
-    block_no_t block_with_inode = (*inode_num - 1) / INODES_PER_BLOCK + INODE_TABLE_START_BLOCK;
+    block_no_t block_with_inode = (*inode_num - 1) / INODES_PER_BLOCK + get_inode_table_start();
     int inode_idx_in_block = (*inode_num - 1) % INODES_PER_BLOCK;
 
-    struct inode_st *data = malloc(get_bytes_per_block());
+    struct inode_st *data = kmalloc(get_bytes_per_block());
     err_code = read_block(data, block_with_inode);
     if (err_code != SUCCESS) {
-        free(data);
+        kfree(data);
         return err_code;
     }
 
@@ -736,7 +909,7 @@ err_t add_new_file_inode(ino_id_t *inode_num, int file_type) {
 
     // Write data back
     err_code = write_block(data, block_with_inode);
-    free(data);
+    kfree(data);
     if (err_code != SUCCESS) {
         return err_code;
     }
@@ -758,33 +931,25 @@ err_t remove_last_block_inode(ino_id_t id) {
     }
     inode_cache->inode.metadata.i_blocks--;
 
-    unsigned char *bitmap_data = malloc(get_bytes_per_block());
-    err = read_block(bitmap_data, BLOCK_BITMAP);
-    if (err) {
-        free(bitmap_data);
-        return err;
-    }
-
-    toggle_in_bitmap_data(bitmap_data, block_to_remove);
+    err = set_block_allocated(block_to_remove, 0);
+    if (err) return err;
 
     if (block_idx == 16) {
         // remove single pointer and puts back into inode blocks 
         block_no_t single_ptr = inode_cache->inode.blocks[12];
-        block_no_t *data = malloc(get_bytes_per_block());
+        block_no_t *data = kmalloc(get_bytes_per_block());
         read_block(data, single_ptr);
         inode_cache->inode.blocks[14] = data[2];
         inode_cache->inode.blocks[13] = data[1];
         inode_cache->inode.blocks[12] = data[0];
-        toggle_in_bitmap_data(bitmap_data, single_ptr);
-        free(data);
+        err = set_block_allocated(single_ptr, 0);
+        if (err) {
+            kfree(data);
+            return err;
+        }
+        kfree(data);
     }
     remove_ref_from_cache(id);
-
-    err = write_block(bitmap_data, BLOCK_BITMAP);
-    free(bitmap_data);
-    if (err) {
-        return err;
-    }
     
     return SUCCESS;
 }

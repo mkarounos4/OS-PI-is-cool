@@ -3,7 +3,6 @@
 struct oft_entry;
 
 #include <stdint.h>
-#include <fcntl.h>
 
 #include "data-structs/vec.h"
 #include "disk.h"
@@ -34,7 +33,7 @@ struct oft_entry {
     /** @brief Inode number */
     ino_id_t ino_id;
     /** @brief Parent directory inode id or first-block id. */
-    uint16_t parent_id;
+    ino_id_t parent_id;
     /** @brief Cached inode when using inode-based storage; FAT. */
     struct cached_inode_st* inode;
 };
@@ -48,6 +47,13 @@ struct oft_entry {
 err_t initialize_oft();
 
 /**
+ * @brief Destroy the global OFT and release all open-file references.
+ *
+ * @return SUCCESS on success.
+ */
+err_t empty_oft(void);
+
+/**
  * @brief Insert or reuse an OFT row for file_name. May create the
  * underlying file if the mode implies creation.
  *
@@ -58,7 +64,7 @@ err_t initialize_oft();
  * @return New OFT slot index (kernel fd) on success, or a negative
  * err_t; F_ONLY_ONE_WRITER if opening for write while another writer exists.
  */
-int oft_open_file(int mode, const char *file_name, ino_id_t ino_id, uint16_t dir_block);
+int oft_open_file(int mode, const char *file_name, ino_id_t ino_id, ino_id_t dir_block);
 
 /**
  * @brief Decrement refcount for oft_id and remove the row when refcount

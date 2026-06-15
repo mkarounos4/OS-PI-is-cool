@@ -1,8 +1,10 @@
 #include "dirs.h"
 
-err_t add_dirent(const char* name, uint16_t ino_id, uint8_t type, uint8_t perm, ino_id_t curr_dir) {
-    struct fs_dirent *dir = malloc(get_bytes_per_block());
-    int curr_block_no = get_first_block(curr_dir);
+#include "timer/timer.h"
+
+err_t add_dirent(const char* name, ino_id_t ino_id, uint8_t type, uint8_t perm, ino_id_t curr_dir) {
+    struct fs_dirent *dir = kmalloc(get_bytes_per_block());
+    block_no_t curr_block_no = get_first_block(curr_dir);
     int index = 0;
     int err;
 
@@ -10,14 +12,14 @@ err_t add_dirent(const char* name, uint16_t ino_id, uint8_t type, uint8_t perm, 
         .ino_id = ino_id,
         .type = type,
         .perm = perm,
-        .mtime = time(NULL)
+        .mtime = timer_get_ticks()
     };
     strcpy(new_dirent.name, name);
 
     while (curr_block_no != 0) {
         err = read_block(dir, curr_block_no);
         if (err != 0) {
-            free(dir);
+            kfree(dir);
             return FILE_READ_ERROR;
         }
 
@@ -28,62 +30,62 @@ err_t add_dirent(const char* name, uint16_t ino_id, uint8_t type, uint8_t perm, 
                 dir[i] = new_dirent;
                 err = write_block(dir, curr_block_no);
                 if (err) {
-                    free(dir);
+                    kfree(dir);
                     return err;
                 }
                 if (i + 1 < (int) (get_bytes_per_block() / sizeof(struct fs_dirent))) {
                     dir[i+1] = (struct fs_dirent){.name = "\0"};
                     err = write_block(dir, curr_block_no);
                     if (err) {
-                        free(dir);
+                        kfree(dir);
                         return err;
                     }
                 }
-                free(dir);
+                kfree(dir);
                 return SUCCESS;
             }
             i++;
-        } 
+        }
         curr_block_no = get_ith_block_of_file_by_id(curr_dir, ++index);
     }
 
     // Alloc new dirent block if we've traversed to the end of dir blocks
-    uint16_t new_block_no;
+    block_no_t new_block_no;
     if ((err = allocate_new_block_for_file_from_id(curr_dir, &new_block_no)) != SUCCESS) {
-        free(dir);
+        kfree(dir);
         return err;
     }
-    struct fs_dirent *new_dir = malloc(get_bytes_per_block());
+    struct fs_dirent *new_dir = kmalloc(get_bytes_per_block());
     new_dir[0] = new_dirent;
     new_dir[1] = (struct fs_dirent){.name = "\0"};
 
     err = write_block(new_dir, new_block_no);
     if (err) {
-        free(dir);
-        free(new_dir);
+        kfree(dir);
+        kfree(new_dir);
         return err;
     }
 
-    free(dir);
-    free(new_dir);
+    kfree(dir);
+    kfree(new_dir);
 
     return SUCCESS;
 }
 
-err_t update_dirent_by_f_name(const char* f_name, ino_id_t parent_id, uint8_t curr_type, int flags, uint8_t perm, uint8_t new_file_type, const char* new_f_name, uint16_t new_id) {
-    struct fs_dirent *dir = malloc(get_bytes_per_block());
-    int curr_block_no = get_first_block(parent_id);
+err_t update_dirent_by_f_name(const char* f_name, ino_id_t parent_id, uint8_t curr_type, int flags, uint8_t perm, uint8_t new_file_type, const char* new_f_name, ino_id_t new_id) {
+    struct fs_dirent *dir = kmalloc(get_bytes_per_block());
+    block_no_t curr_block_no = get_first_block(parent_id);
     int index = 0;
     while (curr_block_no != 0) {
         int err = read_block(dir, curr_block_no);
         if (err != 0) {
-            free(dir);
+            kfree(dir);
             return err;
         }
         int i = 0;
         while (i < (int) (get_bytes_per_block() / sizeof(struct fs_dirent))) {
             if (!strcmp(dir[i].name, "\0")) {
-                free(dir);
+                kfree(dir);
                 return FILE_NOT_FOUND;
             }
             if (!strcmp(dir[i].name, f_name) && dir[i].type == curr_type) {
@@ -103,9 +105,9 @@ err_t update_dirent_by_f_name(const char* f_name, ino_id_t parent_id, uint8_t cu
                 if (flags & EDIT_ID) {
                     dir[i].ino_id = new_id;
                 }
-                dir[i].mtime = time(NULL);
+                dir[i].mtime = timer_get_ticks();
                 err = write_block(dir, curr_block_no);
-                free(dir);
+                kfree(dir);
                 if (err) return err;
                 return SUCCESS;
             }
@@ -113,7 +115,7 @@ err_t update_dirent_by_f_name(const char* f_name, ino_id_t parent_id, uint8_t cu
         } 
         curr_block_no = get_ith_block_of_file_by_id(parent_id, ++index);
     }
-    free(dir);
+    kfree(dir);
     return FILE_NOT_FOUND;
 }
 
@@ -122,12 +124,12 @@ err_t add_dirent_by_path(char *f_path, int file_type, int perm) {
         return INVALID_FILE_NAME;
     }
 
-    char *f_path_mut = malloc(sizeof(char) * (strlen(f_path) + 1));
+    char *f_path_mut = kmalloc(sizeof(char) * (strlen(f_path) + 1));
     char *f_path_mut_root = f_path_mut;
     strcpy(f_path_mut, f_path);
     f_path_mut[strlen(f_path)] = '\0';
 
-    int start_dir = get_curr_dir();
+    ino_id_t start_dir = get_curr_dir();
     if (f_path_mut[0] == '/') {
         start_dir = 1;
         f_path_mut++;
@@ -141,7 +143,7 @@ err_t add_dirent_by_path(char *f_path, int file_type, int perm) {
     while (next_token != NULL) {
         err_t err = get_dirent_by_f_name(token, DIRECTORY_F_TYPE, &dirent, start_dir);
         if (err) {
-            free(f_path_mut_root);
+            kfree(f_path_mut_root);
             return FILE_NOT_FOUND;
         }
         start_dir = dirent.ino_id;
@@ -152,29 +154,29 @@ err_t add_dirent_by_path(char *f_path, int file_type, int perm) {
     block_no_t block;
     err_t err = add_new_file_with_id(&block);
     if (err) {
-        free(f_path_mut_root);
+        kfree(f_path_mut_root);
         return err;
     }
     err = add_dirent(token, block, file_type, perm, start_dir);
     if (err) {
-        free(f_path_mut_root);
+        kfree(f_path_mut_root);
         return err;
     }
 
     if (file_type == DIRECTORY_F_TYPE) {
         err = add_dirent(".", block, DIRECTORY_F_TYPE, 0x7, block);
         if (err) {
-            free(f_path_mut_root);
+            kfree(f_path_mut_root);
             return err;
         }
         err = add_dirent("..", start_dir, DIRECTORY_F_TYPE, 0x7, block);
         if (err) {
-            free(f_path_mut_root);
+            kfree(f_path_mut_root);
             return err;
         }
     }
     
-    free(f_path_mut_root);
+    kfree(f_path_mut_root);
     return SUCCESS;
 }
 
@@ -183,11 +185,11 @@ err_t get_dirent_by_path(const char* f_path, struct fs_dirent* dirent, int file_
     if (f_path == 0 || f_path[0] == 0) {
         return INVALID_FILE_NAME;
     }
-    char *path_cpy = malloc((strlen(f_path) + 1) * sizeof(char));
+    char *path_cpy = kmalloc((strlen(f_path) + 1) * sizeof(char));
     strcpy(path_cpy, f_path);
     path_cpy[strlen(f_path)] = '\0';
 
-    int start_dir = get_curr_dir();
+    ino_id_t start_dir = get_curr_dir();
     if (f_path[0] == '/') {
         start_dir = 1;
         f_path++;
@@ -207,7 +209,7 @@ err_t get_dirent_by_path(const char* f_path, struct fs_dirent* dirent, int file_
         if (err) {
             if (next_token == NULL) {
                 if (actual_name != NULL) {
-                    *actual_name = malloc(sizeof(char) * (1 + strlen(token)));
+                    *actual_name = kmalloc(sizeof(char) * (1 + strlen(token)));
                     strcpy(*actual_name, token);
                     (*actual_name)[strlen(token)] = '\0';
                 }
@@ -215,10 +217,10 @@ err_t get_dirent_by_path(const char* f_path, struct fs_dirent* dirent, int file_
                     *parent_dir = start_dir;
                 }
 
-                free(path_cpy);
+                kfree(path_cpy);
                 return FILE_NOT_CREATED;
             }
-            free(path_cpy);
+            kfree(path_cpy);
             return FILE_NOT_FOUND;
         }
         start_dir = dirent->ino_id;
@@ -233,30 +235,30 @@ err_t get_dirent_by_path(const char* f_path, struct fs_dirent* dirent, int file_
     }
 
     if (next_token != NULL && actual_name != NULL) {
-        *actual_name = malloc(sizeof(char) * (1 + strlen(next_token)));
+        *actual_name = kmalloc(sizeof(char) * (1 + strlen(next_token)));
         strcpy(*actual_name, next_token);
         (*actual_name)[strlen(next_token)] = '\0';
     }
 
-    free(path_cpy);
+    kfree(path_cpy);
     return SUCCESS;
 }
 
 err_t get_dirent_by_f_name(const char* f_name, uint8_t file_type, struct fs_dirent* dirent, int curr_dir) {
-    struct fs_dirent *dir = malloc(get_bytes_per_block());
-    int curr_block_no = get_first_block(curr_dir);
+    struct fs_dirent *dir = kmalloc(get_bytes_per_block());
+    block_no_t curr_block_no = get_first_block(curr_dir);
     int index = 0;
     while (curr_block_no != 0) {
         int err = read_block(dir, curr_block_no);
         if (err != 0) {
-            free(dir);
+            kfree(dir);
             return err;
         }
 
         int i = 0;
         while (i < (int) (get_bytes_per_block() / sizeof(struct fs_dirent))) {
             if (!strcmp(dir[i].name, "\0")) {
-                free(dir);
+                kfree(dir);
                 return FILE_NOT_FOUND;
             }
             
@@ -264,7 +266,7 @@ err_t get_dirent_by_f_name(const char* f_name, uint8_t file_type, struct fs_dire
                 if (dirent != NULL) {
                     *dirent = dir[i];
                 }
-                free(dir);
+                kfree(dir);
                 return SUCCESS;
             }
             i++;
@@ -282,37 +284,34 @@ void format_chmod_str(int perm, char res[4]) {
 }
 
 err_t list_dirents(ino_id_t ino_id, int out_fd) {
-    struct fs_dirent *dir = malloc(get_bytes_per_block());
-    int curr_block_no = get_first_block(ino_id);
+    (void) out_fd;
+
+    struct fs_dirent *dir = kmalloc(get_bytes_per_block());
+    block_no_t curr_block_no = get_first_block(ino_id);
     int index = 0;
 
     while (curr_block_no != 0) {
         int err = read_block(dir, curr_block_no);
         if (err != 0) {
-            free(dir);
+            kfree(dir);
             return err;
         }
 
         int i = 0;
         while (i < (int) (get_bytes_per_block() / sizeof(struct fs_dirent))) {
             if (!strcmp(dir[i].name, "\0")) {
-                free(dir);
+                kfree(dir);
                 return SUCCESS;
             }
             char perm_str[4];
             format_chmod_str(dir[i].perm, perm_str);
-            char *time = ctime(&dir[i].mtime) + 4;
-            char buffer[72];
             int size = dir[i].ino_id == 0 ? 0 : get_file_size_by_id(dir[i].ino_id);
-            int chars_written = snprintf(buffer, 72, "%u %s %u %s %s\n", dir[i].ino_id, perm_str, size, time, dir[i].name);
-            if (chars_written < 0) {
-                return FILE_WRITE_ERROR;
-            }
-            if (chars_written >= 72) {
-                chars_written = 71;
-            }
-
-            k_write(out_fd, buffer, chars_written);
+            printf("%u %s %u tick=%u %s\n",
+                   dir[i].ino_id,
+                   perm_str,
+                   size,
+                   (unsigned int)dir[i].mtime,
+                   dir[i].name);
             i++;
         } 
         curr_block_no = get_ith_block_of_file_by_id(ino_id, ++index);
@@ -320,18 +319,18 @@ err_t list_dirents(ino_id_t ino_id, int out_fd) {
     return SUCCESS;
 }
 
-err_t remove_dirent_by_f_name_and_type(const char* f_name, uint8_t file_type, int parent_dir) {
-    struct fs_dirent *dir = malloc(get_bytes_per_block());
-    struct fs_dirent *next_dir = malloc(get_bytes_per_block()); 
+err_t remove_dirent_by_f_name_and_type(const char* f_name, uint8_t file_type, ino_id_t parent_dir) {
+    struct fs_dirent *dir = kmalloc(get_bytes_per_block());
+    struct fs_dirent *next_dir = kmalloc(get_bytes_per_block());
 
-    int curr_block_no = get_first_block(parent_dir);
+    block_no_t curr_block_no = get_first_block(parent_dir);
     int index = 0;
     int found_dirent = 0;
     while (curr_block_no != 0) {
         int err = read_block(dir, curr_block_no);
         if (err != 0) {
-            free(dir);
-            free(next_dir);
+            kfree(dir);
+            kfree(next_dir);
             return err;
         }
 
@@ -349,8 +348,8 @@ err_t remove_dirent_by_f_name_and_type(const char* f_name, uint8_t file_type, in
                     err = remove_last_block(parent_dir);
                 }
 
-                free(dir);
-                free(next_dir);
+                kfree(dir);
+                kfree(next_dir);
                 return err;
             }
             if (!strcmp(dir[i].name, f_name) && dir[i].type == file_type) {
@@ -360,16 +359,16 @@ err_t remove_dirent_by_f_name_and_type(const char* f_name, uint8_t file_type, in
                 if (i == (int) (get_bytes_per_block() / sizeof(struct fs_dirent)) - 1) {
                     // This should always exist, since the last dirent of the block isn't "\0".
                     // Gets first dirent of next block to replace last block of this dirent.
-                    int next_block_no = get_ith_block_of_file_by_id(parent_dir, index+1);
+                    block_no_t next_block_no = get_ith_block_of_file_by_id(parent_dir, index+1);
                     if (next_block_no == 0) {
-                        free(dir);
-                        free(next_dir);
+                        kfree(dir);
+                        kfree(next_dir);
                         return FILE_NOT_FOUND;
                     }
                     int err = read_block(next_dir, next_block_no);
                     if (err != 0) {
-                        free(dir);
-                        free(next_dir);
+                        kfree(dir);
+                        kfree(next_dir);
                         return err;
                     }
                     dir[i] = next_dir[0];
@@ -385,7 +384,7 @@ err_t remove_dirent_by_f_name_and_type(const char* f_name, uint8_t file_type, in
         }
         curr_block_no = get_ith_block_of_file_by_id(parent_dir, ++index);
     }
-    free(dir);
-    free(next_dir);
+    kfree(dir);
+    kfree(next_dir);
     return FILE_NOT_FOUND;
 }

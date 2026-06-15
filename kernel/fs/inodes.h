@@ -1,14 +1,9 @@
 #pragma once
 
-#include <stdio.h>
-#include <fcntl.h>
-#include <stdlib.h>
-#include <unistd.h>
 #include <stdint.h>
-#include <string.h>
+#include "string.h"
 
-typedef uint16_t ino_id_t;
-typedef uint16_t block_no_t;
+#include "types.h"
 
 // Attributes for inodes
 typedef struct attributes_t_struct {
@@ -31,24 +26,31 @@ struct cached_inode_st;
 
 
 // Constants
-#define INODE_BYTE_SIZE 128
-#define BLOCK_BITMAP 1
-#define INODE_BITMAP 2
-#define INODE_TABLE_START_BLOCK 3
+#define INODE_BYTE_SIZE ((int)sizeof(struct inode_st))
+#define SUPERBLOCK_BLOCK 0
 #define ROOT_INO 1
 #define INODES_PER_BLOCK (get_bytes_per_block() / sizeof(struct inode_st))
 #define BLOCKS_IN_SINGLE_PTR (get_bytes_per_block() / sizeof(block_no_t))
 #define BLOCKS_IN_DOUBLE_PTR (BLOCKS_IN_SINGLE_PTR * BLOCKS_IN_SINGLE_PTR)
 #define BLOCKS_IN_TRIPLE_PTR (BLOCKS_IN_DOUBLE_PTR * BLOCKS_IN_SINGLE_PTR)
-#define INODES_INDICATOR 0xFFFF
+#define FS_SIGNATURE_SIZE 8
+#define FS_SIGNATURE "PNFSI001"
 
 #define ALL_PERMS 0
 
 // Superblock parameters for loading/storing file system metadata
 struct superblock_st {
-    uint16_t inodes_indicator;
-    int num_fat_inode_blocks;
-    int bytes_per_block;
+    char signature[FS_SIGNATURE_SIZE];
+    uint32_t bytes_per_block;
+    uint32_t total_blocks;
+    uint32_t block_bitmap_start;
+    uint32_t block_bitmap_blocks;
+    uint32_t inode_bitmap_start;
+    uint32_t inode_bitmap_blocks;
+    uint32_t inode_table_start;
+    uint32_t inode_table_blocks;
+    uint32_t data_start_block;
+    ino_id_t root_inode_id;
 };
 
 /**
@@ -72,26 +74,27 @@ err_t get_inode(struct cached_inode_st** node, ino_id_t id);
 err_t write_inode(struct inode_st *node, ino_id_t id);
 
 /**
- * @brief Format a file descriptor as a fresh inode-layout PennFAT
- * filesystem with blocks_in_fat inode blocks and the given block
- * size configuration.
+ * @brief Format the configured block-device region as a fresh inode
+ * filesystem with scalable bitmaps and the given inode table size.
  *
- * @param file_d Open file descriptor to the backing file.
- * @param blocks_in_fat Number of blocks reserved for the inode table.
- * @param bytes_per_block Block size configuration (0-4).
+ * @param inode_table_blocks Number of blocks reserved for the inode table.
+ * @param bytes_per_block Concrete filesystem block size in bytes.
  * @return SUCCESS on success, or a negative error code on failure.
  */
-err_t mkfs_inode(int file_d, int blocks_in_fat, int bytes_per_block);
+err_t mkfs_inode(int inode_table_blocks, int bytes_per_block);
 
 /**
- * @brief Mount the inode filesystem currently open at
- * get_mounted_file_d() and report the layout back to the caller.
+ * @brief Mount the inode filesystem described by superblock and
+ * report the loaded layout back to the caller.
  *
+ * @param superblock Validated superblock read from the FS region.
  * @param bytes_per_block Output: bytes per block in the mounted FS.
  * @param num_inode_blocks Output: number of inode table blocks.
  * @return SUCCESS on success, or a negative error code on failure.
  */
-err_t mount_inode(int *bytes_per_block, int *num_inode_blocks);
+err_t mount_inode(const struct superblock_st *superblock,
+                  int *bytes_per_block,
+                  int *num_inode_blocks);
 
 /**
  * @brief Unmount the currently mounted inode filesystem, flushing

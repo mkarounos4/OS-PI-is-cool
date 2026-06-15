@@ -13,3 +13,4 @@ void kmem_init(void *start, void *end);
 void *kmem_sbrk(intptr_t incr);
 void *kmem_heap_lo();
 void *kmem_heap_hi();
+void *kmemset(void *ptr, int value, size_t num);
