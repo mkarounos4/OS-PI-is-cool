@@ -56,15 +56,6 @@ void kernel_main(void) {
     if (block_init() == 0) {
         block_ready = 1;
         uart_puts("[boot] block_init done\n");
-#if defined(BLOCK_TEST_MODE)
-#if BLOCK_TEST_MODE == 1
-        block_test_write_read(UINT64_C(1048576));
-#elif BLOCK_TEST_MODE == 2
-        block_test_verify_persistence(UINT64_C(1048576));
-#elif BLOCK_TEST_MODE == 3
-        block_test_multi_write_read(UINT64_C(1048576));
-#endif
-#endif
     } else {
         uart_puts("[boot] block_init failed\n");
     }
@@ -95,65 +86,22 @@ void kernel_main(void) {
         }
     }
 
-    if (!fs_ready) {
-        scheduler_init();
-        scheduler_start();
-
-        while (1) {
-            timer_delay_ms(750);
-            uart_puts("while loop heartbeat\n");
-        }
-    }
-
-    err = ls(NULL, 1);
+    initialize_char_device_registry();
+    uart_puts("[tty] Intialized char device registry.");
+    err = tty_drivers_init();
     if (err) {
-        uart_puts("[fs] ERROR ls\n");
-    }
-    char *paths[2];
-    paths[1] = NULL;
-    paths[0] = "test";
-    err = cat(paths, NULL, 0);
-    if (err) {
-        uart_puts("[fs] ERROR init cat: ");
-        print_error(err);
+        uart_puts("[tty] ERROR: failed to init tty driver\n");
     } else {
-        uart_puts("[fs] SUCCESS init cat\n");
+        uart_puts("[tty] Initialized tty driver.");
     }
-    err = touch(paths);
-    if (err) {
-        uart_puts("[fs] ERROR touch: ");
-        print_error(err);
+    int tty = tty_create();
+    if (tty < 0) {
+        uart_puts("[tty] ERROR: failed to create tty instance\n");
+    } else {
+        uart_puts("[tty] Created terminal");
     }
-    int fd = k_open("test", F_WRITE);
-    if (fd <= 0) {
-        uart_puts("[fs] ERROR open: ");
-        print_error(err);
-    }
-    char *buf = "THIS IS MY MESSAGE which I must write\n";
-    err = k_write(fd, buf, strlen(buf));
-    if (err < 0) {
-        uart_puts("[fs] ERROR write: ");
-        print_error(err);
-    }
-    err = k_close(fd);
-    if (err) {
-        uart_puts("[fs] ERROR close: ");
-        print_error(err);
-    }
-    err = cat(paths, NULL, 0);
-    if (err) {
-        uart_puts("[fs] ERROR cat: ");
-        print_error(err);
-    }
-    err = ls(NULL, 1);
-    if (err) {
-        uart_puts("[fs] ERROR ls: ");
-        print_error(err);
-    }
-
 
     scheduler_init();
-    
     scheduler_start();
 
     while (1) {

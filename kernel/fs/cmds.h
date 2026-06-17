@@ -3,6 +3,12 @@
 #include "errors.h"
 #include "memory/kmalloc.h"
 
+int open(const char *fname, int mode);
+int close(int fd);
+int read(int fd, char *buf, int n);
+int write(int fd, char *buf, int n);
+int lseek(int fd, int offset, int whence);
+
 /**
  * @brief Create each file in a NULL-terminated list if it does not yet
  * exist, or update its modification timestamp to the current time if

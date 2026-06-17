@@ -22,3 +22,5 @@ struct tty_driver_state {
 }
 
 void tty_send_input(int minor, const void *buffer, size_t count);
+int tty_drivers_init(void);
+int tty_create();

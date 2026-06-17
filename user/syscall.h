@@ -35,6 +35,20 @@ enum syscall_type {
     S_SBRK = 11,
     S_KILL = 12,
     S_BLOCK_UNTIL_EVENT = 13,
+    S_FS_TOUCH = 14,
+    S_FS_MV = 15,
+    S_FS_RM = 16,
+    S_FS_CAT = 17,
+    S_FS_CP = 18,
+    S_FS_CHMOD = 19,
+    S_FS_LS = 20,
+    S_FS_MKDIR = 21,
+    S_FS_CD = 22,
+    S_FS_OPEN = 23,
+    S_FS_CLOSE = 24,
+    S_FS_LSEEK = 25,
+    S_FS_READ = 26,
+    S_FS_WRITE = 27,
 };
 
 long write_console(const char *s, uint64_t len);

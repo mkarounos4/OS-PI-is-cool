@@ -8,6 +8,7 @@
 #include "scheduler/scheduler.h"
 #include "signals/signals.h"
 #include "memory/page_table/page_table.h"
+#include "fs/cmds.h"
 
 #define SYS_WRITE_CONSOLE_MAX 1024u
 #define SYS_USER_PTR_MIN      UINT64_C(0x1000)
@@ -152,6 +153,61 @@ struct trap_frame *syscall_dispatch(struct trap_frame *frame) {
         break;
     case S_BLOCK_UNTIL_EVENT:
         ret = s_block_until_event((uint32_t) frame->regs[0]);
+        break;
+    case S_FS_TOUCH:
+        ret = touch((char **)(uintptr_t)frame->regs[0]);
+        break;
+    case S_FS_MV:
+        ret = mv((char *)(uintptr_t)frame->regs[0],
+                 (char *)(uintptr_t)frame->regs[1]);
+        break;
+    case S_FS_RM:
+        ret = rm((char **)(uintptr_t)frame->regs[0]);
+        break;
+    case S_FS_CAT:
+        ret = cat((char **)(uintptr_t)frame->regs[0],
+                  (char *)(uintptr_t)frame->regs[1],
+                  (int)frame->regs[2]);
+        break;
+    case S_FS_CP:
+        ret = cp((char *)(uintptr_t)frame->regs[0],
+                 (char *)(uintptr_t)frame->regs[1],
+                 (int)frame->regs[2]);
+        break;
+    case S_FS_CHMOD:
+        ret = fs_chmod((char *)(uintptr_t)frame->regs[0],
+                       (char *)(uintptr_t)frame->regs[1],
+                       (int)frame->regs[2]);
+        break;
+    case S_FS_LS:
+        ret = ls((char *)(uintptr_t)frame->regs[0], (int)frame->regs[1]);
+        break;
+    case S_FS_MKDIR:
+        ret = fs_mkdir((char **)(uintptr_t)frame->regs[0]);
+        break;
+    case S_FS_CD:
+        ret = cd((char *)(uintptr_t)frame->regs[0]);
+        break;
+    case S_FS_OPEN:
+        ret = open((const char *)(uintptr_t)frame->regs[0], (int)frame->regs[1]);
+        break;
+    case S_FS_CLOSE:
+        ret = close((int)frame->regs[0]);
+        break;
+    case S_FS_LSEEK:
+        ret = lseek((int)frame->regs[0],
+                    (int)frame->regs[1],
+                    (int)frame->regs[2]);
+        break;
+    case S_FS_READ:
+        ret = read((int)frame->regs[0],
+                   (char *)(uintptr_t)frame->regs[1],
+                   (int)frame->regs[2]);
+        break;
+    case S_FS_WRITE:
+        ret = write((int)frame->regs[0],
+                    (char *)(uintptr_t)frame->regs[1],
+                    (int)frame->regs[2]);
         break;
     default:
         ret = SYS_ENOSYS;

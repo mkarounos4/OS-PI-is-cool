@@ -1,7 +1,74 @@
+#include <sys/types.h>
+
 #include "cmds.h"
 #include "kapi.h"
 
-#include <unistd.h>
+int open(const char *fname, int mode) {
+    pcb_t *pcb = get_curr_process();
+    if (pcb == NULL) {
+        return -1;
+    }
+
+    int fd = k_open(fname, mode);
+    if (fd < 0) {
+        return fd;
+    }
+
+    vec_push_back(&pcb->file_descriptors, fd);
+    reutrn vec_len(&pcb->file_desciptors)-1;
+}
+
+int close(int fd) {
+    pcb_t *pcb = get_curr_process();
+    if (pcb == NULL) {
+        return -1;
+    }
+
+    if (vec_len(&pcb->file_desciptors) < fd || fd < 0) {
+        return INVALID_ARGS;
+    }
+
+    return k_close(vec_get(&pcb->file_desciptors, fd));
+}
+
+int read(int fd, char *buf, int n) {
+    pcb_t *pcb = get_curr_process();
+    if (pcb == NULL) {
+        return -1;
+    }
+
+    if (vec_len(&pcb->file_desciptors) < fd || fd < 0) {
+        return INVALID_ARGS;
+    }
+
+    return k_read(vec_get(&pcb->file_desciptors, fd), buf, n);
+}
+
+int write(int fd, char *buf, int n) {
+    pcb_t *pcb = get_curr_process();
+    if (pcb == NULL) {
+        return -1;
+    }
+
+    if (vec_len(&pcb->file_desciptors) < fd || fd < 0) {
+        return INVALID_ARGS;
+    }
+
+    return k_write(vec_get(&pcb->file_descriptors, fd), buf, n);
+}
+
+int lseek(int fd, int offset, int whence) {
+    pcb_t *pcb = get_curr_process();
+    if (pcb == NULL) {
+        return -1;
+    }
+
+    if (vec_len(&pcb->file_desciptors) < fd || fd < 0) {
+        return INVALID_ARGS;
+    }
+
+    return k_lseek(vec_get(&pcb->file_descriptors, fd), offset, whence);
+}
 
 // Throws FS_not_mounted, k_open errors, k_close errors, k_update_file_time errors
 err_t touch(char **file_paths) {

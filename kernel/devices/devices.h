@@ -20,3 +20,9 @@ struct char_driver {
     const struct file_operations *fops;
     void *driver_data;
 }
+
+void initialize_char_device_registry();
+void destroy_char_device_registry();
+void register_char_driver(struct char_driver *driver);
+int devfs_create_char_device(dev_t rdev);
+struct char_driver *get_char_device(uint16_t major);

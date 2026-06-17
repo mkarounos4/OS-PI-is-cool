@@ -2,7 +2,21 @@
 
 #define MAX_CHAR_DEVICES 16
 
-static struct char_driver char_device_registry[MAX_CHAR_DEVICES];
+static struct char_driver *char_device_registry[MAX_CHAR_DEVICES];
+
+void initialize_char_device_registry() {
+    for (int i = 0; i < MAX_CHAR_DEVICES; i++) {
+        char_device_registry[i] = NULL;
+    }
+}
+
+void destroy_char_device_registry() {
+    for (int i = 0; i < MAX_CHAR_DEVICES; i++) {
+        if (char_device_registry[i] != NULL) {
+            kfree(char_device_registry[i]);
+        }
+    }
+}
 
 void register_char_driver(struct char_driver *driver) {
     if (driver == NULL || driver->fops == NULL) {
@@ -36,7 +50,7 @@ int devfs_create_char_device(dev_t rdev) {
     }
 
     inode.metadata.i_rdev = rdev;
-    inode.metadata.fops = char_device_registry[rdev.major].fops;
+    inode.metadata.fops = char_device_registry[rdev.major]->fops;
     
     err_t err = write_inode(&inode, ino);
     if (err) {
@@ -63,8 +77,8 @@ int devfs_create_char_device(dev_t rdev) {
     }
 
     char name[32] = malloc(sizeof(char) * 32);
-    strcpy(char_device_registry[rdev.major].name, name);
-    int len = strlen(char_device_registry[rdev.major].name);
+    strcpy(char_device_registry[rdev.major]->name, name);
+    int len = strlen(char_device_registry[rdev.major]->name);
     if (strlen > 30) {
         name[30] = '0' + minor;
         name[31] = '\0';

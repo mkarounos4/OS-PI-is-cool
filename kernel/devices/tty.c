@@ -63,7 +63,7 @@ int tty_create() {
         return err;
     }
 
-    return SUCCESS;
+    return minor;
 }
 
 int tty_open(struct oft_entry *entry) {
@@ -95,7 +95,7 @@ ssize_t tty_read(struct oft_entry *entry, void *buffer, size_t count) {
         void *char_void;
         bool read_char = consume_ring_buffer(curr_tty->rx, char_void);
         if (!read_char) {
-            pcb_t *curr_pcb = get_current_process();
+            pcb_t *curr_pcb = get_curr_process();
             if (curr_pcb == NULL) {
                 return num_read;
             }
