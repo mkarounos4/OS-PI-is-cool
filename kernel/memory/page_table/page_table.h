@@ -20,9 +20,8 @@
 void *alloc_page(void);
 void free_page(void *page);
 
-static uint8_t copy_phys_page(uint64_t src_pa, uint64_t dst_pa);
-static uint64_t table_desc(uint64_t *table);
-static uint64_t kernel_phys_addr(uint64_t va);
+uint8_t copy_phys_page(uint64_t src_pa, uint64_t dst_pa);
+uint64_t table_desc(uint64_t *table);
 uint64_t kernel_direct_map_va(uint64_t pa);
 
 uint8_t pt_map_page(uint64_t *l0, uint64_t va, uint64_t pa, uint64_t attrs);

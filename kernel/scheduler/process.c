@@ -1,4 +1,5 @@
 #include "scheduler/scheduler.h"
+#include "memory/malloc.h"
 #include "memory/page_table/page_table.h"
 #include "traps/traps.h"
 #include "uart/uart.h"
@@ -8,6 +9,10 @@
 #define PA_MASK UINT64_C(0x0000ffffffffffff)
 
 static pcb_t processes[MAX_PROCESS_COUNT];
+
+static uint64_t kernel_phys_addr(uint64_t va) {
+    return va & PA_MASK;
+}
 
 static void __attribute__((noreturn)) process_first_run(void) {
     struct trap_frame *frame;
@@ -317,7 +322,7 @@ pid_t fork() {
     // create child process off of parent
     pcb_t *parent = get_curr_process();
     pid_t child_pid = proc_create(parent->entry_func, parent->args, parent->pid);
-    if (child_pid == NULL) return -1;
+    if (child_pid < 0) return -1;
     pcb_t *child = get_pcb_by_pid(child_pid); 
     
     // cpy parent trap frame over to child

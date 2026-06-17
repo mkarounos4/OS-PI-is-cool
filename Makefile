@@ -57,7 +57,7 @@ ALL_C_SRCS := $(shell find $(KERNEL_DIR) -type f -name '*.c')
 ASM_SRCS   := $(shell find $(KERNEL_DIR) -type f -name '*.S')
 USER_C_SRCS := $(shell find $(USER_DIR) -type f -name '*.c')
 
-C_SRCS := $(filter-out kernel/uart/uart_rpi.c kernel/uart/uart_qemu.c kernel/memory/malloc.c,$(ALL_C_SRCS)) $(UART_SRC)
+C_SRCS := $(filter-out kernel/uart/uart_rpi.c kernel/uart/uart_qemu.c,$(ALL_C_SRCS)) $(UART_SRC)
 
 OBJS := $(patsubst $(KERNEL_DIR)/%.c,$(BUILD_DIR)/%.o,$(C_SRCS))
 OBJS += $(patsubst $(KERNEL_DIR)/%.S,$(BUILD_DIR)/%.S.o,$(ASM_SRCS))

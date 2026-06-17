@@ -69,7 +69,7 @@ static void zero_page(void *page) {
     }
 }
 
-static uint8_t copy_phys_page(uint64_t src_pa, uint64_t dst_pa) {
+uint8_t copy_phys_page(uint64_t src_pa, uint64_t dst_pa) {
     void *src = (void *)(uintptr_t)kernel_direct_map_va(src_pa);
     void *dst = (void *)(uintptr_t)kernel_direct_map_va(dst_pa);
 
@@ -128,7 +128,7 @@ static uint64_t kernel_phys_addr(uint64_t va) {
     return va & PA_MASK;
 }
 
-static uint64_t table_desc(uint64_t *table) {
+uint64_t table_desc(uint64_t *table) {
     return ((uint64_t)(uintptr_t)table & PTE_ADDR_MASK) | DESC_VALID | DESC_TABLE;
 }
 
