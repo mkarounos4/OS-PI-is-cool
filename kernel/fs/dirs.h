@@ -15,7 +15,7 @@
 // the existing perm field rather than replacing it (used to clear bits).
 #define AND_PERM 0x10
 
-// File type values stored in the dirent `type` field.
+// File type values stored in inode metadata.
 #define UNKNOWN_F_TYPE 0x0
 #define REGULAR_F_TYPE 0x1
 #define DIRECTORY_F_TYPE 0x2
@@ -29,13 +29,11 @@
  * (truncated to 32 chars if longer).
  * @param firstBlock First block of the file's data (FAT) or inode id
  * (inode filesystems).
- * @param type File type (one of the *_F_TYPE constants).
- * @param perm Permission bits (rwx, see inodes.h).
  * @param curr_dir Inode id / first block of the directory the entry
  * should be added to.
  * @return SUCCESS on success, or a negative error code on failure.
  */
-err_t add_dirent(const char* name, ino_id_t ino_id, uint8_t type, uint8_t perm, ino_id_t curr_dir);
+err_t add_dirent(const char* name, ino_id_t ino_id, ino_id_t curr_dir);
 
 /**
  * @brief On-disk directory entry for a single file or subdirectory.
@@ -47,14 +45,8 @@ struct fs_dirent {
     char name[32];
     /** @brief inode id. */
     ino_id_t ino_id;
-    /** @brief Entry kind: UNKNOWN_F_TYPE, REGULAR_F_TYPE, DIRECTORY_F_TYPE, or SYMBOLIC_F_TYPE. */
-    uint8_t type;
-    /** @brief Permission bits (typically rwx-style low 3 bits). */
-    uint8_t perm;
-    /** @brief Last modification time. */
-    fs_time_t mtime;
     /** @brief Padding reserved for future fields; keep struct size stable. */
-    uint8_t reserved[16];
+    uint8_t reserved[26];
 };
 
 /**

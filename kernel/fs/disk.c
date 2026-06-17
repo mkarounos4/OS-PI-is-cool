@@ -306,12 +306,24 @@ static err_t validate_root_directory(void) {
 
         int start_idx = 0;
         if (block_idx == 0) {
+            attributes_t first_metadata;
+            attributes_t second_metadata;
+            err = get_inode_metadata(dir[0].ino_id, &first_metadata);
+            if (err != SUCCESS) {
+                kfree(dir);
+                return err;
+            }
+            err = get_inode_metadata(dir[1].ino_id, &second_metadata);
+            if (err != SUCCESS) {
+                kfree(dir);
+                return err;
+            }
             if (strcmp(dir[0].name, ".") != 0 ||
                 strcmp(dir[1].name, "..") != 0 ||
                 dir[0].ino_id != ROOT_INO ||
                 dir[1].ino_id != ROOT_INO ||
-                dir[0].type != DIRECTORY_F_TYPE ||
-                dir[1].type != DIRECTORY_F_TYPE) {
+                first_metadata.type != DIRECTORY_F_TYPE ||
+                second_metadata.type != DIRECTORY_F_TYPE) {
                 kfree(dir);
                 return FS_INVALID;
             }
@@ -703,6 +715,12 @@ err_t free_file(const char* f_name) {
         return error;
     }
 
+    attributes_t metadata;
+    error = get_inode_metadata(dirent.ino_id, &metadata);
+    if (error != SUCCESS) {
+        return error;
+    }
+
     if (dirent.ino_id != 0) {
 
        error = free_file_inode(get_inode_from_cache(dirent.ino_id));
@@ -712,7 +730,7 @@ err_t free_file(const char* f_name) {
     }
     remove_ref_from_cache(dirent.ino_id);
 
-    error = remove_dirent_by_f_name_and_type(actual_name, dirent.type, parent_dir);
+    error = remove_dirent_by_f_name_and_type(actual_name, metadata.type, parent_dir);
     return error;
 }
 
@@ -721,17 +739,23 @@ err_t clear_blocks_of_file(struct oft_entry *entry) {
     return clear_blocks_of_inode(&entry->inode->inode, 1);
 }
 
-err_t add_new_file(struct oft_entry **entry, int file_type) {
-    err_t error = add_new_file_inode(&(*entry)->ino_id, file_type);
-    (*entry)->inode = get_inode_from_cache((*entry)->ino_id);
+int add_new_file(struct oft_entry **entry, int file_type, uint8_t perm) {
+    ino_id_t ino_id;
+    err_t error = add_new_file_inode(&ino_id, file_type, perm);
     if (error != SUCCESS) {
         return error;
     }
-    return SUCCESS;
+
+    if (entry != NULL) {
+        (*entry)->ino_id = ino_id;
+        (*entry)->inode = get_inode_from_cache(ino_id);
+    }
+
+    return ino_id;
 }
 
-err_t add_new_file_with_id(block_no_t* new_block) {
-    return add_new_file_inode(new_block, FILE_TYPE);
+err_t add_new_file_with_id(block_no_t* new_block, int file_type, uint8_t perm) {
+    return add_new_file_inode(new_block, file_type, perm);
 }
 
 err_t remove_last_block(ino_id_t id_in_fs) {

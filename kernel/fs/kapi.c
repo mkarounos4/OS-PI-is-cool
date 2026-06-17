@@ -27,9 +27,14 @@ int k_open(const char *fname, int mode) {
     }
 
     if (error != FILE_NOT_CREATED) {
-        if (!(dirent.perm & 0x4) && mode == F_READ) {
+        attributes_t metadata;
+        error = get_inode_metadata(dirent.ino_id, &metadata);
+        if (error != SUCCESS) {
+            return error;
+        }
+        if (!(metadata.perm & 0x4) && mode == F_READ) {
             return INVALID_PERMISSIONS;
-        } else if (!(dirent.perm & 0x2) && (mode == F_WRITE || mode == F_APPEND)) {
+        } else if (!(metadata.perm & 0x2) && (mode == F_WRITE || mode == F_APPEND)) {
             return INVALID_PERMISSIONS;
         }
     }
@@ -54,6 +59,18 @@ int k_open(const char *fname, int mode) {
         }
     }
 
+    struct oft_entry *entry;
+    error = get_oft_entry_by_fd(fd, &entry);
+    if (err != SUCCESS) {
+        return err;
+    }
+    if (entry->inode->inode.metadata->type == CHAR_DEVICE_TYPE) {
+        err = entry->inode->inode.metadata->fops->open(entry);
+        if (err) {
+            return err;
+        }
+    }
+
     return fd;
 }
 
@@ -63,19 +80,21 @@ int k_close(int fd) {
         return FS_NOT_MOUNTED;
     }
 
+    struct oft_entry *entry;
+    if (err) {
+        return err;
+    }
+    if (entry->inode->inode.metadata->type == CHAR_DEVICE_TYPE) {
+        err = entry->inode->inode.metadata->fops.close(entry);
+        if (err) {
+            return err;
+        }
+    }
+
     return oft_close_file(fd);
 }
 
 int k_read(int fd, char *buf, int n) {
-    if (fd == 0 || fd == 2) {
-        return INVALID_PERMISSIONS;
-    }
-
-    if (fd == 1) {
-        // ERROR need to implement stdin
-        return 100;
-    }
-
     // Return if not mounted
     if (!get_is_mounted()) {
         return FS_NOT_MOUNTED;
@@ -85,6 +104,10 @@ int k_read(int fd, char *buf, int n) {
     struct oft_entry* entry;
     if (get_oft_entry_by_fd(fd, &entry) == OFT_FD_DOES_NOT_EXIST) {
         return OFT_FD_DOES_NOT_EXIST;
+    }
+
+    if (entry->inode->inode.metadata->type == CHAR_DEVICE_TYPE) {
+        return entry->inode->inode.metadata->fops.read(entry, buf, n);
     }
 
     int size = get_file_size(entry);
@@ -151,21 +174,14 @@ int k_read(int fd, char *buf, int n) {
 }
 
 int k_file_add_reference(int fd) {
+    if (!get_is_mounted()) {
+        return FS_NOT_MOUNTED;
+    }
+
     return oft_add_reference(fd);
 }
 
 int k_write(int fd, char *buf, int n) {
-    if (fd == 0 || fd == 2) {
-        return INVALID_PERMISSIONS;
-    }
-
-    if (fd == 1) {
-        for (int i = 0; i < n; i++) {
-            uart_putc(buf[i]);
-        }
-        return n;
-    }
-
     // Return if not mounted
     if (!get_is_mounted()) {
         return FS_NOT_MOUNTED;
@@ -176,9 +192,13 @@ int k_write(int fd, char *buf, int n) {
     if (get_oft_entry_by_fd(fd, &entry) == OFT_FD_DOES_NOT_EXIST) {
         return OFT_FD_DOES_NOT_EXIST;
     }
+
+    if (entry->inode->inode.metadata->type == CHAR_DEVICE_TYPE) {
+        return entry->inode->inode.metadata->fops.write(entry, buf, n);
+    }
     
     if (entry->ino_id == 0) {
-        err_t err = add_new_file(&entry, FILE_TYPE);
+        err_t err = add_new_file(&entry, FILE_TYPE, 6);
         update_dirent_by_f_name(entry->file_name, entry->parent_id, FILE_TYPE, EDIT_ID, 0, 0, "", entry->ino_id);
         if (err) {
             return err;
@@ -412,10 +432,18 @@ int k_update_file_time(const char *file_name) {
 }
 
 int k_unlink(const char*fname) {
+    if (!get_is_mounted()) {
+        return FS_NOT_MOUNTED;
+    }
+
     return free_file(fname);
 }
 
 int k_ls(const char *filename, int out_fs) {
+    if (!get_is_mounted()) {
+        return FS_NOT_MOUNTED;
+    }
+
     ino_id_t dir_block = get_curr_dir();
     if (filename != NULL) {
         struct fs_dirent dir;
@@ -451,7 +479,7 @@ int k_mv_file(const char *src_path, const char *dest_path) {
         return err;
     }
 
-    err = add_dirent(actual_name, old_dirent.ino_id, FILE_TYPE, old_dirent.perm, new_parent_dir);
+    err = add_dirent(actual_name, old_dirent.ino_id, new_parent_dir);
     if (err) {
         kfree(actual_name);
         return err;
@@ -469,15 +497,27 @@ int k_mv_file(const char *src_path, const char *dest_path) {
 }
 
 int k_check_if_exists(const char *f_name) {
+    if (!get_is_mounted()) {
+        return FS_NOT_MOUNTED;
+    }
+
     struct fs_dirent dir;
     return !get_dirent_by_path(f_name, &dir, FILE_TYPE, NULL, NULL);
 }
 
 int k_make_directory(char *f_path) {
+    if (!get_is_mounted()) {
+        return FS_NOT_MOUNTED;
+    }
+
     return add_dirent_by_path(f_path, DIRECTORY_F_TYPE, 0x7);
 }
 
 int k_change_directory(char *f_path) {
+    if (!get_is_mounted()) {
+        return FS_NOT_MOUNTED;
+    }
+
     struct fs_dirent dir;
     err_t err = get_dirent_by_path(f_path, &dir, DIRECTORY_F_TYPE, NULL, NULL);
     if (err) {
@@ -489,9 +529,17 @@ int k_change_directory(char *f_path) {
 }
 
 bool k_check_if_executable(char *f_name) {
+    if (!get_is_mounted()) {
+        return FS_NOT_MOUNTED;
+    }
+
     struct fs_dirent dir;
     if (!get_dirent_by_path(f_name, &dir, FILE_TYPE, NULL, NULL)) {
-        return (dir.perm & 0x1);
+        attributes_t metadata;
+        if (get_inode_metadata(dir.ino_id, &metadata) != SUCCESS) {
+            return false;
+        }
+        return (metadata.perm & 0x1);
     }
     return false;
 }

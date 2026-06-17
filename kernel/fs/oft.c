@@ -38,69 +38,6 @@ err_t initialize_oft() {
     open_file_table = vec_new(3, entry_deletor);
     oft_initialized = 1;
 
-    struct oft_entry *stdin_file_entry = kmalloc(sizeof(struct oft_entry));
-    if (stdin_file_entry == NULL) {
-        empty_oft();
-        return FILE_OPEN_ERROR;
-    }
-    *stdin_file_entry = (struct oft_entry) {
-        .mode = F_READ,
-        .cursor = 0,
-        .ref_count = 1,
-        .file_name = copy_oft_name("STDIN"),
-        .ino_id = 0,
-        .parent_id = 0,
-        .inode = NULL
-    };
-    if (stdin_file_entry->file_name == NULL) {
-        kfree(stdin_file_entry);
-        empty_oft();
-        return FILE_OPEN_ERROR;
-    }
-    vec_push_back(&open_file_table, stdin_file_entry);
-
-    struct oft_entry *stdout_file_entry = kmalloc(sizeof(struct oft_entry));
-    if (stdout_file_entry == NULL) {
-        empty_oft();
-        return FILE_OPEN_ERROR;
-    }
-    *stdout_file_entry = (struct oft_entry) {
-        .mode = F_WRITE,
-        .cursor = 0,
-        .ref_count = 1,
-        .file_name = copy_oft_name("STDOUT"),
-        .ino_id = 0,
-        .parent_id = 0,
-        .inode = NULL
-    };
-    if (stdout_file_entry->file_name == NULL) {
-        kfree(stdout_file_entry);
-        empty_oft();
-        return FILE_OPEN_ERROR;
-    }
-    vec_push_back(&open_file_table, stdout_file_entry);
-
-    struct oft_entry *stderr_file_entry = kmalloc(sizeof(struct oft_entry));
-    if (stderr_file_entry == NULL) {
-        empty_oft();
-        return FILE_OPEN_ERROR;
-    }
-    *stderr_file_entry = (struct oft_entry) {
-        .mode = F_WRITE,
-        .cursor = 0,
-        .ref_count = 1,
-        .file_name = copy_oft_name("STDERR"),
-        .ino_id = 0,
-        .parent_id = 0,
-        .inode = NULL
-    };
-    if (stderr_file_entry->file_name == NULL) {
-        kfree(stderr_file_entry);
-        empty_oft();
-        return FILE_OPEN_ERROR;
-    }
-    vec_push_back(&open_file_table, stderr_file_entry);
-
     return SUCCESS;
 }
 
@@ -147,13 +84,13 @@ int oft_open_file(int mode, const char *file_name, ino_id_t ino_id, ino_id_t dir
             struct fs_dirent dir;
             err = get_dirent_by_f_name(file_name, FILE_TYPE, &dir, dir_block);
             if (err != SUCCESS) {
-                err = add_dirent(file_name, new_entry->ino_id, FILE_TYPE, 6, dir_block);
+                add_new_file(&new_entry, FILE_TYPE, 6);
+                err = add_dirent(file_name, new_entry->ino_id, dir_block);
                 if (err) {
                     return err;
                 }
             }
         } else {
-            // Adds inode ref from cache
             new_entry->inode = get_inode_from_cache(ino_id);
         }
 

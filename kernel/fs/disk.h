@@ -4,10 +4,11 @@
 #include "string.h"
 #include "types.h"
 
-// Values for the `type` field of a dirent in the on-disk layout.
+// Values for the `type` field of inode metadata.
 #define DIRECTORY_TYPE 0
 #define FILE_TYPE 1
 #define SYMLINK_TYPE 2
+#define CHAR_DRIVER_TYPE 3
 
 #include "inodes.h"
 #include "oft.h"
@@ -105,9 +106,10 @@ err_t free_file(const char* f_name);
  *
  * @param entry Output: receives a pointer to the new OFT entry.
  * @param file_type One of the *_TYPE constants.
+ * @param perm Initial permission bits for the inode.
  * @return SUCCESS on success, or a negative error code on failure.
  */
-err_t add_new_file(struct oft_entry **entry, int file_type);
+err_t add_new_file(struct oft_entry **entry, int file_type, uint8_t perm);
 
 /**
  * @brief Allocate a new file and return just its first-block
@@ -116,9 +118,11 @@ err_t add_new_file(struct oft_entry **entry, int file_type);
  *
  * @param new_block Output: receives the first block / inode id of
  * the new file.
+ * @param file_type One of the *_TYPE constants.
+ * @param perm Initial permission bits for the inode.
  * @return SUCCESS on success, or a negative error code on failure.
  */
-err_t add_new_file_with_id(block_no_t* new_block);
+err_t add_new_file_with_id(block_no_t* new_block, int file_type, uint8_t perm);
 
 // ============================================================
 // HELPER FUNCTIONS

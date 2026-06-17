@@ -1,8 +1,6 @@
 #include "dirs.h"
 
-#include "timer/timer.h"
-
-err_t add_dirent(const char* name, ino_id_t ino_id, uint8_t type, uint8_t perm, ino_id_t curr_dir) {
+err_t add_dirent(const char* name, ino_id_t ino_id, ino_id_t curr_dir) {
     struct fs_dirent *dir = kmalloc(get_bytes_per_block());
     block_no_t curr_block_no = get_first_block(curr_dir);
     int index = 0;
@@ -10,9 +8,6 @@ err_t add_dirent(const char* name, ino_id_t ino_id, uint8_t type, uint8_t perm, 
 
     struct fs_dirent new_dirent = (struct fs_dirent){
         .ino_id = ino_id,
-        .type = type,
-        .perm = perm,
-        .mtime = timer_get_ticks()
     };
     strcpy(new_dirent.name, name);
 
@@ -88,15 +83,29 @@ err_t update_dirent_by_f_name(const char* f_name, ino_id_t parent_id, uint8_t cu
                 kfree(dir);
                 return FILE_NOT_FOUND;
             }
-            if (!strcmp(dir[i].name, f_name) && dir[i].type == curr_type) {
+            attributes_t metadata;
+            err = get_inode_metadata(dir[i].ino_id, &metadata);
+            if (err != SUCCESS) {
+                kfree(dir);
+                return err;
+            }
+            if (!strcmp(dir[i].name, f_name) && metadata.type == curr_type) {
+                int inode_flags = INODE_EDIT_MTIME;
                 if (flags & EDIT_TYPE) {
-                    dir[i].type = new_file_type;
+                    inode_flags |= INODE_EDIT_TYPE;
                 }
                 if (flags & EDIT_PERM) {
+                    inode_flags |= INODE_EDIT_PERM;
                     if (flags & AND_PERM) {
-                        dir[i].perm &= perm;
-                    } else {
-                        dir[i].perm |= perm;
+                        inode_flags |= INODE_AND_PERM;
+                    }
+                }
+                ino_id_t metadata_id = (flags & EDIT_ID) ? new_id : dir[i].ino_id;
+                if (metadata_id != 0) {
+                    err = update_inode_metadata(metadata_id, inode_flags, new_file_type, perm);
+                    if (err != SUCCESS) {
+                        kfree(dir);
+                        return err;
                     }
                 }
                 if (flags & EDIT_FNAME) {
@@ -105,7 +114,6 @@ err_t update_dirent_by_f_name(const char* f_name, ino_id_t parent_id, uint8_t cu
                 if (flags & EDIT_ID) {
                     dir[i].ino_id = new_id;
                 }
-                dir[i].mtime = timer_get_ticks();
                 err = write_block(dir, curr_block_no);
                 kfree(dir);
                 if (err) return err;
@@ -152,24 +160,24 @@ err_t add_dirent_by_path(char *f_path, int file_type, int perm) {
     }
 
     block_no_t block;
-    err_t err = add_new_file_with_id(&block);
+    err_t err = add_new_file_with_id(&block, file_type, perm);
     if (err) {
         kfree(f_path_mut_root);
         return err;
     }
-    err = add_dirent(token, block, file_type, perm, start_dir);
+    err = add_dirent(token, block, start_dir);
     if (err) {
         kfree(f_path_mut_root);
         return err;
     }
 
     if (file_type == DIRECTORY_F_TYPE) {
-        err = add_dirent(".", block, DIRECTORY_F_TYPE, 0x7, block);
+        err = add_dirent(".", block, block);
         if (err) {
             kfree(f_path_mut_root);
             return err;
         }
-        err = add_dirent("..", start_dir, DIRECTORY_F_TYPE, 0x7, block);
+        err = add_dirent("..", start_dir, block);
         if (err) {
             kfree(f_path_mut_root);
             return err;
@@ -262,7 +270,14 @@ err_t get_dirent_by_f_name(const char* f_name, uint8_t file_type, struct fs_dire
                 return FILE_NOT_FOUND;
             }
             
-            if (!strcmp(dir[i].name, f_name) && (dir[i].type == file_type || dir[i].type == 0)) {
+            attributes_t metadata;
+            err = get_inode_metadata(dir[i].ino_id, &metadata);
+            if (err != SUCCESS) {
+                kfree(dir);
+                return err;
+            }
+
+            if (!strcmp(dir[i].name, f_name) && (metadata.type == file_type || file_type == UNKNOWN_F_TYPE)) {
                 if (dirent != NULL) {
                     *dirent = dir[i];
                 }
@@ -303,14 +318,20 @@ err_t list_dirents(ino_id_t ino_id, int out_fd) {
                 kfree(dir);
                 return SUCCESS;
             }
+            attributes_t metadata;
+            err = get_inode_metadata(dir[i].ino_id, &metadata);
+            if (err != SUCCESS) {
+                kfree(dir);
+                return err;
+            }
             char perm_str[4];
-            format_chmod_str(dir[i].perm, perm_str);
+            format_chmod_str(metadata.perm, perm_str);
             int size = dir[i].ino_id == 0 ? 0 : get_file_size_by_id(dir[i].ino_id);
             printf("%u %s %u tick=%u %s\n",
                    dir[i].ino_id,
                    perm_str,
                    size,
-                   (unsigned int)dir[i].mtime,
+                   (unsigned int)metadata.mtime,
                    dir[i].name);
             i++;
         } 
@@ -352,7 +373,14 @@ err_t remove_dirent_by_f_name_and_type(const char* f_name, uint8_t file_type, in
                 kfree(next_dir);
                 return err;
             }
-            if (!strcmp(dir[i].name, f_name) && dir[i].type == file_type) {
+            attributes_t metadata;
+            err = get_inode_metadata(dir[i].ino_id, &metadata);
+            if (err != SUCCESS) {
+                kfree(dir);
+                kfree(next_dir);
+                return err;
+            }
+            if (!strcmp(dir[i].name, f_name) && metadata.type == file_type) {
                 found_dirent = 1;
             }
             if (found_dirent) {

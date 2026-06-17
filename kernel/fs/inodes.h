@@ -8,8 +8,13 @@
 // Attributes for inodes
 typedef struct attributes_t_struct {
     uint16_t i_links_count; // Num dir entries pointing to this (deletes inode when erach 0)
+    uint8_t type;
+    uint8_t perm;
     uint32_t i_size;
     uint32_t i_blocks; // Num blocks
+    fs_time_t mtime;
+    dev_t rdev;
+    struct file_operations *fops;
 } attributes_t;
 
 // Struct for inode data
@@ -37,6 +42,10 @@ struct cached_inode_st;
 #define FS_SIGNATURE "PNFSI001"
 
 #define ALL_PERMS 0
+#define INODE_EDIT_TYPE 0x01
+#define INODE_EDIT_PERM 0x02
+#define INODE_AND_PERM 0x04
+#define INODE_EDIT_MTIME 0x08
 
 // Superblock parameters for loading/storing file system metadata
 struct superblock_st {
@@ -63,6 +72,10 @@ struct superblock_st {
  * @return SUCCESS on success, or a negative error code on failure.
  */
 err_t get_inode(struct cached_inode_st** node, ino_id_t id);
+
+err_t get_inode_metadata(ino_id_t id, attributes_t *metadata);
+
+err_t update_inode_metadata(ino_id_t id, int flags, uint8_t type, uint8_t perm);
 
 /**
  * @brief Write the given inode data to its on-disk slot.
@@ -205,7 +218,7 @@ err_t free_file_inode(struct cached_inode_st *cache_inode);
  * @return SUCCESS on success, INODE_FULL if no free inode slots,
  * or a negative error code on failure.
  */
-err_t add_new_file_inode(ino_id_t *inode_num, int file_type);
+err_t add_new_file_inode(ino_id_t *inode_num, int file_type, uint8_t perm);
 
 /**
  * @brief Read an inode directly from disk, bypassing the inode cache.

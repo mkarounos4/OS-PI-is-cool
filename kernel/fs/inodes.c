@@ -223,7 +223,10 @@ err_t mkfs_inode(int inode_table_blocks, int bytes_per_block) {
     memset(&root_node, 0, sizeof(root_node));
     attributes_t meta = {
         .i_links_count = 2,
-        .i_blocks = 1
+        .type = DIRECTORY_F_TYPE,
+        .perm = 0x7,
+        .i_blocks = 1,
+        .mtime = timer_get_ticks(),
     };
     root_node.metadata = meta;
     root_node.blocks[0] = get_data_start_block();
@@ -255,20 +258,13 @@ err_t mkfs_inode(int inode_table_blocks, int bytes_per_block) {
         return FILE_WRITE_ERROR;
     }
     memset(data_root, 0, bytes_per_block);
-    fs_time_t now = timer_get_ticks();
     data_root[0] = (struct fs_dirent) {
         .name =  ".",
         .ino_id = 1,
-        .type = DIRECTORY_F_TYPE,
-        .perm = 0x7,
-        .mtime = now,
     };
     data_root[1] = (struct fs_dirent) {
         .name =  "..",
         .ino_id = 1,
-        .type = DIRECTORY_F_TYPE,
-        .perm = 0x7,
-        .mtime = now,
     };
     data_root[2] = (struct fs_dirent) {
         .name = "\0",
@@ -352,6 +348,52 @@ err_t get_inode_raw(struct inode_st *node, ino_id_t id) {
 
 err_t get_inode(struct cached_inode_st** node, ino_id_t id) {
     *node = get_inode_from_cache(id);
+    return *node == NULL ? FILE_READ_ERROR : SUCCESS;
+}
+
+err_t get_inode_metadata(ino_id_t id, attributes_t *metadata) {
+    if (metadata == NULL || id == 0) {
+        return INVALID_ARGS;
+    }
+
+    struct cached_inode_st *node;
+    err_t err = get_inode(&node, id);
+    if (err != SUCCESS) {
+        return err;
+    }
+
+    *metadata = node->inode.metadata;
+    remove_ref_from_cache(id);
+    return SUCCESS;
+}
+
+err_t update_inode_metadata(ino_id_t id, int flags, uint8_t type, uint8_t perm) {
+    if (id == 0) {
+        return INVALID_ARGS;
+    }
+
+    struct cached_inode_st *node;
+    err_t err = get_inode(&node, id);
+    if (err != SUCCESS) {
+        return err;
+    }
+
+    if (flags & INODE_EDIT_TYPE) {
+        node->inode.metadata.type = type;
+    }
+    if (flags & INODE_EDIT_PERM) {
+        if (flags & INODE_AND_PERM) {
+            node->inode.metadata.perm &= perm;
+        } else {
+            node->inode.metadata.perm |= perm;
+        }
+    }
+    if (flags & INODE_EDIT_MTIME) {
+        node->inode.metadata.mtime = timer_get_ticks();
+    }
+
+    node->dirty = 1;
+    remove_ref_from_cache(id);
     return SUCCESS;
 }
 
@@ -878,7 +920,7 @@ err_t free_file_inode(struct cached_inode_st *cache_inode) {
     return clear_blocks_of_inode(inode, 0);
 }
 
-err_t add_new_file_inode(ino_id_t *inode_num, int file_type) {
+err_t add_new_file_inode(ino_id_t *inode_num, int file_type, uint8_t perm) {
     // If return params are NULL, give temp values to not cause null reference errors
     if (inode_num == NULL) {
         ino_id_t inode_temp = 0;
@@ -905,7 +947,10 @@ err_t add_new_file_inode(ino_id_t *inode_num, int file_type) {
     // Update new inode with given data
     struct inode_st *new_node = &data[inode_idx_in_block];
     new_node->metadata.i_links_count = 0;
+    new_node->metadata.type = file_type;
+    new_node->metadata.perm = perm;
     new_node->metadata.i_blocks = 0;
+    new_node->metadata.mtime = timer_get_ticks();
 
     // Write data back
     err_code = write_block(data, block_with_inode);
