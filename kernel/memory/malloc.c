@@ -16,39 +16,33 @@ typedef struct {
 /* Memset and Memcpy */
 void *memset(void *ptr, int value, size_t num)
 {
-        unsigned char *p = ptr;
-        while (num--)
-                *p++ = (unsigned char) value;
-        return ptr;
+    unsigned char *p = ptr;
+    while (num--)
+        *p++ = (unsigned char) value;
+    return ptr;
 }
 
 void *memcpy(void *dst, const void *src, size_t num)
 {
-        unsigned char *d = dst;
-        const unsigned char *s = src;
-        while (num--)
-                *d++ = *s++;
-        return dst;
+    unsigned char *d = dst;
+    const unsigned char *s = src;
+    while (num--)
+        *d++ = *s++;
+    return dst;
 }
 
 
 /* Heap and Brk */
-// TODO: get real values for these
 static void *HeapMemoryBrk = NULL;
 static void *HeapMemory = NULL;
 static void *HeapMemoryEnd = NULL;
 static void *heap_ptr = NULL;
 static Seg_Lists *seg_lists_ptr = NULL;
 
-void mem_init(struct mem_ctx *ctx)
-{
-    ctx->heap_brk = ctx->heap_start;
-    ctx->heap_ptr = NULL;
-    ctx->seg_lists = NULL;
-
-    HeapMemory = ctx->heap_start;
-    HeapMemoryBrk = ctx->heap_brk;
-    HeapMemoryEnd = ctx->heap_end;
+void mem_init(void *start, void *end) {
+    HeapMemory = start;
+    HeapMemoryBrk = HeapMemory;
+    HeapMemoryEnd = end; 
     heap_ptr = NULL;
     seg_lists_ptr = NULL;
     
@@ -58,56 +52,37 @@ void mem_init(struct mem_ctx *ctx)
             asm volatile ("wfe");
         }
     }
-
-    mem_fetch_heap_vals(ctx);
-}
-
-void mem_load_heap(struct mem_ctx *ctx) {
-    HeapMemory = ctx->heap_start;
-    HeapMemoryBrk = ctx->heap_brk;
-    HeapMemoryEnd = ctx->heap_end;
-    heap_ptr = ctx->heap_ptr;
-    seg_lists_ptr = (Seg_Lists *)ctx->seg_lists;
-}
-
-void mem_fetch_heap_vals(struct mem_ctx *ctx) {
-    ctx->heap_start = HeapMemory;
-    ctx->heap_brk = HeapMemoryBrk;
-    ctx->heap_end = HeapMemoryEnd;
-    ctx->heap_ptr = heap_ptr;
-    ctx->seg_lists = seg_lists_ptr;
 }
 
 void *mem_sbrk(intptr_t incr)
 {
-        void *prevBrk = HeapMemoryBrk;
-        if (HeapMemoryBrk == NULL || HeapMemoryEnd == NULL || incr < 0) {
-                uart_puts("ERROR: Allocated too much memory!\n");
-                return (void *) -1;
-        }
+    void *prevBrk = HeapMemoryBrk;
+    if (HeapMemoryBrk == NULL || HeapMemoryEnd == NULL || incr < 0) {
+        uart_puts("ERROR: Allocated too much memory!\n");
+        return (void *) -1;
+    }
 
-        void *nextBrk = (char *)HeapMemoryBrk + incr;
-        if ((uintptr_t)nextBrk > (uintptr_t)HeapMemoryEnd) {
-                uart_puts("ERROR: Allocated too much memory!\n");
-                return (void *) -1;
-        }
-        HeapMemoryBrk = nextBrk;
-        return prevBrk;
+    void *nextBrk = (char *)HeapMemoryBrk + incr;
+    if ((uintptr_t)nextBrk > (uintptr_t)HeapMemoryEnd) {
+        uart_puts("ERROR: Allocated too much memory!\n");
+        return (void *) -1;
+    }
+    HeapMemoryBrk = nextBrk;
+    return prevBrk;
 }
 
 void *mem_heap_lo()
 {
-        return HeapMemory;
+    return HeapMemory;
 }
 
 void *mem_heap_hi()
 {
-        return (char *)HeapMemoryBrk - 1;
+    return (char *)HeapMemoryBrk - 1;
 }
 
 
 /* Malloc */
-/* What is the correct alignment? */
 #define ALIGNMENT 16
 
 static size_t align(size_t x)

@@ -1,28 +1,17 @@
 #include "scheduler/scheduler.h"
-#include "memory/kernel_mem.h"
 #include "memory/malloc.h"
+#include "memory/page_table/page_table.h"
 #include "traps/traps.h"
-#include "syscall/u_syscall.h"
 #include "uart/uart.h"
 #include "signals/signals.h"
+#include "user_image.h"
+
+#define PA_MASK UINT64_C(0x0000ffffffffffff)
 
 static pcb_t processes[MAX_PROCESS_COUNT];
 
-void *init_process_entry(void*);
-
-// Aligns the given value down to the nearest multiple of the given alignment, which must be a power of 2.
-static uintptr_t align_down(uintptr_t value, uintptr_t alignment) {
-    return value & ~(alignment - 1u);
-}
-
-static void process_trampoline(void *(*func)(void *), void *arg) {
-    void *ret = func(arg);
-    exit((int)(uintptr_t)ret);
-
-    // Should not reach.
-    while (1) {
-        asm volatile ("wfe");
-    }
+static uint64_t kernel_phys_addr(uint64_t va) {
+    return va & PA_MASK;
 }
 
 static void __attribute__((noreturn)) process_first_run(void) {
@@ -134,33 +123,14 @@ static pcb_t *get_next_unused_pcb() {
 }
 
 pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
-    struct mem_ctx prev_ctx;
-    mem_fetch_heap_vals(&prev_ctx);
-
     pcb_t *new_proc = get_next_unused_pcb();
     if (new_proc == NULL) {
         uart_puts("ERROR: no unused processes left");
         return -1;
     }
 
-    pcb_t *running_proc = get_curr_process();
-    if (running_proc != NULL) {
-        mem_fetch_heap_vals(&running_proc->heap_ctx);
-    } else {
-        mem_fetch_heap_vals(get_kernel_mem_ctx());
-    }
-
-    mem_load_heap(get_kernel_mem_ctx());
-
     // TODO: replace when VM added with better heap allocation
-    new_proc->heap_ctx.heap_start = (void *)&new_proc->heap[0];
-    new_proc->heap_ctx.heap_brk = new_proc->heap_ctx.heap_start;
-    new_proc->heap_ctx.heap_end = (void *)&new_proc->heap[PROC_HEAP_SIZE];
-    new_proc->heap_ctx.heap_ptr = NULL;
-    new_proc->heap_ctx.seg_lists = NULL;
-
-    mem_init(&new_proc->heap_ctx);
-    mem_load_heap(get_kernel_mem_ctx());
+    // allocate default heap values here
 
     // Setup FD table here based on parent if applicable (after FS impl)
     new_proc->ppid = ppid;
@@ -182,22 +152,26 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     new_proc->waiting_for_flags = 0;
     new_proc->exit_code = 0;
     new_proc->name = NULL;
+    new_proc->entry_func = func;
+    new_proc->args = args;
 
-    // Get stacks for thread
-    uintptr_t kernel_top = align_down((uintptr_t)&new_proc->kernel_stack[PROC_STACK_SIZE], 16);
-    uintptr_t user_top = align_down((uintptr_t)&new_proc->user_stack[PROC_STACK_SIZE], 16);
+    uint64_t *user_l0 = initialize_user_page_table();
+    if (user_l0 == NULL) {
+        uart_puts("ERROR: failed to initialize user page table");
+        return -1;
+    }
 
-    new_proc->user_stack_base = (uintptr_t) &new_proc->user_stack[0];
-    new_proc->user_stack_top = (uintptr_t) user_top;
-    new_proc->kernel_stack_base = (uintptr_t) &new_proc->kernel_stack[0];
-    new_proc->kernel_stack_top = (uintptr_t) kernel_top;
-    new_proc->user_code_base = (uint64_t)(uintptr_t)process_trampoline;
-    new_proc->user_heap_base = (uint64_t)(uintptr_t)&new_proc->heap[0];
-    new_proc->user_heap_brk = new_proc->user_heap_base;
-    new_proc->user_heap_end = (uint64_t)(uintptr_t)&new_proc->heap[PROC_HEAP_SIZE];
+    uint64_t kernel_stack_page_va = PROC_KERNEL_STACK_TOP - PAGE_SIZE;
+    uint8_t *kernel_stack_page = pt_seed_kernel_page(user_l0,
+                                                     kernel_stack_page_va);
+    if (kernel_stack_page == NULL) {
+        uart_puts("ERROR: failed to seed process kernel stack");
+        return -1;
+    }
 
-    // Get trap_frame with thread context
-    struct trap_frame *frame = (struct trap_frame *)(kernel_top - sizeof(struct trap_frame));
+    uint64_t frame_va = PROC_KERNEL_STACK_TOP - sizeof(struct trap_frame);
+    struct trap_frame *frame = (struct trap_frame *)(uintptr_t)
+        (kernel_stack_page + (frame_va - kernel_stack_page_va));
 
     // Initialize all thread registers to 0.
     for (unsigned i = 0; i < 31; i++) {
@@ -208,8 +182,8 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     frame->regs[1] = (uint64_t)(uintptr_t)args;
 
     // Initialize all special registers.
-    frame->sp = user_top;
-    frame->elr = (uint64_t)(uintptr_t)process_trampoline;
+    frame->sp = USER_STACK_TOP;
+    frame->elr = USER_THREAD_START;
     frame->spsr = 0; // Initialize to SP_EL0 for user exception level
     frame->esr = 0;
     frame->far = 0;
@@ -217,7 +191,7 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     frame->intid = 0;
 
     // Initialize rest of tcb
-    new_proc->ctx.x19 = (uint64_t)(uintptr_t)frame;
+    new_proc->ctx.x19 = frame_va;
     new_proc->ctx.x20 = 0;
     new_proc->ctx.x21 = 0;
     new_proc->ctx.x22 = 0;
@@ -229,17 +203,10 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     new_proc->ctx.x28 = 0;
     new_proc->ctx.x29 = 0;
     new_proc->ctx.x30 = (uint64_t)(uintptr_t)process_first_run;
-    new_proc->ctx.sp = kernel_top - sizeof(struct trap_frame);
+    new_proc->ctx.sp = frame_va;
+    new_proc->ctx.ttbr0_el1 = kernel_phys_addr((uint64_t)(uintptr_t)user_l0);
 
     add_task_to_scheduler(new_proc);
-    mem_fetch_heap_vals(get_kernel_mem_ctx());
-    if (running_proc != NULL) {
-        mem_load_heap(&running_proc->heap_ctx);
-    } else {
-        mem_load_heap(get_kernel_mem_ctx());
-    }
-    mem_load_heap(&prev_ctx);
-
 
     return new_proc->pid;
 }
@@ -300,18 +267,83 @@ void processes_init() {
         processes[i].pid = i;
     }
 
-    proc_create(init_process_entry, NULL, 0);
+    proc_create((void *(*)(void *))(uintptr_t)USER_INIT_PROCESS_ENTRY, NULL, 0);
 }
 
-void *init_process_entry(void*) {
-    while (1) {
-        int ret = waitpid(-1, NULL, 0);
-        if (ret == ECHILD) {
-            block_until_event(BLOCK_UNTIL_NEW_CHILD);
-        }
-    }
+void cpy_address_space(pcb_t *src, pcb_t *dst) {
+    uint64_t *src_l0 = (uint64_t *)(uintptr_t)src->ctx.ttbr0_el1;
+    uint64_t *dst_l0 = (uint64_t *)alloc_page();
+    if (dst_l0 == NULL) return;
+    dst->ctx.ttbr0_el1 = (uint64_t)(uintptr_t)kernel_phys_addr((uint64_t)(uintptr_t)dst_l0);
 
-    return NULL;
+    for (short i = 0; i < PAGE_TABLE_ENTRIES; i++) {
+	if ((src_l0[i] & DESC_VALID) == 0) continue;
+
+	uint64_t *src_l1 = (uint64_t *)(uintptr_t)kernel_direct_map_va(src_l0[i] & PTE_ADDR_MASK);
+        uint64_t *dst_l1 = (uint64_t *)alloc_page();
+	if (dst_l1 == NULL) return;
+	dst_l0[i] = table_desc(dst_l1);
+
+	for (short j = 0; j < PAGE_TABLE_ENTRIES; j++) {
+	    if ((src_l1[j] & DESC_VALID) == 0) continue;
+
+	    uint64_t *src_l2 = (uint64_t *)(uintptr_t)kernel_direct_map_va(src_l1[j] & PTE_ADDR_MASK);
+            uint64_t *dst_l2 = (uint64_t *)alloc_page();
+            if (dst_l2 == NULL) return;
+            dst_l1[j] = table_desc(dst_l2);
+
+	    for (short k = 0; k < PAGE_TABLE_ENTRIES; k++) {
+		if ((src_l2[k] & DESC_VALID) == 0) continue;
+
+		uint64_t *src_l3 = (uint64_t *)(uintptr_t)kernel_direct_map_va(src_l2[k] & PTE_ADDR_MASK);
+                uint64_t *dst_l3 = (uint64_t *)alloc_page();
+                if (dst_l3 == NULL) return;
+                dst_l2[k] = table_desc(dst_l3);
+
+		for (short l = 0; l < PAGE_TABLE_ENTRIES; l++) {
+		    if ((src_l3[l] & DESC_VALID) == 0) continue;
+
+		    uint64_t src_pa = src_l3[l] & PTE_ADDR_MASK;
+                    uint64_t *dst_page = (uint64_t *)alloc_page();
+                    if (dst_page == NULL) return;
+
+                    uint64_t dst_pa = kernel_phys_addr((uint64_t)(uintptr_t)dst_page);
+                    copy_phys_page(src_pa, dst_pa);
+
+                    uint64_t attrs = src_l3[l] & ~PTE_ADDR_MASK;
+                    dst_l3[l] = (dst_pa & PTE_ADDR_MASK) | attrs;
+		}
+	    }
+	}
+    }
+}
+
+pid_t fork() {
+    // create child process off of parent
+    pcb_t *parent = get_curr_process();
+    pid_t child_pid = proc_create(parent->entry_func, parent->args, parent->pid);
+    if (child_pid < 0) return -1;
+    pcb_t *child = get_pcb_by_pid(child_pid); 
+    
+    // cpy parent trap frame over to child
+    uint64_t parent_frame_va = parent->ctx.x19;
+    struct trap_frame *parent_frame = (struct trap_frame *)(uintptr_t)parent_frame_va;
+    uint64_t child_frame_va = child->ctx.x19;
+    struct trap_frame *child_frame = (struct trap_frame *)(uintptr_t)child_frame_va;
+    *child_frame = *parent_frame;
+
+    // modify child return register
+    child_frame->regs[0] = 0;
+
+    cpy_address_space(child, parent);
+
+    child->file_descriptors = parent->file_descriptors;
+
+    // make child runnable
+    add_task_to_scheduler(child);
+
+    // return child pid to parent's call
+    return child->pid;
 }
 
 // Add stop/terminate/block/unblock/continue process (but reqs signal mask and handlers)

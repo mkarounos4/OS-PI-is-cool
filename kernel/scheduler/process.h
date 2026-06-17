@@ -3,15 +3,11 @@
 #include <stdint.h>
 
 #include "data-structs/vec.h"
-#include "memory/malloc.h"
 #include "traps/traps.h"
 
 typedef int32_t pid_t;
 
 #define MAX_PROCESS_COUNT 16
-#define PROC_STACK_SIZE 8192u
-#define PROC_HEAP_SIZE 16384u
-
 #define WNOHANG 1
 #define WUNTRACED 2
 #define WCONTINUED 4
@@ -45,23 +41,11 @@ typedef struct pcb_st {
     enum process_state state;
     int exit_code;
     uint32_t blocked_until;
+    void *(*entry_func)(void*);
+    void *args;
 
     // Thread parameters (implementation simplified to one thread per process)
     struct cpu_context ctx;
-    unsigned char user_stack[PROC_STACK_SIZE];
-    unsigned char kernel_stack[PROC_STACK_SIZE];
-    unsigned char heap[PROC_HEAP_SIZE];
-    
-    uintptr_t user_stack_base;
-    uintptr_t user_stack_top;
-    uintptr_t kernel_stack_base;
-    uintptr_t kernel_stack_top;
-    
-    struct mem_ctx heap_ctx;
-    uint64_t user_code_base;
-    uint64_t user_heap_base;
-    uint64_t user_heap_brk;
-    uint64_t user_heap_end;
 
     uint8_t wait_stop_pending;
     uint8_t wait_cont_pending;
@@ -75,6 +59,7 @@ void processes_init();
 pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid);
 void proc_destroy(pcb_t *p);
 long s_waitpid_impl(pid_t pid, int *status, int32_t flags);
+pid_t fork();
 
 void terminate_process(pcb_t *pcb);
 void stop_process(pcb_t *pcb);

@@ -1,14 +1,12 @@
 #include "data-structs/vec.h"
-#include "memory/malloc.h"
+#include "memory/kmalloc.h"
 #include "uart/uart.h"
+#include "traps/traps.h"
 
 Vec vec_new(size_t initial_capacity, ptr_dtor_fn ele_dtor_fn) {
-	ptr_t* data = malloc(sizeof(void*) * initial_capacity);
+	ptr_t* data = kmalloc(sizeof(void*) * initial_capacity);
 	if (data == NULL) {
-		uart_puts("Failed to allocate memory.");
-        while (1) {
-            asm volatile ("wfe");
-        }
+		fatal_exception("Failed to allocate memory.");
 	}
 	return (Vec) {
 		.data = data,
@@ -20,10 +18,7 @@ Vec vec_new(size_t initial_capacity, ptr_dtor_fn ele_dtor_fn) {
 
 ptr_t vec_get(Vec* self, size_t index) {
 	if (index >= vec_len(self)) {
-		uart_puts("Get index must be less than length.");
-        while (1) {
-            asm volatile ("wfe");
-        }
+		fatal_exception("Get index must be less than length.");
 	}
 
 	return self->data[index];
@@ -31,10 +26,7 @@ ptr_t vec_get(Vec* self, size_t index) {
 
 void vec_set(Vec* self, size_t index, ptr_t new_ele) {
 	if (index >= vec_len(self)) {
-		uart_puts("Index out of bounds.");
-        while (1) {
-            asm volatile ("wfe");
-        }
+		fatal_exception("Index out of bounds.");
 	}
 
 	ptr_t old_data = self->data[index];
@@ -75,10 +67,7 @@ void vec_insert(Vec* self, size_t index, ptr_t new_ele) {
 	}
 
 	if (index > vec_len(self)) {
-		uart_puts("Insertion index out of bounds.");
-        while (1) {
-            asm volatile ("wfe");
-        }
+		fatal_exception("Insertion index out of bounds.");
 	}
 
 	if (vec_len(self) == vec_capacity(self)) {
@@ -98,10 +87,7 @@ void vec_insert(Vec* self, size_t index, ptr_t new_ele) {
 
 void vec_erase(Vec* self, size_t index) {
 	if (index >= vec_len(self)) {
-		uart_puts("Erase index out of bounds.");
-        while (1) {
-            asm volatile ("wfe");
-        }
+		fatal_exception("Erase index out of bounds.");
 	}
 
 	if (self->ele_dtor_fn != NULL) {
@@ -115,25 +101,19 @@ void vec_erase(Vec* self, size_t index) {
 
 void vec_resize(Vec* self, size_t new_capacity) {
 	if (new_capacity < vec_len(self)) {
-		uart_puts("Resize capacity must be at least length.");
-        while (1) {
-            asm volatile ("wfe");
-        }
+		fatal_exception("Resize capacity must be at least length.");
 	}
 
 	ptr_t* old_data = self->data;
-	self->data = malloc(sizeof(ptr_t) * new_capacity);
+	self->data = kmalloc(sizeof(ptr_t) * new_capacity);
 	if (self->data == NULL) {
-		uart_puts("Failed to allocate memory.");
-        while (1) {
-            asm volatile ("wfe");
-        }
+		fatal_exception("Failed to allocate memory.");
 	}
 
 	for (size_t i = 0; i < vec_len(self); i++) {
 		self->data[i] = old_data[i]; 
 	}
-	free(old_data);
+	kfree(old_data);
 	vec_capacity(self) = new_capacity;
 }
 
@@ -148,7 +128,7 @@ void vec_clear(Vec* self) {
 
 void vec_destroy(Vec* self) {
 	vec_clear(self);
-	free(self->data);
+	kfree(self->data);
 	self->data = NULL;
 	vec_capacity(self) = 0;
 	vec_len(self) = 0;

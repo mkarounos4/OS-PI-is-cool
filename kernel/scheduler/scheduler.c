@@ -6,11 +6,11 @@
 #include "uart/uart.h"
 #include "syscall/syscall.h"
 #include "data-structs/vec.h"
-#include "memory/kernel_mem.h"
-#include "memory/malloc.h"
-#include "syscall/u_syscall.h"
+#include "memory/page_table/page_table.h"
+#include "memory/kmalloc.h"
 
 #define SCHEDULER_QUANTUM_MS 1000u
+#define PA_MASK UINT64_C(0x0000ffffffffffff)
 
 struct sched_task_node {
     pcb_t *pcb;
@@ -25,14 +25,13 @@ static uint64_t curr_tick;
 
 static struct cpu_context boot_ctx;
 static struct cpu_context idle_ctx;
-static unsigned char idle_stack[THREAD_STACK_SIZE];
 static volatile int ready_to_schedule = 0;
 static void *ready_ctx = NULL;
 
 static void scheduler_tick(void *ctx);
 
-static uintptr_t align_down(uintptr_t value, uintptr_t alignment) {
-    return value & ~(alignment - 1u);
+static uint64_t kernel_phys_addr(uint64_t va) {
+    return va & PA_MASK;
 }
 
 static void set_ready_to_schedule(void *ctx) {
@@ -46,7 +45,7 @@ static void add_sched_queue_node(pcb_t *pcb) {
         return;
     }
 
-    struct sched_task_node *new_node = malloc(sizeof(struct sched_task_node));
+    struct sched_task_node *new_node = kmalloc(sizeof(struct sched_task_node));
     if (new_node == NULL) {
         uart_puts("ERROR: failed to allocate scheduler queue node\n");
         return;
@@ -80,7 +79,7 @@ static pcb_t *pop_sched_queue() {
     }
 
     pcb_t *ret = task_node->pcb;
-    free(task_node);
+    kfree(task_node);
     sched_queue_size--;
     if (ret->state != PROC_READY_STATE) {
         return pop_sched_queue();
@@ -108,7 +107,6 @@ void scheduler_init(void) {
 
     processes_init();
 
-    uintptr_t idle_top = align_down((uintptr_t)&idle_stack[THREAD_STACK_SIZE], 16);
     idle_ctx.x19 = 0;
     idle_ctx.x20 = 0;
     idle_ctx.x21 = 0;
@@ -121,7 +119,18 @@ void scheduler_init(void) {
     idle_ctx.x28 = 0;
     idle_ctx.x29 = 0;
     idle_ctx.x30 = (uint64_t)(uintptr_t)idle_task_fn;
-    idle_ctx.sp = idle_top;
+    uint8_t *idle_stack = alloc_page();
+    if (idle_stack == NULL) {
+        uart_puts("ERROR: failed to allocate idle stack\n");
+        return;
+    }
+    idle_ctx.sp = (uint64_t)(uintptr_t)(idle_stack + PAGE_SIZE);
+    uint64_t *idle_l0 = initialize_user_page_table();
+    if (idle_l0 == NULL) {
+        uart_puts("ERROR: failed to initialize idle page table\n");
+        return;
+    }
+    idle_ctx.ttbr0_el1 = kernel_phys_addr((uint64_t)(uintptr_t)idle_l0);
 }
 
 // Starts execution at thread 0. Does not return.
@@ -131,8 +140,6 @@ void scheduler_start(void) {
     curr_proc = next_pcb;
     
     if (next_pcb != NULL) {
-        mem_fetch_heap_vals(get_kernel_mem_ctx());
-        mem_load_heap(&next_pcb->heap_ctx);
         next_pcb->state = PROC_RUNNING_STATE;
         context_switch(&boot_ctx, &next_pcb->ctx);
     } else {
@@ -166,14 +173,11 @@ void scheduler_tick(void *ctx) {
 
     // Get previous ctx
     if (curr_proc != NULL) {
-        mem_fetch_heap_vals(&curr_proc->heap_ctx);
         old_ctx = &curr_proc->ctx;
     } else {
         // if idle task, ignore ctx
         old_ctx = &idle_ctx;
     }
-
-    mem_load_heap(get_kernel_mem_ctx());
 
     if (curr_proc != NULL) {
         if (curr_proc->state == PROC_RUNNING_STATE) {
@@ -188,14 +192,11 @@ void scheduler_tick(void *ctx) {
     // idle if no tasks
     curr_proc = pop_sched_queue();
     // Load new proc heap to malloc
-    mem_fetch_heap_vals(get_kernel_mem_ctx());
     if (curr_proc == NULL) {
         new_ctx = &idle_ctx;
         new_pid = -1;
     } else {
         new_ctx = &curr_proc->ctx;
-
-        mem_load_heap(&curr_proc->heap_ctx);
 
         // Update new thread data
         curr_proc->state = PROC_RUNNING_STATE;

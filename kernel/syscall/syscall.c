@@ -6,8 +6,9 @@
 #include "traps/traps.h"
 #include "uart/uart.h"
 #include "scheduler/scheduler.h"
-#include "memory/kernel_mem.h"
 #include "signals/signals.h"
+#include "memory/page_table/page_table.h"
+#include "fs/cmds.h"
 
 #define SYS_WRITE_CONSOLE_MAX 1024u
 #define SYS_USER_PTR_MIN      UINT64_C(0x1000)
@@ -57,9 +58,6 @@ static long s_exit_impl(int code) {
 }
 
 static long s_spawn(void* (*func)(void*), void *argv) {
-    struct mem_ctx prev_ctx;
-    mem_fetch_heap_vals(&prev_ctx);
-
     pid_t ppid = s_getpid();
     
     pid_t new_proc = proc_create(func, argv, ppid);
@@ -71,7 +69,6 @@ static long s_spawn(void* (*func)(void*), void *argv) {
         return -1;
     }
 
-    mem_load_heap(&prev_ctx);
     return new_pcb->pid;
 }
 
@@ -83,6 +80,26 @@ static long s_block_until_event(uint32_t event) {
 
     curr_proc->blocked_until = event;
     block_process(curr_proc);
+
+    return 0;
+}
+
+static long s_sbrk_validate(uint64_t old_brk, uint64_t new_brk) {
+    if (get_curr_process() == NULL) {
+        return SYS_EINVAL;
+    }
+
+    if (old_brk > new_brk) {
+        return SYS_EINVAL;
+    }
+
+    if (old_brk < USER_HEAP_START) {
+        return SYS_EINVAL;
+    }
+
+    if (new_brk > USER_HEAP_START + USER_HEAP_SIZE) {
+        return SYS_EINVAL;
+    }
 
     return 0;
 }
@@ -128,11 +145,69 @@ struct trap_frame *syscall_dispatch(struct trap_frame *frame) {
                              (int *)(uintptr_t)frame->regs[1],
                              (int32_t)frame->regs[2]);
         break;
+    case S_SBRK:
+        ret = s_sbrk_validate(frame->regs[0], frame->regs[1]);
+        break;
     case S_KILL:
         ret = s_kill((pid_t)frame->regs[0], (int)(uintptr_t)frame->regs[1]);
         break;
     case S_BLOCK_UNTIL_EVENT:
         ret = s_block_until_event((uint32_t) frame->regs[0]);
+        break;
+    case S_FS_TOUCH:
+        ret = touch((char **)(uintptr_t)frame->regs[0]);
+        break;
+    case S_FS_MV:
+        ret = mv((char *)(uintptr_t)frame->regs[0],
+                 (char *)(uintptr_t)frame->regs[1]);
+        break;
+    case S_FS_RM:
+        ret = rm((char **)(uintptr_t)frame->regs[0]);
+        break;
+    case S_FS_CAT:
+        ret = cat((char **)(uintptr_t)frame->regs[0],
+                  (char *)(uintptr_t)frame->regs[1],
+                  (int)frame->regs[2]);
+        break;
+    case S_FS_CP:
+        ret = cp((char *)(uintptr_t)frame->regs[0],
+                 (char *)(uintptr_t)frame->regs[1],
+                 (int)frame->regs[2]);
+        break;
+    case S_FS_CHMOD:
+        ret = fs_chmod((char *)(uintptr_t)frame->regs[0],
+                       (char *)(uintptr_t)frame->regs[1],
+                       (int)frame->regs[2]);
+        break;
+    case S_FS_LS:
+        ret = ls((char *)(uintptr_t)frame->regs[0], (int)frame->regs[1]);
+        break;
+    case S_FS_MKDIR:
+        ret = fs_mkdir((char **)(uintptr_t)frame->regs[0]);
+        break;
+    case S_FS_CD:
+        ret = cd((char *)(uintptr_t)frame->regs[0]);
+        break;
+    case S_FS_OPEN:
+        ret = open((const char *)(uintptr_t)frame->regs[0], (int)frame->regs[1]);
+        break;
+    case S_FS_CLOSE:
+        ret = close((int)frame->regs[0]);
+        break;
+    case S_FS_LSEEK:
+        ret = lseek((int)frame->regs[0],
+                    (int)frame->regs[1],
+                    (int)frame->regs[2]);
+        break;
+    case S_FS_READ:
+        ret = read((int)frame->regs[0],
+                   (char *)(uintptr_t)frame->regs[1],
+                   (int)frame->regs[2]);
+        break;
+    case S_FS_WRITE:
+        ret = write((int)frame->regs[0],
+                    (char *)(uintptr_t)frame->regs[1],
+                    (int)frame->regs[2]);
         break;
     default:
         ret = SYS_ENOSYS;

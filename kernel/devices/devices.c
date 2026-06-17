@@ -1,0 +1,100 @@
+#include "devices.h"
+
+#define MAX_CHAR_DEVICES 16
+
+static struct char_driver *char_device_registry[MAX_CHAR_DEVICES];
+
+void initialize_char_device_registry() {
+    for (int i = 0; i < MAX_CHAR_DEVICES; i++) {
+        char_device_registry[i] = NULL;
+    }
+}
+
+void destroy_char_device_registry() {
+    for (int i = 0; i < MAX_CHAR_DEVICES; i++) {
+        if (char_device_registry[i] != NULL) {
+            kfree(char_device_registry[i]);
+        }
+    }
+}
+
+void register_char_driver(struct char_driver *driver) {
+    if (driver == NULL || driver->fops == NULL) {
+        return -1;
+    }
+    if (driver->major > MAX_CHAR_DEVICES) {
+        return -1;
+    }
+    if (char_drivers[driver->major] != NULL) {
+        return -2;
+    }
+
+    char_drivers[driver->major] = driver;
+    return 0;
+}
+
+int devfs_create_char_device(dev_t rdev) {
+    if (char_device_registry[rdev.major] == NULL) {
+        return -1;
+    }
+
+    int ino = add_new_file(NULL, CHAR_DRIVER_TYPE, 0x7);
+    if (ino < 0) {
+        return -1;
+    }
+
+    struct inode_st inode;
+    err_t err = get_inode_raw(&inode, ino);
+    if (err != SUCCESS) {
+        return err;
+    }
+
+    inode.metadata.i_rdev = rdev;
+    inode.metadata.fops = char_device_registry[rdev.major]->fops;
+    
+    err_t err = write_inode(&inode, ino);
+    if (err) {
+        return err;
+    }
+
+    ino_id_t parent_dir;
+    struct fs_dirent dirent;
+    err_t err = get_dirent_by_path("/dev", &dirent, DIRECTORY_TYPE, &parent_dir, NULL);
+    if (err == FILE_NOT_FOUND) {
+        char paths[1][5];
+        char path[5] = "/dev";
+        err = fs_mkdir(paths);
+        if (err) {
+            return err;
+        }
+
+        err = get_dirent_by_path("/dev", &dirent, DIRECTORY_TYPE, &parent_dir, NULL);
+        if (err) {
+            return err;
+        }
+    } else if (err) {
+        return err;
+    }
+
+    char name[32] = malloc(sizeof(char) * 32);
+    strcpy(char_device_registry[rdev.major]->name, name);
+    int len = strlen(char_device_registry[rdev.major]->name);
+    if (strlen > 30) {
+        name[30] = '0' + minor;
+        name[31] = '\0';
+    } else {
+        name[strlen] = '0'+ minor;
+        name[strlen+1] = '\0';
+    }
+
+    err = add_dirent(name, ino, parent_dir);
+    if (err) {
+        retuurn err;
+    }
+
+    return SUCCESS;
+}
+
+struct char_driver *get_char_device(uint16_t major) {
+    return char_drivers[driver->major] = driver;
+}
