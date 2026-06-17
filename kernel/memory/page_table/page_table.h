@@ -3,6 +3,9 @@
 #include <stdint.h>
 
 #define PAGE_SIZE 4096ULL
+#define PAGE_TABLE_ENTRIES 512ULL
+#define PTE_ADDR_MASK     UINT64_C(0x0000fffffffff000)
+#define DESC_VALID        (1ULL << 0)
 #define KERNEL_VA_BASE UINT64_C(0xffff000000000000)
 #define KERNEL_HEAP_START UINT64_C(0xffff800000000000)
 #define KERNEL_HEAP_SIZE  UINT64_C(0x100000)
@@ -17,6 +20,9 @@
 void *alloc_page(void);
 void free_page(void *page);
 
+static uint8_t copy_phys_page(uint64_t src_pa, uint64_t dst_pa);
+static uint64_t table_desc(uint64_t *table);
+static uint64_t kernel_phys_addr(uint64_t va);
 uint64_t kernel_direct_map_va(uint64_t pa);
 
 uint8_t pt_map_page(uint64_t *l0, uint64_t va, uint64_t pa, uint64_t attrs);

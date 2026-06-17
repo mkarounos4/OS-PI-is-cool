@@ -4,14 +4,11 @@
 
 #include "user_image.h"
 
-#define PAGE_TABLE_ENTRIES 512ULL
 #define PAGE_MASK         (PAGE_SIZE - 1ULL)
 #define L1_BLOCK_SIZE     UINT64_C(0x40000000)
 #define PA_MASK           UINT64_C(0x0000ffffffffffff)
-#define PTE_ADDR_MASK     UINT64_C(0x0000fffffffff000)
 #define BLOCK_ADDR_MASK   UINT64_C(0x0000ffffc0000000)
 
-#define DESC_VALID        (1ULL << 0)
 #define DESC_BLOCK        (0ULL << 1)
 #define DESC_TABLE        (1ULL << 1)
 #define DESC_PAGE         (1ULL << 1)
@@ -70,6 +67,20 @@ static void zero_page(void *page) {
     for (uint64_t i = 0; i < PAGE_SIZE / sizeof(uint64_t); i++) {
         words[i] = 0;
     }
+}
+
+static uint8_t copy_phys_page(uint64_t src_pa, uint64_t dst_pa) {
+    void *src = (void *)(uintptr_t)kernel_direct_map_va(src_pa);
+    void *dst = (void *)(uintptr_t)kernel_direct_map_va(dst_pa);
+
+    uint64_t *src_words = (uint64_t *)src;
+    uint64_t *dst_words = (uint64_t *)dst;
+
+    for (uint64_t i = 0; i < PAGE_SIZE / sizeof(uint64_t); i++) {
+        dst_words[i] = src_words[i];
+    }
+
+    return 1;
 }
 
 static void page_allocator_init(void) {

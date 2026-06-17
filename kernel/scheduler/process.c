@@ -9,10 +9,6 @@
 
 static pcb_t processes[MAX_PROCESS_COUNT];
 
-static uint64_t kernel_phys_addr(uint64_t va) {
-    return va & PA_MASK;
-}
-
 static void __attribute__((noreturn)) process_first_run(void) {
     struct trap_frame *frame;
     asm volatile ("mov %0, x19" : "=r"(frame));
@@ -271,20 +267,63 @@ void processes_init() {
 
 void cpy_address_space(pcb_t *src, pcb_t *dst) {
     uint64_t *src_l0 = (uint64_t *)(uintptr_t)src->ctx.ttbr0_el1;
+    uint64_t *dst_l0 = (uint64_t *)alloc_page();
+    if (dst_l0 == NULL) return;
+    dst->ctx.ttbr0_el1 = (uint64_t)(uintptr_t)kernel_phys_addr((uint64_t)(uintptr_t)dst_l0);
 
-    /* TODO: walk table, allocating a new page in dst for each page in src, 
-     * copying over the contents to dst */
+    for (short i = 0; i < PAGE_TABLE_ENTRIES; i++) {
+	if ((src_l0[i] & DESC_VALID) == 0) continue;
+
+	uint64_t *src_l1 = (uint64_t *)(uintptr_t)kernel_direct_map_va(src_l0[i] & PTE_ADDR_MASK);
+        uint64_t *dst_l1 = (uint64_t *)alloc_page();
+	if (dst_l1 == NULL) return;
+	dst_l0[i] = table_desc(dst_l1);
+
+	for (short j = 0; j < PAGE_TABLE_ENTRIES; j++) {
+	    if ((src_l1[j] & DESC_VALID) == 0) continue;
+
+	    uint64_t *src_l2 = (uint64_t *)(uintptr_t)kernel_direct_map_va(src_l1[j] & PTE_ADDR_MASK);
+            uint64_t *dst_l2 = (uint64_t *)alloc_page();
+            if (dst_l2 == NULL) return;
+            dst_l1[j] = table_desc(dst_l2);
+
+	    for (short k = 0; k < PAGE_TABLE_ENTRIES; k++) {
+		if ((src_l2[k] & DESC_VALID) == 0) continue;
+
+		uint64_t *src_l3 = (uint64_t *)(uintptr_t)kernel_direct_map_va(src_l2[k] & PTE_ADDR_MASK);
+                uint64_t *dst_l3 = (uint64_t *)alloc_page();
+                if (dst_l3 == NULL) return;
+                dst_l2[k] = table_desc(dst_l3);
+
+		for (short l = 0; l < PAGE_TABLE_ENTRIES; l++) {
+		    if ((src_l3[l] & DESC_VALID) == 0) continue;
+
+		    uint64_t src_pa = src_l3[l] & PTE_ADDR_MASK;
+                    uint64_t *dst_page = (uint64_t *)alloc_page();
+                    if (dst_page == NULL) return;
+
+                    uint64_t dst_pa = kernel_phys_addr((uint64_t)(uintptr_t)dst_page);
+                    copy_phys_page(src_pa, dst_pa);
+
+                    uint64_t attrs = src_l3[l] & ~PTE_ADDR_MASK;
+                    dst_l3[l] = (dst_pa & PTE_ADDR_MASK) | attrs;
+		}
+	    }
+	}
+    }
 }
 
 pid_t fork() {
     // create child process off of parent
-    parent = get_curr_process();
-    child = proc_create(parent->entry_func, parent->args, parent->pid);
+    pcb_t *parent = get_curr_process();
+    pid_t child_pid = proc_create(parent->entry_func, parent->args, parent->pid);
+    if (child_pid == NULL) return -1;
+    pcb_t *child = get_pcb_by_pid(child_pid); 
     
     // cpy parent trap frame over to child
-    uint64_t parent_frame_va = src_pcb->ctx.x19;
+    uint64_t parent_frame_va = parent->ctx.x19;
     struct trap_frame *parent_frame = (struct trap_frame *)(uintptr_t)parent_frame_va;
-    uint64_t child_frame_va = dst_pcb->ctx.x19;
+    uint64_t child_frame_va = child->ctx.x19;
     struct trap_frame *child_frame = (struct trap_frame *)(uintptr_t)child_frame_va;
     *child_frame = *parent_frame;
 
