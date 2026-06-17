@@ -12,7 +12,6 @@ typedef struct {
     void *seventeen_free_ptr;     // size 17+
 } Seg_Lists;
 
-
 /* Memset and Memcpy */
 static void *kmalloc_memset(void *ptr, int value, size_t num)
 {
@@ -31,6 +30,9 @@ void *kmalloc_memcpy(void *dst, const void *src, size_t num)
     return dst;
 }
 
+void *kmemset(void *ptr, int value, size_t num) {
+    kmalloc_memset(ptr, value, num);
+}
 
 /* Heap and Brk */
 static void *HeapMemoryBrk = NULL;

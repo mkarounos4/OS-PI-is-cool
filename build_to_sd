@@ -1,8 +1,8 @@
 make clean
-make PLATFORM=rpi
-mount /run/media/veerkakar/bootfs/
+make rpi
 cp config.txt   /run/media/veerkakar/bootfs/
 cp kernel8.img  /run/media/veerkakar/bootfs/
+cp kernel.elf /run/media/veerkakar/bootfs/
 cp kernel8.img  /run/media/veerkakar/bootfs/kernel_2712.img
 sync /run/media/veerkakar/bootfs/
 umount /run/media/veerkakar/bootfs/

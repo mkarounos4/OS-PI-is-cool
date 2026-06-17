@@ -4,6 +4,8 @@ OBJCOPY = $(CROSS)objcopy
 OBJDUMP = $(CROSS)objdump
 NM      = $(CROSS)nm
 BOOTDIR = /run/media/veerkakar/bootfs
+QEMU_SD_IMG ?= build/qemu/sd.img
+QEMU_SD_SIZE ?= 1G
 
 PLATFORM ?= rpi
 
@@ -115,11 +117,14 @@ install:
 # quit qemu with Ctrl+A X
 qemu:
 	$(MAKE) PLATFORM=qemu build
+	@mkdir -p $(dir $(QEMU_SD_IMG))
+	@test -f $(QEMU_SD_IMG) || truncate -s $(QEMU_SD_SIZE) $(QEMU_SD_IMG)
 	qemu-system-aarch64 \
 	    -M raspi3b \
 	    -cpu cortex-a53 \
 	    -nographic \
-	    -kernel kernel8.img
+	    -kernel kernel8.img \
+	    -drive file=$(QEMU_SD_IMG),if=sd,format=raw
 
 build: $(TARGET)
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 #define UART_KERNEL_VA_BASE UINT64_C(0xffff000000000000)
@@ -21,6 +22,11 @@ static inline void rpi5_mmio_barrier(void) {
 
 uint64_t get_uart_base(void);
 void uart_init(void);
+void uart_irq_init(void);
+void uart_rx_interrupt_hook(void);
+void uart_rx_interrupts_enable(void);
+void uart_rx_interrupts_disable(void);
+void uart_input_handler(void *data, size_t size);
 void uart_puts(const char *s);
 void uart_putc(const char c);
 void uart_putint(int i);

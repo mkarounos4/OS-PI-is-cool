@@ -27,9 +27,19 @@ static inline uint32_t mmio_read32(uint64_t address) {
 #if defined(PLATFORM_QEMU)
 
 #define RPI3_LOCAL_BASE                 UINT64_C(0x40000000)
+#define RPI3_LOCAL_GPU_INT_ROUTING      0x0cu
 #define RPI3_LOCAL_CORE0_TIMER_IRQCNTL  0x40u
 #define RPI3_LOCAL_CORE0_IRQ_SOURCE     0x60u
 #define RPI3_LOCAL_CNTP_IRQ_BITS        ((1u << 0) | (1u << 1))
+#define RPI3_LOCAL_GPU_IRQ_BIT          (1u << 8)
+
+#define BCM2835_IRQ_BASE                UINT64_C(0x3f00b200)
+#define BCM2835_IRQ_PENDING1            0x04u
+#define BCM2835_IRQ_PENDING2            0x08u
+#define BCM2835_IRQ_ENABLE2             0x14u
+#define BCM2835_IRQ_DISABLE2            0x20u
+#define BCM2835_UART0_INTID             57u
+#define BCM2835_UART0_PENDING2_BIT      (1u << (BCM2835_UART0_INTID - 32u))
 
 static inline void local_write(uint32_t reg, uint32_t value) {
     mmio_write32(RPI3_LOCAL_BASE + reg, value);
@@ -37,6 +47,14 @@ static inline void local_write(uint32_t reg, uint32_t value) {
 
 static inline uint32_t local_read(uint32_t reg) {
     return mmio_read32(RPI3_LOCAL_BASE + reg);
+}
+
+static inline void bcm_irq_write(uint32_t reg, uint32_t value) {
+    mmio_write32(BCM2835_IRQ_BASE + reg, value);
+}
+
+static inline uint32_t bcm_irq_read(uint32_t reg) {
+    return mmio_read32(BCM2835_IRQ_BASE + reg);
 }
 
 #else
@@ -108,6 +126,8 @@ void irq_init(void) {
     irq_disable();
 
     local_write(RPI3_LOCAL_CORE0_TIMER_IRQCNTL, 0);
+    local_write(RPI3_LOCAL_GPU_INT_ROUTING, 0);
+    bcm_irq_write(BCM2835_IRQ_DISABLE2, BCM2835_UART0_PENDING2_BIT);
 
     asm volatile("dsb sy\nisb" ::: "memory");
 #else
@@ -172,6 +192,8 @@ void irq_enable_line(unsigned intid) {
     if (intid == ARM_GENERIC_TIMER_INTID) {
         local_write(RPI3_LOCAL_CORE0_TIMER_IRQCNTL,
                     local_read(RPI3_LOCAL_CORE0_TIMER_IRQCNTL) | RPI3_LOCAL_CNTP_IRQ_BITS);
+    } else if (intid == BCM2835_UART0_INTID) {
+        bcm_irq_write(BCM2835_IRQ_ENABLE2, BCM2835_UART0_PENDING2_BIT);
     }
 #else
     gicd_write(GICD_ISENABLER + ((intid / 32u) * 4u), 1u << (intid % 32u));
@@ -187,6 +209,8 @@ void irq_disable_line(unsigned intid) {
     if (intid == ARM_GENERIC_TIMER_INTID) {
         local_write(RPI3_LOCAL_CORE0_TIMER_IRQCNTL,
                     local_read(RPI3_LOCAL_CORE0_TIMER_IRQCNTL) & ~RPI3_LOCAL_CNTP_IRQ_BITS);
+    } else if (intid == BCM2835_UART0_INTID) {
+        bcm_irq_write(BCM2835_IRQ_DISABLE2, BCM2835_UART0_PENDING2_BIT);
     }
 #else
     gicd_write(GICD_ICENABLER + ((intid / 32u) * 4u), 1u << (intid % 32u));
@@ -212,6 +236,11 @@ struct trap_frame *irq_handle_exception(struct trap_frame *frame) {
 
     if ((source & RPI3_LOCAL_CNTP_IRQ_BITS) != 0) {
         intid = ARM_GENERIC_TIMER_INTID;
+    } else if ((source & RPI3_LOCAL_GPU_IRQ_BIT) != 0) {
+        uint32_t pending2 = bcm_irq_read(BCM2835_IRQ_PENDING2);
+        if ((pending2 & BCM2835_UART0_PENDING2_BIT) != 0) {
+            intid = BCM2835_UART0_INTID;
+        }
     }
 #else
     uint32_t iar = gicc_read(GICC_IAR);
