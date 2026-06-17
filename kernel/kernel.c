@@ -33,6 +33,7 @@ void kernel_main(void) {
     uart_puts("[boot] irq_init begin\n");
     irq_init();
     uart_puts("[boot] irq_init done\n");
+    uart_irq_init();
     uart_puts("[boot] timer_init begin\n");
     timer_init();
     uart_puts("[boot] timer_init done\n");

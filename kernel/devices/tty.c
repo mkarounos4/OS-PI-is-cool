@@ -145,6 +145,10 @@ ssize_t tty_write(struct oft_entry *entry, const void *buffer, size_t count) {
 }
 
 void tty_send_input(int minor, const void *buffer, size_t count) {
+    if (tty_state == NULL || tty_state.num_ttys <= minor) {
+        return;
+    }
+
     while (count > 0) {
         bool wrote_char = produce_ring_buffer(tty_state[minor]->tx, buffer);
         if (!wrote_char) {
