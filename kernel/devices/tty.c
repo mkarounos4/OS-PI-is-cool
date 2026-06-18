@@ -58,6 +58,8 @@ int tty_create() {
     new_tty.rx_wait_queue = vec_new(2, NULL);
     new_tty.tx_wait_queue = vec_new(2, NULL);
 
+    new_tty.fg_pgid = 0;
+
     err_t err = devfs_create_char_device(new_tty.device_number);
     if (err) {
         return err;
@@ -90,16 +92,19 @@ ssize_t tty_read(struct oft_entry *entry, void *buffer, size_t count) {
 
     struct tty_device *curr_tty = tty_state.devices[minor];
 
+    pcb_t *curr_pcb = get_curr_process();
+    if (curr_pcb == NULL) {
+        return num_read;
+    }
+    if (curr_pcb->pgid != fg_pgid) {
+        s_kill(-curr_pcb->pgid, SIGTTIN);
+    }
+    
     ssize_t num_read = 0;
     while (num_read < count) {
         void *char_void;
         bool read_char = consume_ring_buffer(curr_tty->rx, char_void);
         if (!read_char) {
-            pcb_t *curr_pcb = get_curr_process();
-            if (curr_pcb == NULL) {
-                return num_read;
-            }
-
             vec_push_back(&curr_tty->rx_wait_queue, curr_pcb->pid);
             block_process(curr_pcb);
             continue;
@@ -150,7 +155,7 @@ void tty_send_input(int minor, const void *buffer, size_t count) {
     }
 
     while (count > 0) {
-        bool wrote_char = produce_ring_buffer(tty_state[minor]->tx, buffer);
+        bool wrote_char = produce_ring_buffer(tty_state.devices[minor]->tx, buffer);
         if (!wrote_char) {
             return;
         }
@@ -158,4 +163,21 @@ void tty_send_input(int minor, const void *buffer, size_t count) {
         buffer++;
         count--;
     }
+}
+
+int tcsetpgrp(int fd, int pgid) {
+    pcb_t *pcb = get_curr_process();
+    if (pcb == NULL) {
+        return -1;
+    }
+
+    if (pgid == 0) {
+        pgid = pcb->pgid;
+    }
+
+    if (tty_state.devices[fd]->fg_pgid != pcb->pgid) {
+        s_kill(pcb->pid, SIGTTOU);
+    }
+    tty_state.devices[fd]->fg_pgid = pgid;
+    return 0;
 }

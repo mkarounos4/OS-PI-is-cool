@@ -13,6 +13,8 @@ struct tty_device {
     Vec tx_wait_queue;
 
     int refcount;
+
+    pid_t fg_pgid;
 };
 
 struct tty_driver_state {
@@ -24,3 +26,4 @@ struct tty_driver_state {
 void tty_send_input(int minor, const void *buffer, size_t count);
 int tty_drivers_init(void);
 int tty_create();
+int tcsetpgrp(int fd, int pgid);

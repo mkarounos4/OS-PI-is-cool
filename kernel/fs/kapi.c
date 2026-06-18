@@ -52,7 +52,7 @@ int k_open(const char *fname, int mode) {
         if (err) {
             return err;
         }
-        update_file_size(entry, 0);
+        err = update_file_size(entry, 0);
         entry->cursor = 0;
         if (err) {
             return err;
@@ -60,7 +60,7 @@ int k_open(const char *fname, int mode) {
     }
 
     struct oft_entry *entry;
-    error = get_oft_entry_by_fd(fd, &entry);
+    err = get_oft_entry_by_fd(fd, &entry);
     if (err != SUCCESS) {
         return err;
     }
@@ -81,6 +81,7 @@ int k_close(int fd) {
     }
 
     struct oft_entry *entry;
+    err = get_oft_entry_by_fd(fd, &entry);
     if (err) {
         return err;
     }

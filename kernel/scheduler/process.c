@@ -411,3 +411,49 @@ void send_unblock_event(pid_t pid, uint32_t event) {
         unblock_process(pcb);
     }
 }
+
+int dup2(int oldfd, int newfd) {
+    pcb_t *pcb = get_curr_process(pid);
+    if (pcb == NULL) {
+        return -1;
+    }
+
+    close(newfd);
+    vec_set(pcb->open_file_table, new_fd, vec_get(pcb->open_file_table(old_fd)));
+    k_file_add_reference(vec_get(pcb->open_file_table(old_fd)));
+
+    return 0;
+}
+
+int setpgrp(pid_t pid, pid_t pgid) {
+    pcb_t *pcb;
+    if (pid == 0) {
+        pcb = get_curr_process();
+    } else {
+        pcb = get_pcb_by_pid(pid);
+    }
+
+    if (pcb == NULL) {
+        return -1;
+    }
+
+    if (pgid == 0) {
+        pcb_t *pcb2 = get_curr_process();
+        if (pcb2 == NULL) {
+            return -1;
+        }
+        pgid = pcb2->pid;
+    }
+
+    pcb->pgid = pgid;
+    return 0;
+}
+
+pid_t getpgrp() {
+    pcb_t *pcb = get_curr_process();
+    if (pcb == NULL) {
+        return -1;
+    }
+
+    return pcb->pgid;
+}
