@@ -61,28 +61,7 @@ int main(int argc, char *argv[]) {
     background_jobs = vec_new(2, free_job);
     stopped_background_jobs = vec_new(2, NULL);
 
-    // determine if this is an interactive or noninteractive shell
-    if (isatty(STDIN_FILENO)) {
-        prompt();
-    } else {
-        noninteractive_prompt();
-    }
-}
-
-void noninteractive_prompt() {
-    char *line = NULL;
-    size_t len = 0;
-    while (getline(&line, &len, stdin) != -1 && len != 0) {
-        struct parsed_command *parsed_cmd;
-        int parse_res = parse_command(line, &parsed_cmd);
-
-        if (parse_res != 0) {
-            printf("parse_command: invalid command\n");
-        } else {
-            execute_commands(parsed_cmd, line);
-        }
-    }
-    free(line);
+    prompt();
 }
 
 void prompt() {
@@ -277,7 +256,7 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
             prepare_child_process(parsed_cmd);
             execvp(parsed_cmd->commands[0][0], parsed_cmd->commands[0]);
             perror("execvp");
-            _exit(EXIT_FAILURE);
+            exit(EXIT_FAILURE);
         }
 
         // Set child to new process group
@@ -327,11 +306,11 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
                 }
 
                 if (check_fat_commands(parsed_cmd->commands[i])) {
-                    _exit(EXIT_SUCCESS);
+                    exit(EXIT_SUCCESS);
                 }
 
                 execvp(parsed_cmd->commands[i][0], parsed_cmd->commands[i]);
-                _exit(EXIT_FAILURE);
+                exit(EXIT_FAILURE);
             }
 
             // Set child to new process group

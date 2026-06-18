@@ -337,10 +337,12 @@ pid_t fork() {
 
     cpy_address_space(child, parent);
 
-    child->file_descriptors = parent->file_descriptors;
-
-    // make child runnable
-    add_task_to_scheduler(child);
+    child->file_descriptors = vec_new(3, NULL);
+    for (int i = 0; i < vec_len(&parent->file_descriptors); i++) {
+        void *fd = vec_get(&parent->file_descriptors, i);
+        vec_push_back(&child->file_descriptors, fd);
+        k_file_add_reference((int)(uintptr_t) fd);
+    }
 
     // return child pid to parent's call
     return child->pid;
