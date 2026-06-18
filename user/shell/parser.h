@@ -5,6 +5,7 @@
 #define PARSER_H_
 
 #include <stdbool.h>
+#include "fs_syscall.h"
 
 /* Here defines all possible parser errors */
 // parser encountered an unexpected file input token '<'
@@ -87,7 +88,7 @@ int parse_command(const char *cmd_line, struct parsed_command **result);
 void print_parsed_command(const struct parsed_command *cmd);
 
 /* a debugging function for printing out what error was encountered */
-void print_parser_errcode(FILE* output, int err_code);
+void print_parser_errcode(int err_code);
 
 #endif
 

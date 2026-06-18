@@ -1,13 +1,12 @@
-#include "Vec.h"
+#include "data-structs/vec.h"
+#include "memory/kmalloc.h"
+#include "uart/uart.h"
+#include "traps/traps.h"
 
 Vec vec_new(size_t initial_capacity, ptr_dtor_fn ele_dtor_fn) {
-	if (initial_capacity < 0) {
-		panic("initial_capacity must be non-negative.\n");
-	}
-
-	ptr_t* data = malloc(sizeof(void*) * initial_capacity);
+	ptr_t* data = kmalloc(sizeof(void*) * initial_capacity);
 	if (data == NULL) {
-		panic("Failed to allocate memory.");
+		exit(1);
 	}
 	return (Vec) {
 		.data = data,
@@ -19,18 +18,15 @@ Vec vec_new(size_t initial_capacity, ptr_dtor_fn ele_dtor_fn) {
 
 ptr_t vec_get(Vec* self, size_t index) {
 	if (index >= vec_len(self)) {
-		panic("Get index must be less than length.");
+		exit(1);
 	}
-    if (index < 0) {
-        panic("Get index must be at least 0");
-    }
 
 	return self->data[index];
 }
 
 void vec_set(Vec* self, size_t index, ptr_t new_ele) {
-	if (index < 0 || index >= vec_len(self)) {
-		panic ("Index out of bounds.");
+	if (index >= vec_len(self)) {
+		exit(1);
 	}
 
 	ptr_t old_data = self->data[index];
@@ -70,8 +66,8 @@ void vec_insert(Vec* self, size_t index, ptr_t new_ele) {
 		return;
 	}
 
-	if (index > vec_len(self) || index < 0) {
-		panic("Insertion index out of bounds.");
+	if (index > vec_len(self)) {
+		exit(1);
 	}
 
 	if (vec_len(self) == vec_capacity(self)) {
@@ -90,8 +86,8 @@ void vec_insert(Vec* self, size_t index, ptr_t new_ele) {
 }
 
 void vec_erase(Vec* self, size_t index) {
-	if (index >= vec_len(self) || index < 0) {
-		panic("Erase index out of bounds.");
+	if (index >= vec_len(self)) {
+		exit(1);
 	}
 
 	if (self->ele_dtor_fn != NULL) {
@@ -105,25 +101,25 @@ void vec_erase(Vec* self, size_t index) {
 
 void vec_resize(Vec* self, size_t new_capacity) {
 	if (new_capacity < vec_len(self)) {
-		panic("Resize capacity must be at least length.");
+		exit(1);
 	}
 
 	ptr_t* old_data = self->data;
-	self->data = malloc(sizeof(ptr_t) * new_capacity);
+	self->data = kmalloc(sizeof(ptr_t) * new_capacity);
 	if (self->data == NULL) {
-		panic("Failed to allocate memory.");
+		exit(1);
 	}
 
-	for (int i = 0; i < vec_len(self); i++) {
+	for (size_t i = 0; i < vec_len(self); i++) {
 		self->data[i] = old_data[i]; 
 	}
-	free(old_data);
+	kfree(old_data);
 	vec_capacity(self) = new_capacity;
 }
 
 void vec_clear(Vec* self) {
 	if (self->ele_dtor_fn != NULL) { 
-		for (int i = 0; i < vec_len(self); i++) {
+		for (size_t i = 0; i < vec_len(self); i++) {
 			self->ele_dtor_fn(self->data[i]);
 		}
 	}
@@ -132,7 +128,7 @@ void vec_clear(Vec* self) {
 
 void vec_destroy(Vec* self) {
 	vec_clear(self);
-	free(self->data);
+	kfree(self->data);
 	self->data = NULL;
 	vec_capacity(self) = 0;
 	vec_len(self) = 0;

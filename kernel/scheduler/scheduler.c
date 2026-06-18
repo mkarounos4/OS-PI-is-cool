@@ -215,17 +215,17 @@ void scheduler_tick(void *ctx) {
     // Handle queue'd signals
     if (curr_proc != NULL) {
         if (curr_proc->pending_signals & (1 << SIGKILL)) {
-            terminate_process(curr_process);
+            terminate_process(curr_proc);
         } else if (curr_proc->pending_signals & (1 << SIGSTOP)) {
             curr_proc->pending_signals &= ~(1 << SIGSTOP);
-            stop_process(curr_process);
+            stop_process(curr_proc);
         }
 
         int curr = 0;
         while (curr_proc->pending_signals >> curr) {
             if ((curr_proc->pending_signals & (1 << curr)) && !(curr_proc->mask & (1 << curr))) {
                 curr_proc->pending_signals &= ~(1 << curr);
-                curr_proc->sigactions[curr].handler(curr);
+                curr_proc->sigactions[curr].sa_handler(curr);
             }
         }
     }

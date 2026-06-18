@@ -209,6 +209,28 @@ struct trap_frame *syscall_dispatch(struct trap_frame *frame) {
                     (char *)(uintptr_t)frame->regs[1],
                     (int)frame->regs[2]);
         break;
+    case S_SIGPROCMASK:
+        ret = sigprocmask((int)frame->regs[0],
+                          (const sigset_t *)(uintptr_t)frame->regs[1],
+                          (sigset_t *)(uintptr_t)frame->regs[2]);
+        break;
+    case S_SIGEMPTYSET:
+        ret = sigemptyset((sigset_t *)(uintptr_t)frame->regs[0]);
+        break;
+    case S_SIGADDSET:
+        ret = sigaddset((sigset_t *)(uintptr_t)frame->regs[0], (int)frame->regs[1]);
+        break;
+    case S_SIGFILLSET:
+        ret = sigfillset((sigset_t *)(uintptr_t)frame->regs[0]);
+        break;
+    case S_SIGSUSPEND:
+        ret = sigsuspend((const sigset_t *)(uintptr_t)frame->regs[0]);
+        break;
+    case S_SIGACTION:
+        ret = sigaction((int)frame->regs[0],
+                        (struct sigaction *)(uintptr_t)frame->regs[1],
+                        (struct sigaction *)(uintptr_t)frame->regs[2]);
+        break;
     default:
         ret = SYS_ENOSYS;
         break;

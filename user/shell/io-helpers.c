@@ -4,7 +4,7 @@
 
 int changeStdInput(struct parsed_command* cmd) {
     // Redirect stdin to input file if specified
-    int input_file = open(cmd->stdin_file, O_RDONLY, RDWR_MODE);
+    int input_file = open(cmd->stdin_file, O_RDONLY | RDWR_MODE);
     if (input_file == -1) {
         free(cmd);
         return 1;

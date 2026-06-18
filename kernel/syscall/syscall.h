@@ -32,6 +32,12 @@ enum syscall_type {
     S_FS_LSEEK = 25,
     S_FS_READ = 26,
     S_FS_WRITE = 27,
+    S_SIGPROCMASK = 28,
+    S_SIGEMPTYSET = 29,
+    S_SIGADDSET = 30,
+    S_SIGFILLSET = 31,
+    S_SIGSUSPEND = 32,
+    S_SIGACTION = 33,
 };
 
 #define SYS_ENOSYS (-38L)

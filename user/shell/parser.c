@@ -222,28 +222,28 @@ void print_parsed_command(const struct parsed_command *const cmd) {
     puts(cmd->is_background ? "&" : "");
 }
 
-void print_parser_errcode(FILE* output, int err_code) {
+void print_parser_errcode(int err_code) {
   switch (err_code) {
     case UNEXPECTED_FILE_INPUT:
-      fprintf(output, "UNEXPECTED INPUT REDIRECTION TO A FILE\n");
+      printf("UNEXPECTED INPUT REDIRECTION TO A FILE\n");
       break;
     case UNEXPECTED_FILE_OUTPUT:
-      fprintf(output, "UNEXPECTED OUTPUT REDIRECTION TO A FILE\n");
+      printf("UNEXPECTED OUTPUT REDIRECTION TO A FILE\n");
       break;
     case UNEXPECTED_PIPELINE:
-      fprintf(output, "UNEXPECTED PIPE\n");
+      printf("UNEXPECTED PIPE\n");
       break;
     case UNEXPECTED_AMPERSAND:
-      fprintf(output, "UNEXPECTED AMPERESAND\n");
+      printf("UNEXPECTED AMPERESAND\n");
       break;
     case EXPECT_INPUT_FILENAME:
-      fprintf(output, "COULD NOT FINE FILENAME FOR INPUT REDIRECTION \"<\"\n");
+      printf("COULD NOT FINE FILENAME FOR INPUT REDIRECTION \"<\"\n");
       break;
     case EXPECT_OUTPUT_FILENAME:
-      fprintf(output, "COULD NOT FIND FILENAME FOR OUTPUT REDIRECTION \"<\"\n");
+      printf("COULD NOT FIND FILENAME FOR OUTPUT REDIRECTION \"<\"\n");
       break;
     case EXPECT_COMMANDS:
-      fprintf(output, "COULD NOT FIND ANY COMMANDS OR ARGS\n");
+      printf("COULD NOT FIND ANY COMMANDS OR ARGS\n");
       break;
     default:
       break;

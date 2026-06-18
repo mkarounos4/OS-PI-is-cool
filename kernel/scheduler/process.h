@@ -5,7 +5,12 @@
 #include "data-structs/vec.h"
 #include "traps/traps.h"
 
+#ifndef PID_T_DEFINED
+#define PID_T_DEFINED
 typedef int32_t pid_t;
+#endif
+
+#include "signals/signals.h"
 
 #define MAX_PROCESS_COUNT 16
 #define WNOHANG 1

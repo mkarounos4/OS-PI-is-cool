@@ -3,8 +3,6 @@
 
 #include <stddef.h>  // for size_t
 #include <stdbool.h>
-#include "./panic.h"
-#include <stdlib.h>
 
 typedef void* ptr_t;
 typedef void(*ptr_dtor_fn)(ptr_t);

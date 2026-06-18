@@ -1,4 +1,5 @@
 #include "signals.h"
+#include "scheduler/scheduler.h"
 #include "scheduler/process.h"
 
 void (*def_signal_handlers[32])(int);
@@ -9,7 +10,7 @@ void SIG_IGN(int signum) {
 
 void SIG_CONT(int signum) {
     (void)signum;
-    pcb_t *pcb = get_pcb_by_pid(pid);
+    pcb_t *pcb = get_curr_process();
     if (pcb != NULL) {
         continue_process(pcb);
     }
@@ -17,7 +18,7 @@ void SIG_CONT(int signum) {
 
 void SIG_STOP(int signum) {
     (void)signum;
-    pcb_t *pcb = get_pcb_by_pid(pid);
+    pcb_t *pcb = get_curr_process();
     if (pcb != NULL) {
         stop_process(pcb);
     }
@@ -25,7 +26,7 @@ void SIG_STOP(int signum) {
 
 void SIG_TERM(int signum) {
     (void)signum;
-    pcb_t *pcb = get_pcb_by_pid(pid);
+    pcb_t *pcb = get_curr_process();
     if (pcb != NULL) {
         terminate_process(pcb);
     }
@@ -41,11 +42,11 @@ void SIG_NOT_IMPLEMENTED(int signum) {
 }
 
 void user_def_sig_handler(int signum) {
-    pcb_t *pcb = get_pcb_by_pid(pid);
+    pcb_t *pcb = get_curr_process();
     sigset_t old_mask;
-    sigset_t new_mask = pcb->sigactions[signum].mask | (1 << signum);
+    sigset_t new_mask = pcb->sigactions[signum].sa_mask | (1 << signum);
     sigprocmask(SIG_BLOCK, &new_mask, &old_mask);
-    pcb->sigactions[signum].handler(signum);
+    pcb->sigactions[signum].sa_handler(signum);
     sigprocmask(SIG_SET, &old_mask, NULL);
 }
 
@@ -67,15 +68,18 @@ void initialize_signals() {
 
 int s_kill(pid_t pid, int signal) {
     pcb_t *pcb = get_pcb_by_pid(pid);
+    if (pcb == NULL) {
+        return -1;
+    }
     if (pcb == get_curr_process() && !(pcb->mask & (1 << signal))) {
-        pcb->sigactions[signals](signal);
+        pcb->sigactions[signal].sa_handler(signal);
         return 0;
     }
 
     if (signal == SIGCONT) {
         int curr = 0;
         while (pcb->pending_signals >> curr) {
-            if ((pcb->pending_signals & 1) && pcb->sigactions[curr].sa_handler == SIG_STOP) {
+            if ((pcb->pending_signals & (1 << curr)) && pcb->sigactions[curr].sa_handler == SIG_STOP) {
                 pcb->pending_signals &= ~(1 << curr);
             }
             curr++;
@@ -132,7 +136,7 @@ int sigprocmask(int how, const sigset_t *set, sigset_t *oldset) {
     }
 
     if (oldset != NULL) {
-        oldset = pcb->mask;
+        *oldset = pcb->mask;
     }
 
     if (how == SIG_BLOCK) {
@@ -185,10 +189,10 @@ int sigsuspend(const sigset_t *mask) {
     }
 
     sigset_t old_set;
-    sigprocmask(SIG_SETMASK, mask, &old_set)
-    pcb->block_until &= (1 << BLOCK_UNTIL_SIGNAL);
+    sigprocmask(SIG_SETMASK, mask, &old_set);
+    pcb->blocked_until |= (1 << BLOCK_UNTIL_SIGNAL);
     block_process(pcb);
-    sigprocmask(SIG_SETMASK, oldset, NULL);
+    sigprocmask(SIG_SETMASK, &old_set, NULL);
 
     return -1;
 }

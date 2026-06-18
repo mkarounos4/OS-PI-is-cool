@@ -17,9 +17,9 @@ typedef void *ptr_t;
 
 #define SIGKILL 9
 #define SIGSTOP 10
-#define SIGTERM 11
-#define SIGCONT 12
-#define SIGCHLD 13
+#define SIGCONT 11
+#define SIGCHLD 12
+#define SIGTERM 15
 
 enum syscall_type {
     S_WRITE_CONSOLE = 1,
@@ -49,6 +49,12 @@ enum syscall_type {
     S_FS_LSEEK = 25,
     S_FS_READ = 26,
     S_FS_WRITE = 27,
+    S_SIGPROCMASK = 28,
+    S_SIGEMPTYSET = 29,
+    S_SIGADDSET = 30,
+    S_SIGFILLSET = 31,
+    S_SIGSUSPEND = 32,
+    S_SIGACTION = 33,
 };
 
 long write_console(const char *s, uint64_t len);

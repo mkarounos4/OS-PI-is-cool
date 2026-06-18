@@ -5,6 +5,8 @@
 #include "syscall.h"
 
 typedef int32_t err_t;
+typedef __SIZE_TYPE__ size_t;
+typedef __SIZE_TYPE__ ssize_t;
 
 #define F_READ 0x01
 #define F_WRITE 0x02
@@ -18,6 +20,11 @@ typedef int32_t err_t;
 #define O_WRONLY F_WRITE
 #define O_RDWR F_WRITE
 #define O_APPEND F_APPEND
+#define O_CREAT 0x4
+
+#define STDIN  0
+#define STDOUT 1
+#define STDERR 2
 
 static inline int open(const char *fname, int mode) {
     return (int)sys_call2(S_FS_OPEN, (long)(uintptr_t)fname, mode);

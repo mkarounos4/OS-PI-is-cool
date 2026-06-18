@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include "./parser.h"
 #include "Vec.h"
+#include "malloc.h"
 
 #define RUNNING_STATE 0
 #define STOPPED_STATE 1
