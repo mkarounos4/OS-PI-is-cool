@@ -1,4 +1,4 @@
-#include "../../headers/shell-helpers/Vec.h"
+#include "Vec.h"
 
 Vec vec_new(size_t initial_capacity, ptr_dtor_fn ele_dtor_fn) {
 	if (initial_capacity < 0) {

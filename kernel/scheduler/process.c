@@ -387,8 +387,6 @@ void unblock_process(pcb_t *pcb) {
     pcb->state = PROC_READY_STATE;
     pcb->blocked_until = 0;
     add_task_to_scheduler(pcb);
-
-    // handle all queued signals
 }
 
 void continue_process(pcb_t *pcb) {

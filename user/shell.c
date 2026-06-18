@@ -16,17 +16,17 @@ void *shell_init(void *args) {
 
     int fd = open(path, O_RDONLY);
     if (fd < 0) {
-        return;
+        return NULL;
     }
 
     int fd = open(path, O_WRONLY);
     if (fd < 0) {
-        return;
+        return NULL;
     }
 
     int fd = open(path, O_WRONLY);
     if (fd < 0) {
-        return;
+        return NULL;
     }
 
     // call actual shell handler here.

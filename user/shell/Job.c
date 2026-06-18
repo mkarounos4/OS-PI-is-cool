@@ -1,5 +1,4 @@
-#include "../../headers/shell-helpers/Job.h"
-#include "../../headers/os-helpers/s_funcs/s_helpers.h"
+#include "Job.h"
 #include <string.h>
 
 // Removes the job with the given id from the Vec self

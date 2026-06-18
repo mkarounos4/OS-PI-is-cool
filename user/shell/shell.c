@@ -1,5 +1,5 @@
 #define _GNU_SOURCE // For pipe2 definition on Linux
-#include "../headers/fat-helpers/shell.h"
+#include "shell.h"
 
 volatile sig_atomic_t wasInterrupted = 0;
 int shell_pgid;

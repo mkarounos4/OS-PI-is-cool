@@ -1,4 +1,4 @@
-#include "../../headers/shell-helpers/str-helpers.h"
+#include "str-helpers.h"
 
 // Concatenates 2 strings. Result is malloc'd.
 // Note: does not free str1/str2.

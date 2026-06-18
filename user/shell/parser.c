@@ -1,4 +1,4 @@
-#include "../../headers/shell-helpers/parser.h"
+#include "parser.h"
 
 static inline void skip_word(const char **const cur, const char *const end) {
     while (*cur < end && **cur != '<' && **cur != '>' && **cur != '|' && **cur != '&' && !isspace(**cur)) ++*cur;

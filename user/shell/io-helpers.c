@@ -1,4 +1,4 @@
-#include "../../headers/shell-helpers/io-helpers.h"
+#include "io-helpers.h"
 
 #define RDWR_MODE 0644
 

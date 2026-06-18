@@ -20,6 +20,7 @@ typedef int32_t pid_t;
 #define WAIT_CONTINUED 4
 
 #define BLOCK_UNTIL_NEW_CHILD 1
+#define BLOCK_UNTIL_SIGNAL 2
 
 enum process_state {
     PROC_UNUSED_STATE,
@@ -52,6 +53,11 @@ typedef struct pcb_st {
 
     Vec children;   // vec of children PIDs
     Vec file_descriptors;   // vec of fds
+                            
+    sigset_t mask;
+    sigset_t pending_signals;
+    
+    struct sigaction sigactions[32];
 } pcb_t;
 
 pcb_t *get_pcb_by_pid(pid_t pid);
