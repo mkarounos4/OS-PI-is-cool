@@ -5,6 +5,8 @@
 #include <stdint.h>
 
 void *kmalloc(size_t size);
+void *krealloc(void *oldptr, size_t size);
+void *kcalloc(size_t nmemb, size_t size);
 void kfree(void *ptr);
 
 bool kmm_init(void);
