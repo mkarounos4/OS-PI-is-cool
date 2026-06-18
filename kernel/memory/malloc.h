@@ -5,6 +5,8 @@
 #include <stdint.h>
 
 void *malloc(size_t size);
+void *realloci(void *oldptr, size_t size);
+void *calloc(size_t nmemb, size_t size);
 void free(void *ptr);
 
 void *memcpy(void *dst, const void *src, size_t num);

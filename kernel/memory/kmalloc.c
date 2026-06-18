@@ -368,3 +368,54 @@ void kfree(void *ptr)
 
     return;
 }
+
+/*
+ * krealloc
+ */
+void* krealloc(void* oldptr, size_t size)
+{
+    if (!oldptr) return kmalloc(size);
+    if (size == 0) { kfree(oldptr); return NULL; }
+
+    size_t oldsize = (*(size_t *)((char *)oldptr - WS)) & ~0xF;
+    size_t needed = align(size + DWS);
+
+    // current block already big enough
+    if (oldsize >= needed) return oldptr;
+
+    // try expanding into next block if free
+    void *next_hdr = (char *)oldptr - WS + oldsize;
+    size_t next_val = *(size_t *)next_hdr;
+    if (!(next_val & 0x1)) {
+        size_t next_size = next_val & ~0xF;
+        if (oldsize + next_size >= needed) {
+            remove_free((char *)next_hdr + WS, next_size);
+            *(size_t *)((char *)oldptr - WS) = (oldsize + next_size) | 1;
+            *(size_t *)((char *)oldptr - WS + oldsize + next_size - WS) = (oldsize + next_size) | 1;
+            return oldptr;
+        }
+    }
+
+    // fallback
+    void *newptr = kmalloc(size);
+    if (!newptr) return NULL;
+    size_t copySize = oldsize - DWS;
+    if (size < copySize) copySize = size;
+    kmalloc_memcpy(newptr, oldptr, copySize);
+    kfree(oldptr);
+    return newptr;
+}
+
+/*
+ * kcalloc
+ */
+void* kcalloc(size_t nmemb, size_t size)
+{
+    void* ptr;
+    size *= nmemb;
+    ptr = kmalloc(size);
+    if (ptr) {
+        kmalloc_memset(ptr, 0, size);
+    }
+    return ptr;
+}
