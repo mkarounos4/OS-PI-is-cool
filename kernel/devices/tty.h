@@ -32,7 +32,7 @@ struct tty_driver_state {
     // TODO add lock
 };
 
-void tty_send_input(int minor, const void *buffer, size_t count);
+void tty_send_input(int minor, const char *buffer, size_t count);
 int tty_drivers_init(void);
 int tty_create();
 int tcsetpgrp(int fd, pid_t pgid);

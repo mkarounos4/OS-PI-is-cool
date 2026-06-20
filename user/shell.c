@@ -592,9 +592,9 @@ int execvp(const char *cmd, char **args) {
                 }
 
                 if (commands[i][1] == 'a') {
-                    flag = F_APPEND;
+                    flag = O_WRONLY | O_APPEND;
                 } else if (commands[i][1] == 'w') {
-                    flag = F_WRITE;
+                    flag = O_WRONLY;
                 } else {
                     return 1;
                 }

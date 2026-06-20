@@ -14,7 +14,7 @@ bool consume_ring_buffer(struct RingBuffer *buf, char *next) {
         return false;
     }
 
-    next = *(buf->head);
+    *next = *(buf->head);
     buf->size--;
     if (buf->head = buf->data + buf->capacity - 1) {
         buf->head = buf->data;
@@ -47,7 +47,7 @@ bool produce_ring_buffer(struct RingBuffer *buf, char *next) {
     } else {
         buf->tail++;
     }
-    *(buf->tail) = next;
+    *(buf->tail) = *next;
 
     buf->size++;
 

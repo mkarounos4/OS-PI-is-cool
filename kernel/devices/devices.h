@@ -11,8 +11,8 @@ typedef __SIZE_TYPE__ ssize_t;
 struct file_operations {
     int (*open)(struct oft_entry *entry);
     int (*close)(struct oft_entry *entry);
-    ssize_t (*read)(struct oft_entry *entry, void *buffer, size_t count);
-    ssize_t (*write)(struct oft_entry *entry, const void *buffer, size_t count);
+    ssize_t (*read)(struct oft_entry *entry, char *buffer, size_t count);
+    ssize_t (*write)(struct oft_entry *entry, const char *buffer, size_t count);
 };
 
 #ifndef DEV_T_TYPE

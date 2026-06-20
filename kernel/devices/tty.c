@@ -4,8 +4,8 @@
 
 int tty_open(struct oft_entry *entry);
 int tty_close(struct oft_entry *entry);
-ssize_t tty_read(struct oft_entry *entry, void *buffer, size_t count);
-ssize_t tty_write(struct oft_entry *entry, const void *buffer, size_t count);
+ssize_t tty_read(struct oft_entry *entry, char *buffer, size_t count);
+ssize_t tty_write(struct oft_entry *entry, const char *buffer, size_t count);
 
 static struct tty_driver_state tty_state;
 
@@ -161,7 +161,7 @@ void tty_send_input(int minor, const char *buffer, size_t count) {
             if (!wrote_char) {
                 return;
             }
-            bool wrote_char = produce_ring_buffer(&tty_state.devices[minor]->tx, "C");
+            wrote_char = produce_ring_buffer(&tty_state.devices[minor]->tx, "C");
             if (!wrote_char) {
                 return;
             }
@@ -171,7 +171,7 @@ void tty_send_input(int minor, const char *buffer, size_t count) {
             if (!wrote_char) {
                 return;
             }
-            bool wrote_char = produce_ring_buffer(&tty_state.devices[minor]->tx, "Z");
+            wrote_char = produce_ring_buffer(&tty_state.devices[minor]->tx, "Z");
             if (!wrote_char) {
                 return;
             }

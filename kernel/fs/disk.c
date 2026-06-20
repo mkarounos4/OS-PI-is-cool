@@ -742,16 +742,15 @@ err_t clear_blocks_of_file(struct oft_entry *entry) {
 }
 
 err_t clear_blocks_of_file_by_id(ino_id_t id) {
-    struct cached_inode_st *inode_cached = get_inode_from_cache(ino_id);
+    struct cached_inode_st *inode_cached = get_inode_from_cache(id);
     if (inode_cached == 0) {
         return -1;
     }
 
-    int to_ret = clear_blocks_of_inode(inode_cached->inode, 1);
-    err_t error = remove_ref_from_cache(ino_id);
+    int to_ret = clear_blocks_of_inode(&inode_cached->inode, 1);
+    err_t error = remove_ref_from_cache(id);
     if (error) return error;
     return to_ret;
-}
 }
 
 int add_new_file(struct oft_entry **entry, int file_type, uint8_t perm) {

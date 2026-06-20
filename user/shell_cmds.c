@@ -5,8 +5,8 @@ void echo(char **args) {
     
     int i = 1;
     while (args[i] != NULL) {
-        strcat(result, args[i]);
-        strcat(result, " ");
+        str_concat(result, args[i]);
+        str_concat(result, " ");
         i++;
     }
 
