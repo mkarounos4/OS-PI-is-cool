@@ -324,8 +324,8 @@ static err_t validate_root_directory(void) {
                 strcmp(dir[1].name, "..") != 0 ||
                 dir[0].ino_id != ROOT_INO ||
                 dir[1].ino_id != ROOT_INO ||
-                first_metadata.type != DIRECTORY_F_TYPE ||
-                second_metadata.type != DIRECTORY_F_TYPE) {
+                first_metadata.type != DIRECTORY_TYPE ||
+                second_metadata.type != DIRECTORY_TYPE ) {
                 kfree(dir);
                 return FS_INVALID;
             }

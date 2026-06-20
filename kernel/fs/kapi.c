@@ -48,7 +48,6 @@ int k_open(const char *fname, int mode) {
             }
         }
     } else if (!(mode & O_CREAT)) {
-        printf("yes123\n");
         return FILE_NOT_FOUND;
     }
 
@@ -124,7 +123,7 @@ int k_read(int fd, char *buf, int n) {
         return INVALID_PERMISSIONS;
     }
 
-    if (entry->inode->inode.metadata.fops!= NULL) {
+    if (entry->inode->inode.metadata.fops != NULL) {
         return entry->inode->inode.metadata.fops->read(entry, buf, n);
     }
 
@@ -532,7 +531,7 @@ int k_make_directory(char *f_path) {
         return FS_NOT_MOUNTED;
     }
 
-    return add_dirent_by_path(f_path, DIRECTORY_F_TYPE, 0x7);
+    return add_dirent_by_path(f_path, DIRECTORY_TYPE, 0x7);
 }
 
 int k_change_directory(char *f_path) {

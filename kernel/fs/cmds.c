@@ -19,14 +19,14 @@ int open(const char *fname, int mode) {
     int new_fd = -1;
     for (int i = 0; i < vec_len(&pcb->file_descriptors); i++) {
         if (vec_get(&pcb->file_descriptors, i) == -1) {
-            vec_set(&pcb->file_descriptors, i, (void *)(uintptr_t)fd);
+            vec_set(&pcb->file_descriptors, i, (ptr_t)(uintptr_t)fd);
             new_fd = i;
             break;
         }
     }
 
     if (new_fd == -1) {
-        vec_push_back(&pcb->file_descriptors, (void *)(uintptr_t)fd);
+        vec_push_back(&pcb->file_descriptors, (ptr_t)(uintptr_t)fd);
         new_fd = vec_len(&pcb->file_descriptors)-1;
     }
 
@@ -73,7 +73,8 @@ int write(int fd, char *buf, int n) {
         return INVALID_ARGS;
     }
 
-    return k_write((int)(uintptr_t)vec_get(&pcb->file_descriptors, fd), buf, n);
+    int k_fd = (int)(uintptr_t)vec_get(&pcb->file_descriptors, fd);
+    return k_write(k_fd, buf, n);
 }
 
 int lseek(int fd, int offset, int whence) {

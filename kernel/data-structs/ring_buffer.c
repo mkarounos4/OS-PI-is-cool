@@ -1,4 +1,5 @@
 #include "ring_buffer.h"
+#include "uart.h"
 
 struct RingBuffer create_ring_buffer(int capacity) {
     struct RingBuffer buf;
@@ -7,6 +8,7 @@ struct RingBuffer create_ring_buffer(int capacity) {
     buf.size = 0;
     buf.capacity = capacity;
     buf.data = kmalloc(sizeof(char*) * capacity);
+    return buf;
 }
 
 bool consume_ring_buffer(struct RingBuffer *buf, char *next) {

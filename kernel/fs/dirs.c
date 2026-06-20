@@ -171,7 +171,7 @@ err_t add_dirent_by_path(char *f_path, int file_type, int perm) {
         return err;
     }
 
-    if (file_type == DIRECTORY_F_TYPE) {
+    if (file_type == DIRECTORY_TYPE) {
         err = add_dirent(".", block, block);
         if (err) {
             kfree(f_path_mut_root);

@@ -67,6 +67,9 @@ void initialize_signals() {
 }
 
 int s_kill(pid_t pid, int signal) {
+    if (pid < 0) {
+        pid *= -1;
+    }
     pcb_t *pcb = get_pcb_by_pid(pid);
     if (pcb == NULL) {
         return -1;

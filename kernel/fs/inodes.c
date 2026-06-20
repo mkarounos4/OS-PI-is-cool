@@ -224,7 +224,7 @@ err_t mkfs_inode(int inode_table_blocks, int bytes_per_block) {
     memset(&root_node, 0, sizeof(root_node));
     attributes_t meta = {
         .i_links_count = 2,
-        .type = DIRECTORY_F_TYPE,
+        .type = DIRECTORY_TYPE,
         .perm = 0x7,
         .i_blocks = 1,
         .mtime = timer_get_ticks(),

@@ -15,12 +15,6 @@
 // the existing perm field rather than replacing it (used to clear bits).
 #define AND_PERM 0x10
 
-// File type values stored in inode metadata.
-#define UNKNOWN_F_TYPE 0x0
-#define REGULAR_F_TYPE 0x1
-#define DIRECTORY_F_TYPE 0x2
-#define SYMBOLIC_F_TYPE 0x4
-
 /**
  * @brief Create a new directory entry with the given parameters and
  * append it to the directory identified by curr_dir.
