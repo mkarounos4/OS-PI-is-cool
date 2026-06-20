@@ -29,6 +29,7 @@ void uart_rx_interrupts_disable(void);
 void uart_input_handler(void *data, size_t size);
 void uart_puts(const char *s);
 void uart_putc(const char c);
+void uart_putuint(unsigned int u);
 void uart_putint(int i);
 void uart_puthex(uint64_t value);
 

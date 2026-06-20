@@ -134,13 +134,22 @@ void uart_raw_puts(const char *s)
     }
 }
 
-void uart_putint(int i) {
+void uart_putuint(unsigned int u)
+{
+    if (u >= 10)
+        uart_putuint(u / 10);
+
+    uart_putc('0' + (u % 10));
+}
+
+void uart_putint(int i)
+{
     if (i < 0) {
         uart_putc('-');
-	i = -i;
+        uart_putuint((unsigned int)(-i));
+    } else {
+        uart_putuint((unsigned int)i);
     }
-
-    uart_putc((unsigned int)i);
 }
 
 void uart_puthex(uint64_t value)
