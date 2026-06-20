@@ -6,9 +6,7 @@ struct oft_entry;
 
 #include "errors.h"
 #include "data-structs/vec.h"
-#include "disk.h"
-#include "fs/caches/inode_cache.h"
-#include "inodes.h"
+#include "caches/inode_cache.h"
 #include "dirs.h"
 
 // Open modes stored in oft_entry::mode.

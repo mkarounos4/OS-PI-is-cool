@@ -61,8 +61,8 @@ typedef struct pcb_st {
     Vec children;   // vec of children PIDs
     Vec file_descriptors;   // vec of fds
                             
-    sigset_t mask;
-    sigset_t pending_signals;
+    signalset_t mask;
+    signalset_t pending_signals;
     
     struct sigaction sigactions[32];
 } pcb_t;

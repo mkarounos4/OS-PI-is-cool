@@ -4,7 +4,6 @@
 #include "string.h"
 
 #include "types.h"
-#include "devices/devices.h"
 
 #ifndef DEV_T_TYPE
 #define DEV_T_TYPE
@@ -36,8 +35,6 @@ struct cached_inode_st;
 
 
 #include "errors.h"
-#include "disk.h"
-#include "fs/caches/inode_cache.h"
 
 // Constants
 #define INODE_BYTE_SIZE ((int)sizeof(struct inode_st))

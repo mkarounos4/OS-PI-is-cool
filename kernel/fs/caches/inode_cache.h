@@ -1,6 +1,6 @@
 #pragma once
 
-#include "fs/inodes.h"
+#include "inodes.h"
 #include "memory/kmalloc.h"
 
 struct cached_inode_st {

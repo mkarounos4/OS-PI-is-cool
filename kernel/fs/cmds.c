@@ -1,7 +1,9 @@
 #include <sys/types.h>
 
 #include "cmds.h"
+#include "disk.h"
 #include "kapi.h"
+#include "scheduler/scheduler.h"
 
 int open(const char *fname, int mode) {
     pcb_t *pcb = get_curr_process();
@@ -17,14 +19,14 @@ int open(const char *fname, int mode) {
     int new_fd = -1;
     for (int i = 0; i < vec_len(&pcb->file_descriptors); i++) {
         if (vec_get(&pcb->file_descriptors, i) == -1) {
-            vec_set(&pcb->file_descriptors, i, fd);
+            vec_set(&pcb->file_descriptors, i, (void *)(uintptr_t)fd);
             new_fd = i;
             break;
         }
     }
 
     if (new_fd == -1) {
-        vec_push_back(&pcb->file_descriptors, fd);
+        vec_push_back(&pcb->file_descriptors, (void *)(uintptr_t)fd);
         new_fd = vec_len(&pcb->file_descriptors)-1;
     }
 
@@ -45,7 +47,7 @@ int close(int fd) {
     if (err) {
         return err;
     }
-    vec_set(&pcb->file_descriptors, (ptr_t)(uintptr_t)-1);
+    vec_set(&pcb->file_descriptors, -1, (void *)(uintptr_t)fd);
 }
 
 int read(int fd, char *buf, int n) {
@@ -58,7 +60,7 @@ int read(int fd, char *buf, int n) {
         return INVALID_ARGS;
     }
 
-    return k_read((int)(uintptr)tvec_get(&pcb->file_descriptors, fd), buf, n);
+    return k_read((int)(uintptr_t)vec_get(&pcb->file_descriptors, fd), buf, n);
 }
 
 int write(int fd, char *buf, int n) {

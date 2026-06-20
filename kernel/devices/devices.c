@@ -1,5 +1,4 @@
 #include "devices.h"
-#include "fs/dirs.h"
 
 #define MAX_CHAR_DEVICES 16
 

@@ -2,6 +2,7 @@
 
 #include "disk/block.h"
 #include "timer/timer.h"
+#include "devices/devices.h"
 
 #define MKFS_FILL_CHUNK_BLOCKS 32u
 

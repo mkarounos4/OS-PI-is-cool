@@ -21,7 +21,7 @@ enum signal_type {
     SIGTERM = 15,
 };
 
-typedef int sigset_t;
+typedef int signalset_t;
 
 #define SIG_BLOCK 0
 #define SIG_UNBLOCK 1
@@ -30,15 +30,15 @@ typedef int sigset_t;
 
 struct sigaction {
     void (*sa_handler)(int);
-    sigset_t sa_mask;
+    signalset_t sa_mask;
     int sa_flags;
 };
 
 int s_kill(pid_t pid, int signal);
 long send_sigchld(pid_t child);
-int sigprocmask(int how, const sigset_t *set, sigset_t *oldset);
-int sigemptyset(sigset_t *set);
-int sigaddset(sigset_t *set, int signum);
-int sigfillset(sigset_t *set);
-int sigsuspend(const sigset_t *mask);
+int sigprocmask(int how, const signalset_t *set, signalset_t *oldset);
+int sigemptyset(signalset_t *set);
+int sigaddset(signalset_t *set, int signum);
+int sigfillset(signalset_t *set);
+int sigsuspend(const signalset_t *mask);
 int sigaction(int signum, struct sigaction *sa, struct sigaction *old);

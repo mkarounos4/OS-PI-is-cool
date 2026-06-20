@@ -43,8 +43,8 @@ void SIG_NOT_IMPLEMENTED(int signum) {
 
 void user_def_sig_handler(int signum) {
     pcb_t *pcb = get_curr_process();
-    sigset_t old_mask;
-    sigset_t new_mask = pcb->sigactions[signum].sa_mask | (1 << signum);
+    signalset_t old_mask;
+    signalset_t new_mask = pcb->sigactions[signum].sa_mask | (1 << signum);
     sigprocmask(SIG_BLOCK, &new_mask, &old_mask);
     pcb->sigactions[signum].sa_handler(signum);
     sigprocmask(SIG_SET, &old_mask, NULL);
@@ -125,7 +125,7 @@ long send_sigchld(pid_t child) {
     return 0;
 }
 
-int sigprocmask(int how, const sigset_t *set, sigset_t *oldset) {
+int sigprocmask(int how, const signalset_t *set, signalset_t *oldset) {
     if (set == NULL) {
         return -2;
     }
@@ -152,7 +152,7 @@ int sigprocmask(int how, const sigset_t *set, sigset_t *oldset) {
     return 0;
 }
 
-int sigemptyset(sigset_t *set) {
+int sigemptyset(signalset_t *set) {
     if (set == NULL) {
         return -1;
     }
@@ -161,7 +161,7 @@ int sigemptyset(sigset_t *set) {
     return 0;
 }
 
-int sigaddset(sigset_t *set, int signum) {
+int sigaddset(signalset_t *set, int signum) {
     if (set == NULL) {
         return -1;
     }
@@ -170,7 +170,7 @@ int sigaddset(sigset_t *set, int signum) {
     return 0;
 }
 
-int sigfillset(sigset_t *set) {
+int sigfillset(signalset_t *set) {
     if (set == NULL) {
         return -1;
     }
@@ -179,7 +179,7 @@ int sigfillset(sigset_t *set) {
     return 0;
 }
 
-int sigsuspend(const sigset_t *mask) {
+int sigsuspend(const signalset_t *mask) {
     pcb_t *pcb = get_curr_process();
     if (mask == NULL) {
         return -2;
@@ -188,7 +188,7 @@ int sigsuspend(const sigset_t *mask) {
         return -1;
     }
 
-    sigset_t old_set;
+    signalset_t old_set;
     sigprocmask(SIG_SETMASK, mask, &old_set);
     pcb->blocked_until |= (1 << BLOCK_UNTIL_SIGNAL);
     block_process(pcb);

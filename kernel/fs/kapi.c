@@ -2,6 +2,7 @@
 #include "uart/uart.h"
 #include "oft.h"
 #include "dirs.h"
+#include "devices/devices.h"
 
 int k_open(const char *fname, int mode) {
     // Return if not mounted
