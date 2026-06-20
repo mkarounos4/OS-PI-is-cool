@@ -626,7 +626,9 @@ int execvp(const char *cmd, char **args) {
         fs_mkdir(args+1);
     } else if (strcmp(cmd, "cd") == 0) {
         cd(args[1]);
+    } else if (strcmp(cmd, "echo") == 0) {
+        echo(args+1);
     }
 
-    exit(0);
+    exit(EXIT_SUCCESS);
 }

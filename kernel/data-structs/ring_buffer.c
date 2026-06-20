@@ -6,10 +6,10 @@ struct RingBuffer create_ring_buffer(int capacity) {
     buf.tail = NULL;
     buf.size = 0;
     buf.capacity = capacity;
-    buf.data = kmalloc(sizeof(void*) * capacity);
+    buf.data = kmalloc(sizeof(char*) * capacity);
 }
 
-bool consume_ring_buffer(struct RingBuffer *buf, void *next) {
+bool consume_ring_buffer(struct RingBuffer *buf, char *next) {
     if (buf->size == 0) {
         return false;
     }
@@ -30,7 +30,7 @@ bool consume_ring_buffer(struct RingBuffer *buf, void *next) {
     return true;
 }
 
-bool produce_ring_buffer(struct RingBuffer *buf, void *next) {
+bool produce_ring_buffer(struct RingBuffer *buf, char *next) {
     if (buf == NULL) {
         return false;
     }

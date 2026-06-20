@@ -87,7 +87,7 @@ int tty_close(struct oft_entry *entry) {
     return 0;
 }
 
-ssize_t tty_read(struct oft_entry *entry, void *buffer, size_t count) {
+ssize_t tty_read(struct oft_entry *entry, char *buffer, size_t count) {
     uint16_t minor = entry->inode->inode.metadata.i_rdev.minor;
 
     struct tty_device *curr_tty = tty_state.devices[minor];
@@ -102,7 +102,7 @@ ssize_t tty_read(struct oft_entry *entry, void *buffer, size_t count) {
     
     ssize_t num_read = 0;
     while (num_read < count) {
-        void *char_void;
+        char *char_void;
         bool read_char = consume_ring_buffer(&curr_tty->rx, char_void);
         if (!read_char) {
             vec_push_back(&curr_tty->rx_wait_queue, (ptr_t)(uintptr_t)curr_pcb->pid);
@@ -113,7 +113,7 @@ ssize_t tty_read(struct oft_entry *entry, void *buffer, size_t count) {
         if (read_char == '\n') {
             return num_read;
         }
-        *(char*)buffer = read_char;
+        *buffer = *char_void;
         buffer++;
         num_read++;
     }
@@ -121,7 +121,7 @@ ssize_t tty_read(struct oft_entry *entry, void *buffer, size_t count) {
     return num_read;
 }
 
-ssize_t tty_write(struct oft_entry *entry, const void *buffer, size_t count) {
+ssize_t tty_write(struct oft_entry *entry, const char *buffer, size_t count) {
     /*uint16_t minor = entry->inode->inode.metadata.i_rdev.major;
 
     struct tty_device *curr_tty = tty_state.devices[minor];
@@ -141,7 +141,7 @@ ssize_t tty_write(struct oft_entry *entry, const void *buffer, size_t count) {
 
     ssize_t num_written = 0;
     while(num_written < count) {
-        uart_putc((char) *((char*)buffer));
+        uart_putc(*buffer);
         buffer++;
         num_written++;
     }
@@ -149,15 +149,37 @@ ssize_t tty_write(struct oft_entry *entry, const void *buffer, size_t count) {
     return num_written;
 }
 
-void tty_send_input(int minor, const void *buffer, size_t count) {
+void tty_send_input(int minor, const char *buffer, size_t count) {
     if (buffer == NULL || tty_state.num_ttys <= minor) {
         return;
     }
 
     while (count > 0) {
-        bool wrote_char = produce_ring_buffer(&tty_state.devices[minor]->tx, buffer);
-        if (!wrote_char) {
-            return;
+        if (*buffer == 0x03) {
+            s_kill(SIGINT, -tty_state.devices[minor]->fg_pgid);
+            bool wrote_char = produce_ring_buffer(&tty_state.devices[minor]->tx, "^");
+            if (!wrote_char) {
+                return;
+            }
+            bool wrote_char = produce_ring_buffer(&tty_state.devices[minor]->tx, "C");
+            if (!wrote_char) {
+                return;
+            }
+        } else if (*buffer == 0x1A) {
+            s_kill(SIGTSTP, -tty_state.devices[minor]->fg_pgid);
+            bool wrote_char = produce_ring_buffer(&tty_state.devices[minor]->tx, "^");
+            if (!wrote_char) {
+                return;
+            }
+            bool wrote_char = produce_ring_buffer(&tty_state.devices[minor]->tx, "Z");
+            if (!wrote_char) {
+                return;
+            }
+        } else {
+            bool wrote_char = produce_ring_buffer(&tty_state.devices[minor]->tx, buffer);
+            if (!wrote_char) {
+                return;
+            }
         }
 
         buffer++;
