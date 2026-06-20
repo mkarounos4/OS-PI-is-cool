@@ -59,25 +59,33 @@ int devfs_create_char_device(struct dev_st rdev) {
 
     ino_id_t parent_dir;
     struct fs_dirent dirent;
-    err = get_dirent_by_path("/dev", &dirent, DIRECTORY_TYPE, &parent_dir, NULL);
-    if (err == FILE_NOT_FOUND) {
-        char paths[1][5];
-        char path[5] = "/dev";
+    err = get_dirent_by_path("/dev", &dirent, DIRECTORY_TYPE, NULL, NULL);
+    if (err == FILE_NOT_CREATED) {
+        char **paths = kmalloc(sizeof(char*) * 2);
+        paths[1] = NULL;
+        paths[0] = "/dev";
         err = fs_mkdir((char**)paths);
+        kfree(paths);
         if (err) {
             return err;
         }
 
-        err = get_dirent_by_path("/dev", &dirent, DIRECTORY_TYPE, &parent_dir, NULL);
+        err = get_dirent_by_path("/dev", &dirent, DIRECTORY_TYPE, NULL, NULL);
         if (err) {
             return err;
         }
+
+        parent_dir = dirent.ino_id;
     } else if (err) {
         return err;
     }
 
+        printf("test\n");
     char *name = kmalloc(sizeof(char) * 32);
-    strcpy(char_device_registry[rdev.major]->name, name);
+    if (name == NULL) {
+        return -1;
+    }
+    strcpy(name, char_device_registry[rdev.major]->name);
     int len = strlen(char_device_registry[rdev.major]->name);
     if (len > 30) {
         name[30] = '0' + rdev.minor;

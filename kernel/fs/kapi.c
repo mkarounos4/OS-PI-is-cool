@@ -24,7 +24,7 @@ int k_open(const char *fname, int mode) {
     struct fs_dirent dirent;
     ino_id_t parent_dir_id;
     char *actual_name;
-    err_t error = get_dirent_by_path(fname, &dirent, FILE_TYPE, &parent_dir_id, &actual_name);
+    err_t error = get_dirent_by_path(fname, &dirent, 0, &parent_dir_id, &actual_name);
     if (error == FILE_NOT_FOUND) {
         return FILE_NOT_FOUND;
     }
@@ -48,6 +48,7 @@ int k_open(const char *fname, int mode) {
             }
         }
     } else if (!(mode & O_CREAT)) {
+        printf("yes123\n");
         return FILE_NOT_FOUND;
     }
 
@@ -287,7 +288,7 @@ int k_write(int fd, char *buf, int n) {
         struct fs_dirent dirent;
         err_t res;
         // TODO: Update size in dirent and time last edited.
-        if ((res = get_dirent_by_f_name(entry->file_name, FILE_TYPE, &dirent, entry->parent_id)) != SUCCESS) {
+        if ((res = get_dirent_by_f_name(entry->file_name, 1, &dirent, entry->parent_id)) != SUCCESS) {
             kfree(data);
             return res;
         }
@@ -424,7 +425,7 @@ int k_chmod(const char *file_name, uint8_t new_perms, int flag) {
     char *actual_name;
     struct fs_dirent dirent;
     ino_id_t parent_dir;
-    err_t err = get_dirent_by_path(file_name, &dirent, FILE_TYPE, &parent_dir, &actual_name);
+    err_t err = get_dirent_by_path(file_name, &dirent, 0, &parent_dir, &actual_name);
     if (err) {
         return err;
     }
@@ -443,7 +444,7 @@ int k_update_file_time(const char *file_name) {
     char *actual_name;
     struct fs_dirent dirent;
     ino_id_t parent_dir;
-    err_t err = get_dirent_by_path(file_name, &dirent, FILE_TYPE, &parent_dir, &actual_name);
+    err_t err = get_dirent_by_path(file_name, &dirent, 0, &parent_dir, &actual_name);
     if (err) {
         return err;
     }
@@ -468,7 +469,7 @@ int k_ls(const char *filename, int out_fs) {
     ino_id_t dir_block = get_curr_dir();
     if (filename != NULL) {
         struct fs_dirent dir;
-        err_t err = get_dirent_by_path(filename, &dir, DIRECTORY_F_TYPE, NULL, NULL);
+        err_t err = get_dirent_by_path(filename, &dir, 1, NULL, NULL);
         if (err) {
             return err;
         }
@@ -487,7 +488,7 @@ int k_mv_file(const char *src_path, const char *dest_path) {
 
     struct fs_dirent old_dirent;
     ino_id_t parent_dir;
-    int err = get_dirent_by_path(src_path, &old_dirent, FILE_TYPE, &parent_dir, NULL);
+    int err = get_dirent_by_path(src_path, &old_dirent, 0, &parent_dir, NULL);
     if (err) {
         return err;
     }
@@ -495,7 +496,7 @@ int k_mv_file(const char *src_path, const char *dest_path) {
     ino_id_t new_parent_dir;
     struct fs_dirent new_dirent;
     char *actual_name;
-    err = get_dirent_by_path(dest_path, &new_dirent, FILE_TYPE, &new_parent_dir, &actual_name);
+    err = get_dirent_by_path(dest_path, &new_dirent, 0, &new_parent_dir, &actual_name);
     if (err != FILE_NOT_CREATED && err) {
         return err;
     }
@@ -523,7 +524,7 @@ int k_check_if_exists(const char *f_name) {
     }
 
     struct fs_dirent dir;
-    return !get_dirent_by_path(f_name, &dir, FILE_TYPE, NULL, NULL);
+    return !get_dirent_by_path(f_name, &dir, 0, NULL, NULL);
 }
 
 int k_make_directory(char *f_path) {
@@ -540,7 +541,7 @@ int k_change_directory(char *f_path) {
     }
 
     struct fs_dirent dir;
-    err_t err = get_dirent_by_path(f_path, &dir, DIRECTORY_F_TYPE, NULL, NULL);
+    err_t err = get_dirent_by_path(f_path, &dir, 1, NULL, NULL);
     if (err) {
         return err;
     }
@@ -555,7 +556,7 @@ bool k_check_if_executable(char *f_name) {
     }
 
     struct fs_dirent dir;
-    if (!get_dirent_by_path(f_name, &dir, FILE_TYPE, NULL, NULL)) {
+    if (!get_dirent_by_path(f_name, &dir, 0, NULL, NULL)) {
         attributes_t metadata;
         if (get_inode_metadata(dir.ino_id, &metadata) != SUCCESS) {
             return false;
