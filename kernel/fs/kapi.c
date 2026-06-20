@@ -34,11 +34,20 @@ int k_open(const char *fname, int mode) {
         if (error != SUCCESS) {
             return error;
         }
-        if (!(metadata.perm & 0x4) && mode == F_READ) {
+        if (!(metadata.perm & 0x4) && (mode & O_RDONLY)) {
             return INVALID_PERMISSIONS;
-        } else if (!(metadata.perm & 0x2) && (mode == F_WRITE || mode == F_APPEND)) {
+        } if (!(metadata.perm & 0x2) && ((mode & O_WRONLY) || (mode & O_APPEND))) {
             return INVALID_PERMISSIONS;
         }
+
+        if (O_TRUNC) {
+            err_t err = clear_blocks_of_file_by_id(dirent.ino_id);
+            if (err) {
+                return err;
+            }
+        }
+    } else if (!(mode & O_CREAT)) {
+        return FILE_NOT_FOUND;
     }
 
     // Create open or create new file and then return fd
@@ -107,6 +116,10 @@ int k_read(int fd, char *buf, int n) {
     struct oft_entry* entry;
     if (get_oft_entry_by_fd(fd, &entry) == OFT_FD_DOES_NOT_EXIST) {
         return OFT_FD_DOES_NOT_EXIST;
+    }
+
+    if (!(entry->mode & O_RDONLY)) {
+        return INVALID_PERMISSIONS;
     }
 
     if (entry->inode->inode.metadata.fops!= NULL) {
@@ -194,6 +207,10 @@ int k_write(int fd, char *buf, int n) {
     struct oft_entry* entry;
     if (get_oft_entry_by_fd(fd, &entry) == OFT_FD_DOES_NOT_EXIST) {
         return OFT_FD_DOES_NOT_EXIST;
+    }
+
+    if (!(entry->mode & O_WRONLY)) {
+        return INVALID_PERMISSIONS;
     }
 
     if (entry->inode->inode.metadata.fops != NULL) {

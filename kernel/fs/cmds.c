@@ -96,7 +96,7 @@ err_t touch(char **file_paths) {
 
     while (file_paths[0] != NULL) {
         // Open to create file if doesn't exist, and make sure valid name and path
-        int i = open(file_paths[0], 0);
+        int i = open(file_paths[0], O_CREAT);
         if (i < 0) {
             return i;
         }
@@ -222,7 +222,7 @@ err_t cat(char **file, char *output_file, int flag) {
     
     int out_fd = 1;
     if (output_file != NULL) {
-        out_fd = open(output_file, flag);
+        out_fd = open(output_file, O_WRONLY | flag);
     } 
 
     if (out_fd < 0) {
@@ -242,7 +242,7 @@ err_t cat(char **file, char *output_file, int flag) {
             if (!k_check_if_exists(file[0])) {
                 return FILE_NOT_FOUND;
             }
-            in_fd = open(file[0], F_READ);
+            in_fd = open(file[0], O_RDONLY);
         }
         if (in_fd < 0) {
             if (out_fd != 1) {
@@ -324,9 +324,9 @@ err_t cp(char *src_path, char *dest_path, int flag) {
     int src_fd;
     int dest_fd;
 
-    src_fd = open(src_path, F_READ);
+    src_fd = open(src_path, O_RDONLY);
 
-    dest_fd = open(dest_path, F_WRITE);
+    dest_fd = open(dest_path, O_WRONLY);
 
     const int BUF_SIZE = 1024;
     char* buf = kmalloc(BUF_SIZE);

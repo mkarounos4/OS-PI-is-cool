@@ -163,7 +163,7 @@ int find_file_in_table(ino_id_t ino_id, const char *file_name, ino_id_t parent_i
         }
 
         if (same_file) {
-            if (mode > F_READ && next_entry->mode > F_READ) {
+            if ((mode & O_WRONLY) && (next_entry->mode & O_WRONLY)) {
                 return F_ONLY_ONE_WRITER;
             }
             if (oft_id != NULL) *oft_id = i;
