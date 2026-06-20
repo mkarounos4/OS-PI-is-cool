@@ -1,8 +1,6 @@
 #pragma once
 
 #include "errors.h"
-#include "oft.h"
-#include "dirs.h"
 #include "memory/kmalloc.h"
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))

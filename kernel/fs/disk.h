@@ -10,12 +10,9 @@
 #define SYMLINK_TYPE 2
 #define CHAR_DRIVER_TYPE 3
 
-#include "inodes.h"
 #include "oft.h"
 #include "fs/caches/lru_cache.h"
-#include "fs/caches/inode_cache.h"
 #include "errors.h"
-#include "inodes.h"
 
 // ============================================================
 // FAT/INODE WRAPPER FUNCTIONS

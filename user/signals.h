@@ -52,3 +52,9 @@ static inline int sigaction(int signum, struct sigaction *sa, struct sigaction *
                           (long)(uintptr_t)sa,
                           (long)(uintptr_t)old);
 }
+
+
+#define WIFEXITED(X) ((X) == 1)
+#define WIFSIGNALED(X) ((X) == 2)
+#define WIFSTOPPED(X) ((X) == 3)
+#define WIFCONTINUED(X) ((X) == 4)

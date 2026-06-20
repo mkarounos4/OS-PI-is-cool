@@ -4,6 +4,8 @@
 
 #include "data-structs/vec.h"
 #include "traps/traps.h"
+#include "fs/kapi.h"
+#include "fs/cmds.h"
 
 #ifndef PID_T_DEFINED
 #define PID_T_DEFINED
@@ -78,3 +80,7 @@ void block_process(pcb_t *pcb);
 void unblock_process(pcb_t *pcb);
 void continue_process(pcb_t *pcb);
 void send_unblock_event(pid_t pid, uint32_t event);
+
+pid_t getpgid();
+int setpgrp(pid_t pid, pid_t pgid);
+int dup2(int oldfd, int newfd);

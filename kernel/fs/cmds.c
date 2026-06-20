@@ -25,7 +25,7 @@ int open(const char *fname, int mode) {
 
     if (new_fd == -1) {
         vec_push_back(&pcb->file_descriptors, fd);
-        new_fd = vec_len(&pcb->file_desciptors)-1;
+        new_fd = vec_len(&pcb->file_descriptors)-1;
     }
 
     return new_fd;
@@ -37,15 +37,15 @@ int close(int fd) {
         return -1;
     }
 
-    if (vec_len(&pcb->file_desciptors) < fd || fd < 0) {
+    if (vec_len(&pcb->file_descriptors) < fd || fd < 0) {
         return INVALID_ARGS;
     }
 
-    err_t err = k_close(vec_get(&pcb->file_desciptors, fd));
+    err_t err = k_close((int)(uintptr_t)vec_get(&pcb->file_descriptors, fd));
     if (err) {
         return err;
     }
-    vec_set(&pcb->file_descriptors, -1);
+    vec_set(&pcb->file_descriptors, (ptr_t)(uintptr_t)-1);
 }
 
 int read(int fd, char *buf, int n) {
@@ -54,11 +54,11 @@ int read(int fd, char *buf, int n) {
         return -1;
     }
 
-    if (vec_len(&pcb->file_desciptors) < fd || fd < 0) {
+    if (vec_len(&pcb->file_descriptors) < fd || fd < 0) {
         return INVALID_ARGS;
     }
 
-    return k_read(vec_get(&pcb->file_desciptors, fd), buf, n);
+    return k_read((int)(uintptr)tvec_get(&pcb->file_descriptors, fd), buf, n);
 }
 
 int write(int fd, char *buf, int n) {
@@ -67,11 +67,11 @@ int write(int fd, char *buf, int n) {
         return -1;
     }
 
-    if (vec_len(&pcb->file_desciptors) < fd || fd < 0) {
+    if (vec_len(&pcb->file_descriptors) < fd || fd < 0) {
         return INVALID_ARGS;
     }
 
-    return k_write(vec_get(&pcb->file_descriptors, fd), buf, n);
+    return k_write((int)(uintptr_t)vec_get(&pcb->file_descriptors, fd), buf, n);
 }
 
 int lseek(int fd, int offset, int whence) {
@@ -80,11 +80,11 @@ int lseek(int fd, int offset, int whence) {
         return -1;
     }
 
-    if (vec_len(&pcb->file_desciptors) < fd || fd < 0) {
+    if (vec_len(&pcb->file_descriptors) < fd || fd < 0) {
         return INVALID_ARGS;
     }
 
-    return k_lseek(vec_get(&pcb->file_descriptors, fd), offset, whence);
+    return k_lseek((int)(uintptr_t)vec_get(&pcb->file_descriptors, fd), offset, whence);
 }
 
 // Throws FS_not_mounted, k_open errors, k_close errors, k_update_file_time errors

@@ -4,6 +4,7 @@ struct oft_entry;
 
 #include <stdint.h>
 
+#include "errors.h"
 #include "data-structs/vec.h"
 #include "disk.h"
 #include "fs/caches/inode_cache.h"

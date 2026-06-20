@@ -413,14 +413,14 @@ void send_unblock_event(pid_t pid, uint32_t event) {
 }
 
 int dup2(int oldfd, int newfd) {
-    pcb_t *pcb = get_curr_process(pid);
+    pcb_t *pcb = get_curr_process();
     if (pcb == NULL) {
         return -1;
     }
 
     close(newfd);
-    vec_set(pcb->open_file_table, new_fd, vec_get(pcb->open_file_table(old_fd)));
-    k_file_add_reference(vec_get(pcb->open_file_table(old_fd)));
+    vec_set(&pcb->file_descriptors, newfd, vec_get(&pcb->file_descriptors, oldfd));
+    k_file_add_reference((int)(uintptr_t)vec_get(&pcb->file_descriptors, oldfd));
 
     return 0;
 }
@@ -449,7 +449,7 @@ int setpgrp(pid_t pid, pid_t pgid) {
     return 0;
 }
 
-pid_t getpgrp() {
+pid_t getpgid() {
     pcb_t *pcb = get_curr_process();
     if (pcb == NULL) {
         return -1;

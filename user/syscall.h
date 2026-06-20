@@ -55,6 +55,13 @@ enum syscall_type {
     S_SIGFILLSET = 31,
     S_SIGSUSPEND = 32,
     S_SIGACTION = 33,
+    S_FORK = 34,
+    S_DUP2 = 35,
+    S_SETPGID = 36,
+    S_GETPGRP = 37,
+    S_TCSETPGRP = 38,
+    S_FS_MOUNT = 39,
+    S_FS_UNMOUNT = 40,
 };
 
 long write_console(const char *s, uint64_t len);
@@ -112,4 +119,38 @@ static inline long sys_call4(long nr, long a0, long a1, long a2, long a3) {
 
 static inline long sys_call5(long nr, long a0, long a1, long a2, long a3, long a4) {
     return sys_call6(nr, a0, a1, a2, a3, a4, 0);
+}
+
+static inline pid_t setpgid(pid_t pid, pid_t pgid) {
+    return sys_call2(S_SETPGID, pid, pgid);
+}
+
+static inline pid_t getpgrp(void) {
+    return sys_call0(S_GETPGRP);
+}
+
+static inline int tcsetpgrp(int fd, pid_t pgrp) {
+    return sys_call2(S_TCSETPGRP, fd, pgrp);
+}
+
+static inline int pipe2(int pipe[2], int flags) {
+    (void)pipe;
+    (void)flags;
+    return -1;
+}
+
+static inline int fork(void) {
+    return sys_call0(S_FORK);
+}
+
+static inline int dup2(int oldfd, int newfd) {
+    return sys_call2(S_DUP2, oldfd, newfd);
+}
+
+static inline int mount() {
+    return 0;
+}
+
+static inline int unmount() {
+    return -1;
 }

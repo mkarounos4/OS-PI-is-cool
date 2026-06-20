@@ -231,6 +231,21 @@ struct trap_frame *syscall_dispatch(struct trap_frame *frame) {
                         (struct sigaction *)(uintptr_t)frame->regs[1],
                         (struct sigaction *)(uintptr_t)frame->regs[2]);
         break;
+    case S_FORK:
+        ret = fork();
+        break;
+    case S_DUP2:
+        ret = dup2((pid_t)frame->regs[0], (pid_t)frame->regs[1]);
+        break;
+    case S_SETPGID:
+        ret = setpgrp((pid_t)frame->regs[0], (pid_t)frame->regs[1]);
+        break;
+    case S_GETPGRP:
+        ret = getpgid();
+        break;
+    case S_TCSETPGRP:
+        ret = tcsetpgrp((int)frame->regs[0], (pid_t)frame->regs[1]);
+        break;
     default:
         ret = SYS_ENOSYS;
         break;

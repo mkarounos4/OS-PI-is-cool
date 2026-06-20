@@ -1,5 +1,7 @@
 #include "kapi.h"
 #include "uart/uart.h"
+#include "oft.h"
+#include "dirs.h"
 
 int k_open(const char *fname, int mode) {
     // Return if not mounted
@@ -60,12 +62,12 @@ int k_open(const char *fname, int mode) {
     }
 
     struct oft_entry *entry;
-    err = get_oft_entry_by_fd(fd, &entry);
+    err_t err = get_oft_entry_by_fd(fd, &entry);
     if (err != SUCCESS) {
         return err;
     }
-    if (entry->inode->inode.metadata->type == CHAR_DEVICE_TYPE) {
-        err = entry->inode->inode.metadata->fops->open(entry);
+    if (entry->inode->inode.metadata.fops != NULL) {
+        err = entry->inode->inode.metadata.fops->open(entry);
         if (err) {
             return err;
         }
@@ -81,12 +83,12 @@ int k_close(int fd) {
     }
 
     struct oft_entry *entry;
-    err = get_oft_entry_by_fd(fd, &entry);
+    err_t err = get_oft_entry_by_fd(fd, &entry);
     if (err) {
         return err;
     }
-    if (entry->inode->inode.metadata->type == CHAR_DEVICE_TYPE) {
-        err = entry->inode->inode.metadata->fops.close(entry);
+    if (entry->inode->inode.metadata.fops != NULL) {
+        err = entry->inode->inode.metadata.fops->close(entry);
         if (err) {
             return err;
         }
@@ -107,8 +109,8 @@ int k_read(int fd, char *buf, int n) {
         return OFT_FD_DOES_NOT_EXIST;
     }
 
-    if (entry->inode->inode.metadata->type == CHAR_DEVICE_TYPE) {
-        return entry->inode->inode.metadata->fops.read(entry, buf, n);
+    if (entry->inode->inode.metadata.fops!= NULL) {
+        return entry->inode->inode.metadata.fops->read(entry, buf, n);
     }
 
     int size = get_file_size(entry);
@@ -194,8 +196,8 @@ int k_write(int fd, char *buf, int n) {
         return OFT_FD_DOES_NOT_EXIST;
     }
 
-    if (entry->inode->inode.metadata->type == CHAR_DEVICE_TYPE) {
-        return entry->inode->inode.metadata->fops.write(entry, buf, n);
+    if (entry->inode->inode.metadata.fops != NULL) {
+        return entry->inode->inode.metadata.fops->write(entry, buf, n);
     }
     
     if (entry->ino_id == 0) {

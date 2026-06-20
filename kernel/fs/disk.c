@@ -2,6 +2,8 @@
 
 #include "disk/block.h"
 #include "dirs.h"
+#include "inodes.h"
+#include "fs/caches/inode_cache.h"
 
 #define FS_MOUNT_BLOCK_BUFFER_SIZE 4096
 

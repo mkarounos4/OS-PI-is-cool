@@ -28,7 +28,7 @@ int changeStdOutput(struct parsed_command* cmd) {
         flags |= O_TRUNC;
     }
     
-    int output_file = open(cmd->stdout_file, flags, RDWR_MODE);
+    int output_file = open(cmd->stdout_file, flags); //TODO: open flag RDWR_MODE
     if (output_file == -1) {
         free(cmd);
         return 1;

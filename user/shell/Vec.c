@@ -1,10 +1,8 @@
-#include "data-structs/vec.h"
-#include "memory/kmalloc.h"
-#include "uart/uart.h"
-#include "traps/traps.h"
+#include "Vec.h"
+#include "malloc.h"
 
 Vec vec_new(size_t initial_capacity, ptr_dtor_fn ele_dtor_fn) {
-	ptr_t* data = kmalloc(sizeof(void*) * initial_capacity);
+	ptr_t* data = malloc(sizeof(void*) * initial_capacity);
 	if (data == NULL) {
 		exit(1);
 	}
@@ -105,7 +103,7 @@ void vec_resize(Vec* self, size_t new_capacity) {
 	}
 
 	ptr_t* old_data = self->data;
-	self->data = kmalloc(sizeof(ptr_t) * new_capacity);
+	self->data = malloc(sizeof(ptr_t) * new_capacity);
 	if (self->data == NULL) {
 		exit(1);
 	}
@@ -113,7 +111,7 @@ void vec_resize(Vec* self, size_t new_capacity) {
 	for (size_t i = 0; i < vec_len(self); i++) {
 		self->data[i] = old_data[i]; 
 	}
-	kfree(old_data);
+	free(old_data);
 	vec_capacity(self) = new_capacity;
 }
 
@@ -128,7 +126,7 @@ void vec_clear(Vec* self) {
 
 void vec_destroy(Vec* self) {
 	vec_clear(self);
-	kfree(self->data);
+	free(self->data);
 	self->data = NULL;
 	vec_capacity(self) = 0;
 	vec_len(self) = 0;

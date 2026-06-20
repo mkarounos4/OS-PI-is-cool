@@ -16,15 +16,6 @@ int strcmp(const char *lhs, const char *rhs) {
     return (unsigned char)*lhs - (unsigned char)*rhs;
 }
 
-void *memcpy(void *dst, const void *src, size_t n) {
-    unsigned char *d = dst;
-    const unsigned char *s = src;
-    for (size_t i = 0; i < n; i++) {
-        d[i] = s[i];
-    }
-    return dst;
-}
-
 long strtol(const char *nptr, char **endptr, int base) {
     const char *s = nptr;
     long sign = 1;
@@ -71,4 +62,39 @@ long strtol(const char *nptr, char **endptr, int base) {
     }
 
     return value * sign;
+}
+
+// Concatenates 2 strings. Result is malloc'd.
+// Note: does not free str1/str2.
+char *str_concat(char *str1, char *str2) {
+    size_t len1 = strlen(str1);
+    size_t len2 = strlen(str2);
+    char *new_str = malloc(sizeof(char)*(len1+len2+1));
+    for (int i = 0; i < len1; i++) {
+        new_str[i] = str1[i];
+    }
+    for (int i = 0; i < len2; i++) {
+        new_str[len1+i] = str2[i];
+    }
+    new_str[len1+len2] = '\0';
+    return new_str;
+}
+
+// Copies str into a new string. Result is malloc'd.
+char *str_copy(char *str) {
+    size_t len = strlen(str);
+    char *new_str = malloc(sizeof(char)*(len+1));
+    for (int i = 0; i <= len; i++) {
+        new_str[i] = str[i];
+    }
+    return new_str;
+}
+
+int isspace(int c) {
+    return (c == ' '  ||  // Space (0x20)
+            c == '\t' ||  // Horizontal Tab (0x09)
+            c == '\n' ||  // Newline / Line Feed (0x0a)
+            c == '\v' ||  // Vertical Tab (0x0b)
+            c == '\f' ||  // Form Feed (0x0c)
+            c == '\r');   // Carriage Return (0x0d)
 }

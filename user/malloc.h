@@ -8,7 +8,7 @@
 #define USER_HEAP_SIZE  16384ULL
 
 void *malloc(size_t size);
-void *realloci(void *oldptr, size_t size);
+void *realloc(void *oldptr, size_t size);
 void *calloc(size_t nmemb, size_t size);
 void free(void *ptr);
 

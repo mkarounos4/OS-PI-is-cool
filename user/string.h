@@ -1,8 +1,10 @@
 #pragma once
 
-#include <stddef.h>
+#include "malloc.h"
 
 size_t strlen(const char *str);
 int strcmp(const char *lhs, const char *rhs);
-void *memcpy(void *dst, const void *src, size_t n);
 long strtol(const char *nptr, char **endptr, int base);
+char *str_concat(char *str1, char *str2);
+char *str_copy(char *str);
+int isspace(int c);

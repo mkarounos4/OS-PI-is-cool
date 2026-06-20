@@ -21,10 +21,15 @@ typedef __SIZE_TYPE__ ssize_t;
 #define O_RDWR F_WRITE
 #define O_APPEND F_APPEND
 #define O_CREAT 0x4
+#define O_TRUNC 0x8
 
 #define STDIN  0
 #define STDOUT 1
 #define STDERR 2
+
+#define STDIN_FILENO STDIN
+#define STDOUT_FILENO STDOUT
+#define STDERR_FILENO STDERR
 
 static inline int open(const char *fname, int mode) {
     return (int)sys_call2(S_FS_OPEN, (long)(uintptr_t)fname, mode);

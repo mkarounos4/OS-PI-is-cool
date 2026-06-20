@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "traps/traps.h"
+#include "devices/tty.h"
 
 enum syscall_type {
     S_WRITE_CONSOLE = 1,
@@ -38,6 +39,11 @@ enum syscall_type {
     S_SIGFILLSET = 31,
     S_SIGSUSPEND = 32,
     S_SIGACTION = 33,
+    S_FORK = 34,
+    S_DUP2 = 35,
+    S_SETPGID = 36,
+    S_GETPGRP = 37,
+    S_TCSETPGRP = 38,
 };
 
 #define SYS_ENOSYS (-38L)

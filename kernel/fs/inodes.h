@@ -4,6 +4,16 @@
 #include "string.h"
 
 #include "types.h"
+#include "devices/devices.h"
+
+#ifndef DEV_T_TYPE
+#define DEV_T_TYPE
+struct dev_st {
+    uint16_t major;
+    uint16_t minor;
+};
+#endif
+
 
 // Attributes for inodes
 typedef struct attributes_t_struct {
@@ -13,7 +23,7 @@ typedef struct attributes_t_struct {
     uint32_t i_size;
     uint32_t i_blocks; // Num blocks
     fs_time_t mtime;
-    dev_t rdev;
+    struct dev_st i_rdev;
     struct file_operations *fops;
 } attributes_t;
 
@@ -28,7 +38,6 @@ struct cached_inode_st;
 #include "errors.h"
 #include "disk.h"
 #include "fs/caches/inode_cache.h"
-
 
 // Constants
 #define INODE_BYTE_SIZE ((int)sizeof(struct inode_st))

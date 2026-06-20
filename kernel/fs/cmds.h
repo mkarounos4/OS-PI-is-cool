@@ -2,6 +2,7 @@
 
 #include "errors.h"
 #include "memory/kmalloc.h"
+#include "scheduler/process.h"
 
 int open(const char *fname, int mode);
 int close(int fd);

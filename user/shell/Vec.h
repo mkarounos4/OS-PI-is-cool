@@ -1,8 +1,8 @@
 #ifndef VEC_H_
 #define VEC_H_
 
-#include <stddef.h>  // for size_t
 #include <stdbool.h>
+#include "syscall.h"
 
 typedef void* ptr_t;
 typedef void(*ptr_dtor_fn)(ptr_t);

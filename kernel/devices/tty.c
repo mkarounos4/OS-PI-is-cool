@@ -19,8 +19,8 @@ static const struct file_operations tty_fops = {
 static struct char_driver tty_char_driver = {
     .name = "tty",
     .major = TTY_MAJOR,
-    .ops = &tty_fops,
-    .driver_data = tty_state,
+    .fops = &tty_fops,
+    .driver_data = (void*) &tty_state,
 };
 
 int tty_drivers_init(void) {
@@ -41,26 +41,26 @@ int tty_create() {
     }
     tty_state.devices[minor] = new_tty;
 
-    new_tty.name[0] = 't';
-    new_tty.name[1] = 't';
-    new_tty.name[2] = 'y';
-    new_tty.name[3] = '0' + minor;
-    new_tty.name[4] = '\0';
+    new_tty->name[0] = 't';
+    new_tty->name[1] = 't';
+    new_tty->name[2] = 'y';
+    new_tty->name[3] = '0' + minor;
+    new_tty->name[4] = '\0';
 
-    new_tty.device_number = (dev_t) {
+    new_tty->device_number = (struct dev_st) {
         .major = TTY_MAJOR,
         .minor = minor,
-    }
+    };
     
-    new_tty.rx = create_ring_buffer(4096);
-    new_tty.tx = create_ring_buffer(4096);
+    new_tty->rx = create_ring_buffer(4096);
+    new_tty->tx = create_ring_buffer(4096);
     
-    new_tty.rx_wait_queue = vec_new(2, NULL);
-    new_tty.tx_wait_queue = vec_new(2, NULL);
+    new_tty->rx_wait_queue = vec_new(2, NULL);
+    new_tty->tx_wait_queue = vec_new(2, NULL);
 
-    new_tty.fg_pgid = 0;
+    new_tty->fg_pgid = 0;
 
-    err_t err = devfs_create_char_device(new_tty.device_number);
+    err_t err = devfs_create_char_device(new_tty->device_number);
     if (err) {
         return err;
     }
@@ -76,10 +76,10 @@ int tty_close(struct oft_entry *entry) {
     uint16_t minor = entry->inode->inode.metadata.i_rdev.minor;
     tty_state.devices[minor]->refcount--;
     if (tty_state.devices[minor]->refcount == 0) {
-        vec_destroy(&tty_state.devices[minor].rx_wait_queue);
-        vec_destroy(&tty_state.devices[minor].tx_wait_queue);
-        destroy_ring_buffer(tty_state.devices[minor].rx);
-        destroy_ring_buffer(tty_state.devices[minor].tx);
+        vec_destroy(&tty_state.devices[minor]->rx_wait_queue);
+        vec_destroy(&tty_state.devices[minor]->tx_wait_queue);
+        destroy_ring_buffer(&tty_state.devices[minor]->rx);
+        destroy_ring_buffer(&tty_state.devices[minor]->tx);
         kfree(tty_state.devices[minor]);
         // TODO: somehow free /dev/ttyx file
     }
@@ -94,18 +94,18 @@ ssize_t tty_read(struct oft_entry *entry, void *buffer, size_t count) {
 
     pcb_t *curr_pcb = get_curr_process();
     if (curr_pcb == NULL) {
-        return num_read;
+        return 0;
     }
-    if (curr_pcb->pgid != fg_pgid) {
+    if (curr_pcb->pgid != curr_tty->fg_pgid) {
         s_kill(-curr_pcb->pgid, SIGTTIN);
     }
     
     ssize_t num_read = 0;
     while (num_read < count) {
         void *char_void;
-        bool read_char = consume_ring_buffer(curr_tty->rx, char_void);
+        bool read_char = consume_ring_buffer(&curr_tty->rx, char_void);
         if (!read_char) {
-            vec_push_back(&curr_tty->rx_wait_queue, curr_pcb->pid);
+            vec_push_back(&curr_tty->rx_wait_queue, (ptr_t)(uintptr_t)curr_pcb->pid);
             block_process(curr_pcb);
             continue;
         }
@@ -113,7 +113,7 @@ ssize_t tty_read(struct oft_entry *entry, void *buffer, size_t count) {
         if (read_char == '\n') {
             return num_read;
         }
-        *buffer = read_char;
+        *(char*)buffer = read_char;
         buffer++;
         num_read++;
     }
@@ -141,7 +141,7 @@ ssize_t tty_write(struct oft_entry *entry, const void *buffer, size_t count) {
 
     ssize_t num_written = 0;
     while(num_written < count) {
-        uart_putc((char) *buffer);
+        uart_putc((char) *((char*)buffer));
         buffer++;
         num_written++;
     }
@@ -150,12 +150,12 @@ ssize_t tty_write(struct oft_entry *entry, const void *buffer, size_t count) {
 }
 
 void tty_send_input(int minor, const void *buffer, size_t count) {
-    if (tty_state == NULL || tty_state.num_ttys <= minor) {
+    if (buffer == NULL || tty_state.num_ttys <= minor) {
         return;
     }
 
     while (count > 0) {
-        bool wrote_char = produce_ring_buffer(tty_state.devices[minor]->tx, buffer);
+        bool wrote_char = produce_ring_buffer(&tty_state.devices[minor]->tx, buffer);
         if (!wrote_char) {
             return;
         }
