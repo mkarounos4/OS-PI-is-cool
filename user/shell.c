@@ -303,6 +303,35 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
         if (pid == 0) {
             setpgid(0, 0);
             prepare_child_process(parsed_cmd);
+
+            if (parsed_cmd->stdin_file != NULL) {
+                int fd = open(parsed_cmd->stdin_file, O_RDONLY);
+                if (fd) {
+                    perror("failed to open file.");
+                    exit(EXIT_FAILURE);
+                }
+                dup2(fd, STDIN_FILENO);
+                err_t err = close(fd);
+                if (err) {
+                    perror("failed to close file");
+                    exit(EXIT_FAILURE);
+                }
+            }
+            if (parsed_cmd->stdout_file != NULL) {
+                int fd = open(parsed_cmd->stdout_file, O_WRONLY);
+                if (fd) {
+                    perror("failed to open file.");
+                    exit(EXIT_FAILURE);
+                }
+                dup2(fd, STDOUT_FILENO);
+                err_t err = close(fd);
+                if (err) {
+                    perror("failed to close file");
+                    exit(EXIT_FAILURE);
+                }
+
+            }
+
             execvp(parsed_cmd->commands[0][0], parsed_cmd->commands[0]);
             perror("execvp");
             exit(EXIT_FAILURE);
@@ -345,10 +374,36 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
                 // If we aren't the first pipe, STDIN should come from the LAST pipe's read end
                 if (i != 0) {
                     dup2(all_pipes[i-1][READ_END], STDIN_FILENO);
+                } else {
+                    if (parsed_cmd->stdin_file != NULL) {
+                        int fd = open(parsed_cmd->stdin_file, O_RDONLY);
+                        if (fd) {
+                            perror("failed to open file.");
+                            exit(EXIT_FAILURE);
+                        }
+                        dup2(fd, STDIN_FILENO);
+                        err_t err = close(fd);
+                        if (err) {
+                            perror("failed to close file");
+                            exit(EXIT_FAILURE);
+                        }
+                    }
                 }
                 // If we aren't the last pipe, STDOUT should go to from THIS pipe's write end
                 if (i != parsed_cmd->num_commands - 1) {
                     dup2(all_pipes[i][WRITE_END], STDOUT_FILENO);
+                } else {
+                    int fd = open(parsed_cmd->stdout_file, O_WRONLY);
+                    if (fd) {
+                        perror("failed to open file.");
+                        exit(EXIT_FAILURE);
+                    }
+                    dup2(fd, STDOUT_FILENO);
+                    err_t err = close(fd);
+                    if (err) {
+                        perror("failed to close file");
+                        exit(EXIT_FAILURE);
+                    }
                 }
 
                 execvp(parsed_cmd->commands[i][0], parsed_cmd->commands[i]);
