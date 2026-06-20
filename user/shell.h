@@ -11,6 +11,7 @@
 #include "shell/Job.h"
 #include "shell/parser.h"
 #include "malloc.h"
+#include "shell_cmds.h"
 
 #define EXIT_FAILURE -1
 #define EXIT_SUCCESS 0

@@ -287,3 +287,5 @@ int update_file_size(struct oft_entry *entry, int new_size);
 block_no_t get_ith_block_of_file_by_id(ino_id_t id, unsigned int block_num);
 
 int get_file_size_by_id(ino_id_t ino_id);
+
+int clear_blocks_of_file_by_id(ino_id_t id);

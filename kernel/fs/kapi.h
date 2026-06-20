@@ -10,6 +10,13 @@
 #define F_SEEK_CUR 1
 #define F_SEEK_END 2
 
+#define O_TRUNC 4
+#define O_CREAT 8
+#define O_APPEND 16
+#define O_RDONLY 1
+#define O_WRONLY 2
+#define O_RDWR 3
+
 /**
  * @brief Open a file by path, create an open-file-table entry, and
  * return a kernel file descriptor. Creates the file on disk if the

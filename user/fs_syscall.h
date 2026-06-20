@@ -8,20 +8,16 @@ typedef int32_t err_t;
 typedef __SIZE_TYPE__ size_t;
 typedef __SIZE_TYPE__ ssize_t;
 
-#define F_READ 0x01
-#define F_WRITE 0x02
-#define F_APPEND 0x03
+#define O_TRUNC 4
+#define O_CREAT 8
+#define O_APPEND 16
+#define O_RDONLY 1
+#define O_WRONLY 2
+#define O_RDWR 3
 
 #define F_SEEK_SET 0
 #define F_SEEK_CUR 1
 #define F_SEEK_END 2
-
-#define O_RDONLY F_READ
-#define O_WRONLY F_WRITE
-#define O_RDWR F_WRITE
-#define O_APPEND F_APPEND
-#define O_CREAT 0x4
-#define O_TRUNC 0x8
 
 #define STDIN  0
 #define STDOUT 1

@@ -741,6 +741,19 @@ err_t clear_blocks_of_file(struct oft_entry *entry) {
     return clear_blocks_of_inode(&entry->inode->inode, 1);
 }
 
+err_t clear_blocks_of_file_by_id(ino_id_t id) {
+    struct cached_inode_st *inode_cached = get_inode_from_cache(ino_id);
+    if (inode_cached == 0) {
+        return -1;
+    }
+
+    int to_ret = clear_blocks_of_inode(inode_cached->inode, 1);
+    err_t error = remove_ref_from_cache(ino_id);
+    if (error) return error;
+    return to_ret;
+}
+}
+
 int add_new_file(struct oft_entry **entry, int file_type, uint8_t perm) {
     ino_id_t ino_id;
     err_t error = add_new_file_inode(&ino_id, file_type, perm);
