@@ -204,8 +204,8 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     new_proc->ctx.x29 = 0;
     new_proc->ctx.x30 = (uint64_t)(uintptr_t)process_first_run;
     new_proc->ctx.sp = frame_va;
-    new_proc->ctx.ttbr0_el1 = kernel_phys_addr((uint64_t)(uintptr_t)user_l0);
-    new_proc->ctx.ttbr0_el1_va = (uint64_t)(uintptr_t)user_l0;
+    new_proc->ctx.ttbr0_el1 = kernel_phys_addr((uint64_t)user_l0);
+    new_proc->ctx.ttbr0_el1_va = (uint64_t)user_l0;
 
     add_task_to_scheduler(new_proc);
 
@@ -272,10 +272,12 @@ void processes_init() {
 }
 
 void cpy_address_space(pcb_t *src, pcb_t *dst) {
-    uint64_t *src_l0 = (uint64_t *)(uintptr_t)src->ctx.ttbr0_el1_va;
+    uint64_t *src_l0 = (uint64_t *)src->ctx.ttbr0_el1_va;
+    printf("test %X\n", src_l0);
     uint64_t *dst_l0 = (uint64_t *)alloc_page();
     if (dst_l0 == NULL) return;
     dst->ctx.ttbr0_el1 = (uint64_t)(uintptr_t)kernel_phys_addr((uint64_t)(uintptr_t)dst_l0);
+    dst->ctx.ttbr0_el1_va = (uint64_t)dst_l0;
 
     for (short i = 0; i < PAGE_TABLE_ENTRIES; i++) {
 	if ((src_l0[i] & DESC_VALID) == 0) continue;
@@ -336,7 +338,7 @@ pid_t fork() {
     // modify child return register
     child_frame->regs[0] = 0;
 
-    cpy_address_space(child, parent);
+    cpy_address_space(parent, child);
 
     child->file_descriptors = vec_new(3, NULL);
     for (int i = 0; i < vec_len(&parent->file_descriptors); i++) {

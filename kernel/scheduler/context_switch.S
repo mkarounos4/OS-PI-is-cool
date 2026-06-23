@@ -31,10 +31,6 @@ context_switch:
     mrs x2, ttbr0_el1
     str x2, [x0, #CPU_CTX_TTBR0_EL1]
 
-    // Save TTBR0_EL1 virtual value
-    str x2, [x0, #CPU_CTX_TTBR0_EL1_VA]
-
-
     // Restore registers
     ldp x19, x20, [x1, #CPU_CTX_X19]
     ldp x21, x22, [x1, #CPU_CTX_X21]
