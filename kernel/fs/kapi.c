@@ -54,7 +54,6 @@ int k_open(const char *fname, int mode) {
     // Create open or create new file and then return fd
     int fd = oft_open_file(mode, actual_name, error != FILE_NOT_CREATED ? dirent.ino_id: 0, parent_dir_id);
 
-    printf("fd: %d\n", fd);
     struct oft_entry *entry;
     err_t err = get_oft_entry_by_fd(fd, &entry);
     if (err != SUCCESS) {

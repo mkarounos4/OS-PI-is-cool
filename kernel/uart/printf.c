@@ -27,7 +27,7 @@ void printf(const char *fmt, ...) {
 	    	break;
 	    case 'x':
 	    case 'X':
-		uart_puthex(va_arg(args, unsigned int));
+		uart_puthex(va_arg(args, unsigned long));
 	    	break;
 	    case '%':
 		uart_putc('%');

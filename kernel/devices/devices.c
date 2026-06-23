@@ -46,7 +46,6 @@ int devfs_create_char_device(struct dev_st rdev) {
     struct inode_st inode;
     err_t err = get_inode_raw(&inode, ino);
     if (err != SUCCESS) {
-        printf("one\n");
         return err;
     }
 
@@ -58,7 +57,6 @@ int devfs_create_char_device(struct dev_st rdev) {
         return err;
     }
 
-    ino_id_t parent_dir;
     struct fs_dirent dirent;
     err = get_dirent_by_path("/dev", &dirent, 1, NULL, NULL);
     if (err == FILE_NOT_CREATED) {
@@ -75,13 +73,10 @@ int devfs_create_char_device(struct dev_st rdev) {
         if (err) {
             return err;
         }
-
-        parent_dir = dirent.ino_id;
     } else if (err) {
         return err;
     }
 
-        printf("test\n");
     char *name = kmalloc(sizeof(char) * 32);
     if (name == NULL) {
         return -1;
@@ -96,7 +91,7 @@ int devfs_create_char_device(struct dev_st rdev) {
         name[len+1] = '\0';
     }
 
-    err = add_dirent(name, ino, parent_dir);
+    err = add_dirent(name, ino, dirent.ino_id);
     if (err) {
         return err;
     }

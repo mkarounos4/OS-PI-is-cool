@@ -69,7 +69,6 @@ int read(int fd, char *buf, int n) {
             return err;
         }
         int mode;
-        // printf("fd: %d, kfd: %d, mode: %d\n", i, kfd, entry->mode);
     }
     return k_read((int)(uintptr_t)vec_get(&pcb->file_descriptors, fd), buf, n);
 }
