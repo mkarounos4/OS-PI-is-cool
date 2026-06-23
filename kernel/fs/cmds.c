@@ -60,6 +60,17 @@ int read(int fd, char *buf, int n) {
         return INVALID_ARGS;
     }
 
+    for (int i = 0; i < vec_len(&pcb->file_descriptors); i++) {
+        int kfd = (int)(uintptr_t)vec_get(&pcb->file_descriptors, i);
+        struct oft_entry *entry;
+        err_t err = get_oft_entry_by_fd(kfd, &entry);
+        if (err) {
+            printf("WhAAA\n");
+            return err;
+        }
+        int mode;
+        // printf("fd: %d, kfd: %d, mode: %d\n", i, kfd, entry->mode);
+    }
     return k_read((int)(uintptr_t)vec_get(&pcb->file_descriptors, fd), buf, n);
 }
 

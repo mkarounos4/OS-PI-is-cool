@@ -5,7 +5,6 @@
 int tty_open(struct oft_entry *entry);
 int tty_close(struct oft_entry *entry);
 ssize_t tty_read(struct oft_entry *entry, char *buffer, size_t count);
-ssize_t tty_write(struct oft_entry *entry, const char *buffer, size_t count);
 
 static struct tty_driver_state tty_state;
 
@@ -102,18 +101,18 @@ ssize_t tty_read(struct oft_entry *entry, char *buffer, size_t count) {
     
     ssize_t num_read = 0;
     while (num_read < count) {
-        char *char_void;
-        bool read_char = consume_ring_buffer(&curr_tty->rx, char_void);
+        char char_void;
+        bool read_char = consume_ring_buffer(&curr_tty->rx, &char_void);
         if (!read_char) {
             vec_push_back(&curr_tty->rx_wait_queue, (ptr_t)(uintptr_t)curr_pcb->pid);
             block_process(curr_pcb);
             continue;
         }
 
-        if (read_char == '\n') {
+        if (char_void == '\n') {
             return num_read;
         }
-        *buffer = *char_void;
+        *buffer = char_void;
         buffer++;
         num_read++;
     }
@@ -149,6 +148,17 @@ ssize_t tty_write(struct oft_entry *entry, const char *buffer, size_t count) {
     return num_written;
 }
 
+void wake_up_readers(int minor) {
+    while (!vec_is_empty(&tty_state.devices[minor]->rx_wait_queue)) {
+        void *pid;
+        int removed = (int)(uintptr_t)vec_pop_back(&tty_state.devices[minor]->rx_wait_queue, &pid);
+        if (!removed) {
+            continue;
+        }
+        unblock_process(get_pcb_by_pid((int)(uintptr_t)pid));
+    }
+}
+
 void tty_send_input(int minor, const char *buffer, size_t count) {
     if (buffer == NULL || tty_state.num_ttys <= minor) {
         return;
@@ -157,28 +167,21 @@ void tty_send_input(int minor, const char *buffer, size_t count) {
     while (count > 0) {
         if (*buffer == 0x03) {
             s_kill(SIGINT, -tty_state.devices[minor]->fg_pgid);
-            bool wrote_char = produce_ring_buffer(&tty_state.devices[minor]->tx, "^");
-            if (!wrote_char) {
-                return;
-            }
-            wrote_char = produce_ring_buffer(&tty_state.devices[minor]->tx, "C");
-            if (!wrote_char) {
-                return;
-            }
+            tty_write(NULL, "^C", 2);
+            wake_up_readers(minor);
         } else if (*buffer == 0x1A) {
             s_kill(SIGTSTP, -tty_state.devices[minor]->fg_pgid);
-            bool wrote_char = produce_ring_buffer(&tty_state.devices[minor]->tx, "^");
-            if (!wrote_char) {
-                return;
-            }
-            wrote_char = produce_ring_buffer(&tty_state.devices[minor]->tx, "Z");
-            if (!wrote_char) {
-                return;
-            }
+            tty_write(NULL, "^Z", 2);
+            wake_up_readers(minor);
         } else {
-            bool wrote_char = produce_ring_buffer(&tty_state.devices[minor]->tx, buffer);
+            tty_write(NULL, buffer, 1);
+            bool wrote_char = produce_ring_buffer(&tty_state.devices[minor]->rx, buffer);
             if (!wrote_char) {
                 return;
+            }
+
+            if (*buffer == '\n') {
+                wake_up_readers(minor);
             }
         }
 

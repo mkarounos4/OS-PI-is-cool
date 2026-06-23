@@ -227,6 +227,7 @@ void scheduler_tick(void *ctx) {
                 curr_proc->pending_signals &= ~(1 << curr);
                 curr_proc->sigactions[curr].sa_handler(curr);
             }
+            curr++;
         }
     }
 }

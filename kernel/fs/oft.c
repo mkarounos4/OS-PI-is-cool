@@ -57,14 +57,6 @@ int oft_open_file(int mode, const char *file_name, ino_id_t ino_id, ino_id_t dir
 
     if (err == -2) {
         return F_ONLY_ONE_WRITER;
-    } else if (err == SUCCESS) {
-        struct oft_entry *entry;
-        err = get_oft_entry_by_fd(oft_id, &entry);
-        if (err) {
-            return err;
-        }
-        entry->ref_count++;
-        return oft_id;
     } else {
         // if file we're trying to open doesn't have a dirent yet (i.e. id_in_fs is 0, do that)
         struct oft_entry *new_entry = kmalloc(sizeof(struct oft_entry));
@@ -151,23 +143,6 @@ int find_file_in_table(ino_id_t ino_id, const char *file_name, ino_id_t parent_i
             if (oft_id != NULL && *oft_id == -1) {
                 *oft_id = i;
             }
-            continue;
-        }
-
-        int same_file = 0;
-        if (ino_id == 0 && next_entry->ino_id == 0) {
-            same_file = next_entry->parent_id == parent_id &&
-                        strcmp(next_entry->file_name, file_name) == 0;
-        } else {
-            same_file = ino_id == next_entry->ino_id;
-        }
-
-        if (same_file) {
-            if ((mode & O_WRONLY) && (next_entry->mode & O_WRONLY)) {
-                return F_ONLY_ONE_WRITER;
-            }
-            if (oft_id != NULL) *oft_id = i;
-            return SUCCESS;
         }
     }
     if (oft_id != NULL) *oft_id = vec_len(&open_file_table);

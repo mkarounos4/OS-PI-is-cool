@@ -90,7 +90,11 @@ void uart_rx_interrupt_hook(void)
     while ((rpi5_mmio_read32(QEMU_RPI3_UART0_BASE + UART_FR) & FR_RXFE) == 0) {
         uint32_t data = rpi5_mmio_read32(QEMU_RPI3_UART0_BASE + UART_DR);
         if (size < UART_RX_BUFFER_SIZE) {
-            uart_rx_buffer[size++] = (unsigned char)(data & 0xffu);
+            char next = (unsigned char)(data & 0xffu);
+            if (next == 0x0D) {
+                next = '\n';
+            }
+            uart_rx_buffer[size++] = next;
         }
     }
 

@@ -32,6 +32,8 @@ void print_status_updates();
 int execvp(const char *cmd, char **args);
 
 void *shell_init(void *args) {
+    setpgid(0, 0);
+
     int shell_num = (int)(uintptr_t)args;
     char path[10];
     path[0] = '/';
@@ -49,6 +51,7 @@ void *shell_init(void *args) {
     if (fd < 0) {
         return NULL;
     }
+        putstr("2\n");
 
     fd = open(path, O_WRONLY);
     if (fd < 0) {
@@ -191,7 +194,7 @@ char *get_input(int *nextAddNewLine) {
     char *cmd = buffer;
 
     do {
-        ssize_t num_read = read(0, buffer, BUF_SIZE);
+        int num_read = read(0, buffer, BUF_SIZE);
         if (wasInterrupted) {
             free(cmd);
             return NULL;
