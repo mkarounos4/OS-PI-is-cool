@@ -197,6 +197,65 @@ void handle_instruction_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t
     }
 }
 
+static void dump_mmu_state(void)
+{
+    uint64_t current_pc;
+    uint64_t sp;
+    uint64_t ttbr0;
+    uint64_t ttbr1;
+    uint64_t tcr;
+    uint64_t sctlr;
+    uint64_t vbar;
+    uint64_t el;
+    uint64_t esr;
+    uint64_t far;
+    uint64_t elr;
+
+    asm volatile("adr %0, ." : "=r"(current_pc));
+    asm volatile("mov %0, sp" : "=r"(sp));
+
+    asm volatile("mrs %0, CurrentEL" : "=r"(el));
+    asm volatile("mrs %0, ttbr0_el1" : "=r"(ttbr0));
+    asm volatile("mrs %0, ttbr1_el1" : "=r"(ttbr1));
+    asm volatile("mrs %0, tcr_el1" : "=r"(tcr));
+    asm volatile("mrs %0, sctlr_el1" : "=r"(sctlr));
+    asm volatile("mrs %0, vbar_el1" : "=r"(vbar));
+
+    asm volatile("mrs %0, esr_el1" : "=r"(esr));
+    asm volatile("mrs %0, far_el1" : "=r"(far));
+    asm volatile("mrs %0, elr_el1" : "=r"(elr));
+
+    printf("CurrentEL : %x\n", el);
+    printf("PC        : %x\n", current_pc);
+    printf("SP        : %x\n", sp);
+
+    printf("TTBR0_EL1 : %x\n", ttbr0);
+    printf("TTBR1_EL1 : %x\n", ttbr1);
+
+    printf("TCR_EL1   : %x\n", tcr);
+    printf("SCTLR_EL1 : %x\n", sctlr);
+
+    printf("VBAR_EL1  : %x\n", vbar);
+
+    printf("ELR_EL1   : %x\n", elr);
+    printf("ESR_EL1   : %x\n", esr);
+    printf("FAR_EL1   : %x\n", far);
+}
+
+extern char _stack_top;
+extern char __kernel_start;
+extern char __kernel_end;
+
+void dump_symbols(void)
+{
+    int local;
+
+    printf("&local         : %x\n", (uint64_t)&local);
+    printf("_stack_top     : %x\n", (uint64_t)&_stack_top);
+    printf("__kernel_start : %x\n", (uint64_t)&__kernel_start);
+    printf("__kernel_end   : %x\n", (uint64_t)&__kernel_end);
+}
+
 void handle_data_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t esr) {
     (void)elr;
 

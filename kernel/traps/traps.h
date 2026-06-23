@@ -50,6 +50,7 @@ struct cpu_context {
     uint64_t x30;
     uint64_t sp;
     uint64_t ttbr0_el1;
+    uint64_t ttbr0_el1_va;
 };
 
 void context_switch(struct cpu_context *old_ctx, struct cpu_context *new_ctx);
