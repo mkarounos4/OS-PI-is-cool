@@ -14,7 +14,7 @@ typedef int32_t pid_t;
 
 #include "signals/signals.h"
 
-#define MAX_PROCESS_COUNT 64
+#define MAX_PROCESS_COUNT 256
 #define WNOHANG 1
 #define WUNTRACED 2
 #define WCONTINUED 4

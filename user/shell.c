@@ -13,13 +13,7 @@ void ctrCHandler(int signum) {
     wasInterrupted = 1;
 }
 
-void ctrZHandler(int signum) {
-    // printf("got a ctrz\n");
-    // printf("handled by: %d\n", get_curr_process());
-    // printf("%d, %d\n", fg_job_pid, shell_pid);
-    printf("killin\n");
-    // kill(fg_job_pid, SIGTSTP);
-}
+void ctrZHandler(int signum) { (void)signum; }
 
 void prompt();
 void wait_on_children();

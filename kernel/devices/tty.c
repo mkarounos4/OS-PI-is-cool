@@ -109,7 +109,7 @@ ssize_t tty_read(struct oft_entry *entry, char *buffer, size_t count) {
             continue;
         }
 
-        if (char_void == '\n') {
+        if (char_void == 0x04 || char_void == '\n') {
             return num_read;
         }
         *buffer = char_void;
@@ -121,6 +121,7 @@ ssize_t tty_read(struct oft_entry *entry, char *buffer, size_t count) {
 }
 
 ssize_t tty_write(struct oft_entry *entry, const char *buffer, size_t count) {
+    (void)entry;
     /*uint16_t minor = entry->inode->inode.metadata.i_rdev.major;
 
     struct tty_device *curr_tty = tty_state.devices[minor];
@@ -165,24 +166,28 @@ void tty_send_input(int minor, const char *buffer, size_t count) {
     }
 
     while (count > 0) {
+        char to_write = *buffer;
         if (*buffer == 0x03) {
             s_kill(SIGINT, -tty_state.devices[minor]->fg_pgid);
             tty_write(NULL, "^C", 2);
-            wake_up_readers(minor);
+            to_write = 0x04;
         } else if (*buffer == 0x1A) {
             s_kill(SIGTSTP, -tty_state.devices[minor]->fg_pgid);
             tty_write(NULL, "^Z", 2);
-            wake_up_readers(minor);
-        } else {
+            to_write = 0;
+        } else if (*buffer != 0x04){
             tty_write(NULL, buffer, 1);
-            bool wrote_char = produce_ring_buffer(&tty_state.devices[minor]->rx, buffer);
+        }
+
+        if (to_write) {
+            bool wrote_char = produce_ring_buffer(&tty_state.devices[minor]->rx, &to_write);
             if (!wrote_char) {
                 return;
             }
+        }
 
-            if (*buffer == '\n') {
-                wake_up_readers(minor);
-            }
+        if (*buffer == 0x04 || *buffer == '\n') {
+            wake_up_readers(minor);
         }
 
         buffer++;

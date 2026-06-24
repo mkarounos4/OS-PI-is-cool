@@ -64,7 +64,6 @@ err_t add_dirent(const char* name, ino_id_t ino_id, ino_id_t curr_dir) {
     kfree(dir);
     kfree(new_dir);
 
-    printf("finished\n");
     return SUCCESS;
 }
 

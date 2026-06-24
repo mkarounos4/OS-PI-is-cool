@@ -2,6 +2,7 @@
 
 #include "disk/block.h"
 #include "dirs.h"
+#include "fs_test.h"
 #include "inodes.h"
 #include "fs/caches/inode_cache.h"
 
