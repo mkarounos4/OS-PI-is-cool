@@ -346,7 +346,7 @@ pid_t fork() {
         vec_push_back(&child->file_descriptors, fd);
         k_file_add_reference((int)(uintptr_t) fd);
     }
-
+    
     // return child pid to parent's call
     return child->pid;
 }

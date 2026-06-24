@@ -17,7 +17,14 @@
 #define PROC_KERNEL_STACK_SIZE 8192ULL
 #define PROC_KERNEL_STACK_TOP UINT64_C(0x900000)
 
+typedef struct Page {
+    uint16_t refcount;
+} Page;
+
+void pt_init(struct Page *pages);
+
 void *alloc_page(void);
+void increment_refcount();
 void free_page(void *page);
 
 uint8_t copy_phys_page(uint64_t src_pa, uint64_t dst_pa);

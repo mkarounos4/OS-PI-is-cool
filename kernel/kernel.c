@@ -22,6 +22,7 @@
 
 #define FS_DEFAULT_INODE_TABLE_BLOCKS 4
 #define FS_DEFAULT_BLOCK_SIZE_CONFIG 1
+#define RAM_END_PHYS 0x40000000
 
 void kernel_main(void) {
     uart_init();
@@ -43,14 +44,16 @@ void kernel_main(void) {
     irq_enable();
     printf("[boot] irq_enable done\n");
 
-    printf("cringe %d\n", 1);
-
+    printf("cringe %d\n", -17);
+    
     install_kernel_page_table();
     printf("[boot] final kernel page table installed\n");
 
     kmem_init((void *)(uintptr_t)KERNEL_HEAP_START,
               (void *)(uintptr_t)(KERNEL_HEAP_START + KERNEL_HEAP_SIZE));
     printf("[boot] kernel heap ready\n");
+    struct Page *pages = kmalloc(RAM_END_PHYS / PAGE_SIZE);
+    pt_init(pages);
     printf("[boot] virtual memory enabled\n");
 
     int block_ready = 0;

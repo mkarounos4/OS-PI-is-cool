@@ -1,7 +1,6 @@
 #include "syscall.h"
 #include "tests.h"
 #include "shell.h"
-
 void *tests(void *args) {
     (void)args;
 
