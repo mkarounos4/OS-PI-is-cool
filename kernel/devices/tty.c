@@ -68,6 +68,8 @@ int tty_create() {
 }
 
 int tty_open(struct oft_entry *entry) {
+    uint16_t minor = entry->inode->inode.metadata.i_rdev.minor;
+    tty_state.devices[minor]->refcount++;
     return 0;
 }
 

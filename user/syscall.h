@@ -62,6 +62,7 @@ enum syscall_type {
     S_TCSETPGRP = 38,
     S_FS_MOUNT = 39,
     S_FS_UNMOUNT = 40,
+    S_PIPE = 41,
 };
 
 long write_console(const char *s, uint64_t len);
@@ -133,12 +134,6 @@ static inline int tcsetpgrp(int fd, pid_t pgrp) {
     return sys_call2(S_TCSETPGRP, fd, pgrp);
 }
 
-static inline int pipe2(int pipe[2], int flags) {
-    (void)pipe;
-    (void)flags;
-    return -1;
-}
-
 static inline int fork(void) {
     return sys_call0(S_FORK);
 }
@@ -153,4 +148,8 @@ static inline int mount() {
 
 static inline int unmount() {
     return -1;
+}
+
+static inline int pipe(int pipefd[2]) {
+    return sys_call1(S_PIPE, (long) pipefd);
 }

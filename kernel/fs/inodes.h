@@ -24,6 +24,9 @@ typedef struct attributes_t_struct {
     fs_time_t mtime;
     struct dev_st i_rdev;
     struct file_operations *fops;
+    union {
+        struct pipe_st *i_pipe;
+    };
 } attributes_t;
 
 // Struct for inode data
@@ -268,3 +271,5 @@ err_t clear_blocks_of_inode(struct inode_st *inode, int skip_first);
  * @return SUCCESS on success, or a negative error code on failure.
  */
 err_t remove_last_block_inode(ino_id_t id);
+
+err_t set_inode_metadata(ino_id_t id, attributes_t *metadata);

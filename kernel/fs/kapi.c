@@ -202,14 +202,6 @@ int k_write(int fd, char *buf, int n) {
         return entry->inode->inode.metadata.fops->write(entry, buf, n);
     }
     
-    if (entry->ino_id == 0) {
-        err_t err = add_new_file(&entry, FILE_TYPE, 6);
-        update_dirent_by_f_name(entry->file_name, entry->parent_id, FILE_TYPE, EDIT_ID, 0, 0, "", entry->ino_id);
-        if (err) {
-            return err;
-        }
-    }
-
     // Move real cursor to correct position in binary file, do special math for first offset.
     int size = get_file_size(entry);
     uint32_t offset;
@@ -268,16 +260,9 @@ int k_write(int fd, char *buf, int n) {
         offset += bytes_to_write;
         entry->cursor = offset;
 
-        struct fs_dirent dirent;
-        err_t res;
-        // TODO: Update size in dirent and time last edited.
-        if ((res = get_dirent_by_f_name(entry->file_name, 1, &dirent, entry->parent_id)) != SUCCESS) {
-            kfree(data);
-            return res;
-        }
         if (offset > size) {
             size = offset;
-            res = update_file_size(entry, size);
+            int res = update_file_size(entry, size);
             if (res != SUCCESS) {
                 kfree(data);
                 return res;
@@ -413,7 +398,7 @@ int k_chmod(const char *file_name, uint8_t new_perms, int flag) {
         return err;
     }
 
-    err = update_dirent_by_f_name(actual_name, parent_dir, FILE_TYPE, new_flag, new_perms, 0, "", 0);
+    err = update_inode_metadata(dirent.ino_id, EDIT_PERM, 0, new_perms);
     kfree(actual_name);
     return err;
 }
@@ -431,7 +416,7 @@ int k_update_file_time(const char *file_name) {
     if (err) {
         return err;
     }
-    err = update_dirent_by_f_name(actual_name, parent_dir, FILE_TYPE, 0, 0, 0, "", 0);
+    err = update_inode_metadata(dirent.ino_id, 0, 0, 0);
     kfree(actual_name);
     return err;
 }

@@ -44,6 +44,9 @@ enum syscall_type {
     S_SETPGID = 36,
     S_GETPGRP = 37,
     S_TCSETPGRP = 38,
+    S_MOUNT = 39,
+    S_UNMOUNT = 40,
+    S_PIPE = 41,
 };
 
 #define SYS_ENOSYS (-38L)

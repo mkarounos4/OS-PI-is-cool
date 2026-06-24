@@ -45,7 +45,6 @@ void *shell_init(void *args) {
     if (fd < 0) {
         return NULL;
     }
-        putstr("2\n");
 
     fd = open(path, O_WRONLY);
     if (fd < 0) {
@@ -351,7 +350,7 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
         for (int i=0; i < parsed_cmd->num_commands; i++) {
             // We don't need a pipe for the last command
             if (i != parsed_cmd->num_commands - 1) {
-                pipe2(all_pipes[i], O_CLOEXEC);
+                pipe(all_pipes[i]);
             }
 
             pid_t command_pid = fork();

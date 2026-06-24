@@ -9,6 +9,7 @@
 #include "signals/signals.h"
 #include "memory/page_table/page_table.h"
 #include "fs/cmds.h"
+#include "pipe/pipe.h"
 
 #define SYS_WRITE_CONSOLE_MAX 1024u
 #define SYS_USER_PTR_MIN      UINT64_C(0x1000)
@@ -246,6 +247,8 @@ struct trap_frame *syscall_dispatch(struct trap_frame *frame) {
     case S_TCSETPGRP:
         ret = tcsetpgrp((int)frame->regs[0], (pid_t)frame->regs[1]);
         break;
+    case S_PIPE:
+        ret = pipe((int*)frame->regs[0]);
     default:
         ret = SYS_ENOSYS;
         break;

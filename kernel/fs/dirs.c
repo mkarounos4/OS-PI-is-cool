@@ -67,66 +67,6 @@ err_t add_dirent(const char* name, ino_id_t ino_id, ino_id_t curr_dir) {
     return SUCCESS;
 }
 
-err_t update_dirent_by_f_name(const char* f_name, ino_id_t parent_id, uint8_t curr_type, int flags, uint8_t perm, uint8_t new_file_type, const char* new_f_name, ino_id_t new_id) {
-    struct fs_dirent *dir = kmalloc(get_bytes_per_block());
-    block_no_t curr_block_no = get_first_block(parent_id);
-    int index = 0;
-    while (curr_block_no != 0) {
-        int err = read_block(dir, curr_block_no);
-        if (err != 0) {
-            kfree(dir);
-            return err;
-        }
-        int i = 0;
-        while (i < (int) (get_bytes_per_block() / sizeof(struct fs_dirent))) {
-            if (!strcmp(dir[i].name, "\0")) {
-                kfree(dir);
-                return FILE_NOT_FOUND;
-            }
-            attributes_t metadata;
-            err = get_inode_metadata(dir[i].ino_id, &metadata);
-            if (err != SUCCESS) {
-                kfree(dir);
-                return err;
-            }
-            if (!strcmp(dir[i].name, f_name) && metadata.type == curr_type) {
-                int inode_flags = INODE_EDIT_MTIME;
-                if (flags & EDIT_TYPE) {
-                    inode_flags |= INODE_EDIT_TYPE;
-                }
-                if (flags & EDIT_PERM) {
-                    inode_flags |= INODE_EDIT_PERM;
-                    if (flags & AND_PERM) {
-                        inode_flags |= INODE_AND_PERM;
-                    }
-                }
-                ino_id_t metadata_id = (flags & EDIT_ID) ? new_id : dir[i].ino_id;
-                if (metadata_id != 0) {
-                    err = update_inode_metadata(metadata_id, inode_flags, new_file_type, perm);
-                    if (err != SUCCESS) {
-                        kfree(dir);
-                        return err;
-                    }
-                }
-                if (flags & EDIT_FNAME) {
-                    strncpy(dir[i].name, new_f_name, sizeof(dir[i].name));
-                }
-                if (flags & EDIT_ID) {
-                    dir[i].ino_id = new_id;
-                }
-                err = write_block(dir, curr_block_no);
-                kfree(dir);
-                if (err) return err;
-                return SUCCESS;
-            }
-            i++;
-        } 
-        curr_block_no = get_ith_block_of_file_by_id(parent_id, ++index);
-    }
-    kfree(dir);
-    return FILE_NOT_FOUND;
-}
-
 err_t add_dirent_by_path(char *f_path, int file_type, int perm) {
     if (f_path == 0 || f_path[0] == 0) {
         return INVALID_FILE_NAME;

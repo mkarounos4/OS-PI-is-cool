@@ -398,6 +398,23 @@ err_t update_inode_metadata(ino_id_t id, int flags, uint8_t type, uint8_t perm) 
     return SUCCESS;
 }
 
+err_t set_inode_metadata(ino_id_t id, attributes_t *metadata) {
+    if (id == 0) {
+        return INVALID_ARGS;
+    }
+
+    struct cached_inode_st *node;
+    err_t err = get_inode(&node, id);
+    if (err) {
+        return err;
+    }
+
+    node->dirty = 1;
+    node->inode.metadata = *metadata;
+    remove_ref_from_cache(id);
+    return SUCCESS;
+}
+
 err_t write_inode(struct inode_st *node, ino_id_t id) {
     block_no_t block_with_inode =
         (id - 1) / INODES_PER_BLOCK + get_inode_table_start();
@@ -952,6 +969,8 @@ err_t add_new_file_inode(ino_id_t *inode_num, int file_type, uint8_t perm) {
     new_node->metadata.perm = perm;
     new_node->metadata.i_blocks = 0;
     new_node->metadata.mtime = timer_get_ticks();
+    new_node->metadata.fops = NULL;
+    new_node->metadata.i_pipe = NULL;
 
     // Write data back
     err_code = write_block(data, block_with_inode);

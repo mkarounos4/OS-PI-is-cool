@@ -44,27 +44,6 @@ struct fs_dirent {
 };
 
 /**
- * @brief Update fields of the dirent with name f_name inside the
- * parent directory parent_id. Only the fields whose corresponding
- * EDIT_* bits are set in flags are overwritten.
- *
- * @param f_name Name of the dirent to update.
- * @param parent_id Inode id / first block of the containing directory.
- * @param curr_type Current file type of the dirent (used to locate
- * the correct entry when names can alias across types).
- * @param flags Bitmask of EDIT_* flags selecting which fields to update.
- * Pass AND_PERM together with EDIT_PERM to AND the new perm into the
- * existing value instead of replacing it.
- * @param size New size (used only if EDIT_SIZE is set).
- * @param perm New permission bits (used only if EDIT_PERM is set).
- * @param new_file_type New file type (used only if EDIT_TYPE is set).
- * @param new_f_name New file name (used only if EDIT_FNAME is set).
- * @param new_id New first block / inode id (used only if EDIT_ID is set).
- * @return SUCCESS on success, or a negative error code on failure.
- */
-err_t update_dirent_by_f_name(const char* f_name, ino_id_t parent_id, uint8_t curr_type, int flags, uint8_t perm, uint8_t new_file_type, const char* new_f_name, ino_id_t new_id);
-
-/**
  * @brief Look up a dirent by name within the given directory and
  * copy it into the caller-provided struct.
  *

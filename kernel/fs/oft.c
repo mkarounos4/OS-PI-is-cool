@@ -3,26 +3,9 @@
 static Vec open_file_table;
 static int oft_initialized = 0;
 
-static char *copy_oft_name(const char *name) {
-    size_t len = 0;
-    while (name[len] != '\0') {
-        len++;
-    }
-
-    char *copy = kmalloc(len + 1);
-    if (copy == NULL) {
-        return NULL;
-    }
-    for (size_t i = 0; i <= len; i++) {
-        copy[i] = name[i];
-    }
-    return copy;
-}
-
 static void entry_deletor(void *entry) {
     if (entry != NULL) {
         struct oft_entry *oentry = (struct oft_entry*) entry;
-        kfree(oentry->file_name);
         if (oentry->ino_id > 0) {
             remove_ref_from_cache(oentry->ino_id);
         }
@@ -53,49 +36,41 @@ err_t empty_oft(void) {
 
 int oft_open_file(int mode, const char *file_name, ino_id_t ino_id, ino_id_t dir_block) {
     int oft_id;
-    int err = find_file_in_table(ino_id, file_name, dir_block, mode, &oft_id);
+    int err = find_file_in_table(&oft_id);
 
-    if (err == -2) {
-        return F_ONLY_ONE_WRITER;
-    } else {
-        // if file we're trying to open doesn't have a dirent yet (i.e. id_in_fs is 0, do that)
-        struct oft_entry *new_entry = kmalloc(sizeof(struct oft_entry));
-        *new_entry = (struct oft_entry) {
-            .mode = mode,
-            .cursor = 0,
-            .ref_count = 1,
-            .ino_id = ino_id,
-            .inode = NULL,
-            .parent_id = dir_block,
-            .file_name = kmalloc(sizeof(char) * (strlen(file_name)+1))
-        };
-        
-        // Create new file if applicable
-        if (ino_id == 0) {
-            // Adds new dirent to end of directory 
-            struct fs_dirent dir;
-            err = get_dirent_by_f_name(file_name, FILE_TYPE, &dir, dir_block);
-            if (err != SUCCESS) {
-                add_new_file(&new_entry, FILE_TYPE, 6);
-                err = add_dirent(file_name, new_entry->ino_id, dir_block);
-                if (err) {
-                    return err;
-                }
+    // if file we're trying to open doesn't have a dirent yet (i.e. id_in_fs is 0, do that)
+    struct oft_entry *new_entry = kmalloc(sizeof(struct oft_entry));
+    *new_entry = (struct oft_entry) {
+        .mode = mode,
+        .cursor = 0,
+        .ref_count = 1,
+        .ino_id = ino_id,
+        .inode = NULL,
+    };
+    
+    // Create new file if applicable
+    if (ino_id == 0) {
+        // Adds new dirent to end of directory 
+        struct fs_dirent dir;
+        err = get_dirent_by_f_name(file_name, FILE_TYPE, &dir, dir_block);
+        if (err != SUCCESS) {
+            add_new_file(&new_entry, FILE_TYPE, 6);
+            err = add_dirent(file_name, new_entry->ino_id, dir_block);
+            if (err) {
+                return err;
             }
-        } else {
-            new_entry->inode = get_inode_from_cache(ino_id);
         }
+    }
 
-        // Updates file name and adds to open_file_table
-        strcpy(new_entry->file_name, file_name);
-        new_entry->file_name[strlen(file_name)] = '\0';
-        if (oft_id == vec_len(&open_file_table) || oft_id == -1) {
-            oft_id = vec_len(&open_file_table);
-            vec_push_back(&open_file_table, new_entry);
-        } else {
-            vec_set(&open_file_table, oft_id, new_entry);
-        }
-    } 
+    new_entry->inode = get_inode_from_cache(ino_id);
+
+    // adds to open_file_table
+    if (oft_id == vec_len(&open_file_table) || oft_id == -1) {
+        oft_id = vec_len(&open_file_table);
+        vec_push_back(&open_file_table, new_entry);
+    } else {
+        vec_set(&open_file_table, oft_id, new_entry);
+    }
 
     return oft_id;
 }
@@ -135,7 +110,7 @@ int oft_close_file(int oft_id) {
     return SUCCESS;
 }
 
-int find_file_in_table(ino_id_t ino_id, const char *file_name, ino_id_t parent_id, int mode, int *oft_id) {
+int find_file_in_table(int *oft_id) {
     if (oft_id != NULL)  *oft_id = -1;
     for (int i = 0; i < vec_len(&open_file_table); i++) {
         struct oft_entry *next_entry = vec_get(&open_file_table, i);
