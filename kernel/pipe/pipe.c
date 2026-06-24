@@ -119,6 +119,7 @@ int pipe_close(struct oft_entry *entry) {
 
     if (pipe->num_readers == 0 && pipe->num_writers == 0) {
         // clean pipe
+        destroy_ring_buffer(&pipe->buffer);
         kfree(pipe);
     }
 
