@@ -17,10 +17,6 @@
 #define DESC_PAGE (1ULL << 1)
 
 #define PTE_ATTRINDX(n) (((uint64_t)(n) & 0x7ULL) << 2)
-#define PTE_AP_EL1_RW (0ULL << 6)
-#define PTE_AP_EL1_RO (2ULL << 6)
-#define PTE_AP_EL0_RW (1ULL << 6)
-#define PTE_AP_EL0_RO (3ULL << 6)
 #define PTE_SH_INNER (3ULL << 8)
 #define PTE_AF (1ULL << 10)
 #define PTE_PXN (1ULL << 53)
@@ -85,6 +81,20 @@ static void zero_page(void *page) {
   }
 }
 
+static inline int64_t phys_pa_to_pfn(uint64_t phys_pa) {
+    uint64_t pa = kernel_phys_addr(phys_pa);
+    uint64_t pfn = pa >> 12;
+    if (pages == NULL) return -1;
+    return (int64_t)pfn;
+}
+
+static inline int64_t kernel_va_to_pfn(void *kernel_va) {
+    if (kernel_va == NULL) return -1;
+    uint64_t va = (uint64_t)(uintptr_t)kernel_va;
+    uint64_t pa = kernel_phys_addr(va);
+    return phys_pa_to_pfn(pa);
+}
+
 uint8_t copy_phys_page(uint64_t src_pa, uint64_t dst_pa) {
   void *src = (void *)(uintptr_t)kernel_direct_map_va(src_pa);
   void *dst = (void *)(uintptr_t)kernel_direct_map_va(dst_pa);
@@ -107,54 +117,50 @@ static void page_allocator_init(void) {
   next_free_page = align_up((uint64_t)(uintptr_t)__kernel_page_pool_start);
 }
 
+
 void *alloc_page(void) {
-  page_allocator_init();
+    page_allocator_init();
 
-  void *page = NULL;
-  if (free_list != NULL) {
-    page = (void *)free_list;
-    free_list = free_list->next;
-  } else if (next_free_page + PAGE_SIZE <= (uint64_t)(uintptr_t)__RAM_end) {
-    page = (void *)(uintptr_t)next_free_page;
-    next_free_page += PAGE_SIZE;
-  }
+    void *page = NULL;
+    if (free_list != NULL) {
+        page = (void *)free_list;
+        free_list = free_list->next;
+    } else if (next_free_page + PAGE_SIZE <= (uint64_t)(uintptr_t)__RAM_end) {
+        page = (void *)(uintptr_t)next_free_page;
+        next_free_page += PAGE_SIZE;
+    }
 
-  if (page != NULL) {
-    Page *page_data = kmalloc(sizeof(page_data));
-    page_data->refcount = 1;
-    pages[kernel_phys_addr((uint64_t)page)] = *page_data;
-    zero_page(page);
-  }
+    if (page != NULL) {
+        zero_page(page);
 
-  return page;
-}
+        if (pages != NULL) {
+            uint64_t pa = kernel_phys_addr((uint64_t)(uintptr_t)page);
+            int64_t pfn = phys_pa_to_pfn(pa);
+            if (pfn >= 0) {
+                pages[pfn].refcount = 1;
+                pages[pfn].flags = 0;
+            }
+        }
+    }
 
-void increment_page_ref(uint64_t *va) {
-  struct Page *page_data = get_page_struct(va);
-  page_data->refcount++;
-}
-
-void decrement_page_ref(uint64_t *va) {
-  struct Page *page_data = get_page_struct(va);
-  if (page_data->refcount < 1)
-    fatal_exception("[Page] ERROR: negative page refcount");
-  page_data->refcount--;
-  if (page_data->refcount == 0)
-    free_page(va);
+    return page;
 }
 
 void free_page(void *page) {
-  if (page == NULL) {
-    return;
-  }
+    if (page == NULL) return;
 
-  FreePage *free = (FreePage *)page;
-  free->next = free_list;
-  free_list = free;
+    if (pages != NULL) {
+        uint64_t pa = kernel_phys_addr((uint64_t)(uintptr_t)page);
+        int64_t pfn = phys_pa_to_pfn(pa);
+        if (pfn >= 0) {
+            pages[pfn].refcount = 0;
+            pages[pfn].flags = 0;
+        }
+    }
 
-  // destroy page struct
-  Page *page_struct = get_page_struct(page);
-  free_page(page_struct);
+    FreePage *free = (FreePage *)page;
+    free->next = free_list;
+    free_list = free;
 }
 
 uint64_t kernel_direct_map_va(uint64_t pa) {
@@ -451,3 +457,126 @@ uint64_t *initialize_user_page_table(void) {
 
   return l0;
 }
+
+
+/* COW functions and helpers */
+void inc_pte_refcount_pa(uint64_t phys_pa) {
+    int64_t pfn = phys_pa_to_pfn(phys_pa);
+    if (pfn < 0) return;
+    pages[pfn].refcount++;
+}
+
+void dec_pte_refount_pa(uint64_t phys_pa) {
+    int64_t pfn = phys_pa_to_pfn(phys_pa);
+    if (pfn < 0) return;
+    if (pages[pfn].refcount == 0) {
+        fatal_exception("[page_ref_dec_pa] refcount already zero");
+    }
+    pages[pfn].refcount--;
+    if (pages[pfn].refcount == 0) {
+        void *va = (void *)(uintptr_t)kernel_direct_map_va(phys_pa & PA_MASK);
+        free_page(va);
+    }
+}
+
+uint16_t get_pte_refcount_pa(uint64_t phys_pa) {
+    int64_t pfn = phys_pa_to_pfn(phys_pa);
+    if (pfn < 0) return 0;
+    return pages[pfn].refcount;
+}
+
+void inc_pte_refcount_va(void *kernel_va) {
+    int64_t pfn = kernel_va_to_pfn(kernel_va);
+    if (pfn < 0) return;
+    pages[pfn].refcount++;
+}
+
+void dec_pte_refcount_va(void *kernel_va) {
+    int64_t pfn = kernel_va_to_pfn(kernel_va);
+    if (pfn < 0) return;
+    if (pages[pfn].refcount == 0) fatal_exception("[dec_pte_refcount_va] negative page refcount");
+    pages[pfn].refcount--;
+    if (pages[pfn].refcount == 0) {
+        free_page(kernel_va);
+    }
+}
+
+uint16_t get_pte_refcount_va(void *kernel_va) {
+    int64_t pfn = kernel_va_to_pfn(kernel_va);
+    if (pfn < 0) return 0;
+    return pages[pfn].refcount;
+}
+
+int pte_is_user(uint64_t pte) {
+    uint64_t ap = (pte & PTE_AP_MASK) >> PTE_AP_SHIFT;
+    return (ap == (PTE_AP_EL0_RW >> PTE_AP_SHIFT)) ||
+           (ap == (PTE_AP_EL0_RO >> PTE_AP_SHIFT));
+}
+
+int pte_is_writable(uint64_t pte) {
+    uint64_t ap = (pte & PTE_AP_MASK) >> PTE_AP_SHIFT;
+    return (ap == (PTE_AP_EL0_RW >> PTE_AP_SHIFT)) ||
+           (ap == (PTE_AP_EL1_RW >> PTE_AP_SHIFT));
+}
+
+
+void pte_set_cow_flag(uint64_t pa, uint16_t flag) {
+    int64_t pfn = phys_pa_to_pfn(pa);
+    if (pfn < 0) return;
+    pages[pfn].flags |= flag;
+}
+
+void pte_clear_cow_flag(uint64_t pa, uint16_t flag) {
+    int64_t pfn = phys_pa_to_pfn(pa);
+    if (pfn < 0) return;
+    pages[pfn].flags &= ~flag;
+}
+
+uint16_t pte_test_cow_flag(uint64_t pa, uint16_t flag) {
+    int64_t pfn = phys_pa_to_pfn(pa);
+    if (pfn < 0) return 0;
+    return (pages[pfn].flags & flag) != 0;
+}
+
+
+uint64_t pte_clear_writable(uint64_t pte) {
+    pte &= ~PTE_AP_MASK;
+    pte |= PTE_AP_EL0_RO;
+    return pte;
+}
+
+void pte_make_readonly_and_mark_cow(uint64_t *pte_ptr) {
+    if (pte_ptr == NULL) return;
+    uint64_t pte = *pte_ptr;
+    if (!pte_is_user(pte)) return;
+    uint64_t pa = pte & PTE_ADDR_MASK;
+    pte &= ~(3ULL << 6);
+    pte |= PTE_AP_EL0_RO;
+    *pte_ptr = pte;
+
+    pte_set_cow_flag(pa, PTE_FLAG_COW);
+}
+
+void pte_clear_cow_and_make_writable(uint64_t *pte_ptr) {
+    if (pte_ptr == NULL) return;
+    uint64_t pte = *pte_ptr;
+    uint64_t pa = pte & PTE_ADDR_MASK;
+    pte_clear_cow_flag(pa, PTE_FLAG_COW);
+
+    pte &= ~(3ULL << 6);
+    pte |= PTE_AP_EL0_RW;
+    *pte_ptr = pte;
+}
+
+
+void tlb_invalidate_all_user(void) {
+    asm volatile(
+        "dsb ish\n"
+        "tlbi vmalle1\n"
+        "dsb ish\n"
+        "isb\n"
+        :
+        :
+        : "memory");
+}
+

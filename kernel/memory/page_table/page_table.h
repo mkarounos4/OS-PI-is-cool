@@ -16,15 +16,22 @@
 #define USER_STACK_TOP UINT64_C(0x800000)
 #define PROC_KERNEL_STACK_SIZE 8192ULL
 #define PROC_KERNEL_STACK_TOP UINT64_C(0x900000)
+#define PTE_AP_EL1_RW (0ULL << 6)
+#define PTE_AP_EL1_RO (2ULL << 6)
+#define PTE_AP_EL0_RW (1ULL << 6)
+#define PTE_AP_EL0_RO (3ULL << 6)
+#define PTE_AP_MASK (3ULL << 6)
+#define PTE_AP_SHIFT 6
+#define PTE_FLAG_COW (1u << 0)
 
 typedef struct Page {
     uint16_t refcount;
+    uint16_t flags;
 } Page;
 
 void pt_init(struct Page *pages);
 
 void *alloc_page(void);
-void increment_refcount();
 void free_page(void *page);
 
 uint8_t copy_phys_page(uint64_t src_pa, uint64_t dst_pa);
@@ -41,3 +48,26 @@ void *pt_seed_kernel_page(uint64_t *l0, uint64_t va);
 
 uint64_t *initialize_kernel_page_table(void);
 uint64_t *initialize_user_page_table(void);
+
+/* COW helpers */
+int pte_is_user(uint64_t pte);
+int pte_is_writable(uint64_t pte);
+
+void pte_set_cow_flag(uint64_t pa, uint16_t flag);
+void pte_clear_cow_flag(uint64_t pa, uint16_t flag);
+uint16_t pte_test_cow_flag(uint64_t pa, uint16_t flag);
+uint64_t pte_make_readonly(uint64_t pte);
+
+void inc_pte_refcount_pa(uint64_t pa);
+void inc_pte_refcount_va(void *va);
+
+void dec_pte_refcount_pa(uint64_t pa);
+void dec_pte_refcount_va(void *va);
+
+uint16_t get_pte_refcount_pa(uint64_t pa);
+uint16_t get_pte_refcount_va(void *va);
+
+void pte_make_readonly_and_mark_cow(uint64_t *pte_ptr);
+void pte_clear_cow_and_make_writable(uint64_t *pte_ptr);
+
+void tlb_invalidate_all_user(void);

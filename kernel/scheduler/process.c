@@ -280,45 +280,58 @@ void cpy_address_space(pcb_t *src, pcb_t *dst) {
     dst->ctx.ttbr0_el1_va = (uint64_t)dst_l0;
 
     for (short i = 0; i < PAGE_TABLE_ENTRIES; i++) {
-	if ((src_l0[i] & DESC_VALID) == 0) continue;
+	    if ((src_l0[i] & DESC_VALID) == 0) continue;
 
-	uint64_t *src_l1 = (uint64_t *)(uintptr_t)kernel_direct_map_va(src_l0[i] & PTE_ADDR_MASK);
+	    uint64_t *src_l1 = (uint64_t *)(uintptr_t)kernel_direct_map_va(src_l0[i] & PTE_ADDR_MASK);
         uint64_t *dst_l1 = (uint64_t *)alloc_page();
-	if (dst_l1 == NULL) return;
-	dst_l0[i] = table_desc(dst_l1);
+	    if (dst_l1 == NULL) return;
+	    dst_l0[i] = table_desc(dst_l1);
 
-	for (short j = 0; j < PAGE_TABLE_ENTRIES; j++) {
-	    if ((src_l1[j] & DESC_VALID) == 0) continue;
+	    for (short j = 0; j < PAGE_TABLE_ENTRIES; j++) {
+	        if ((src_l1[j] & DESC_VALID) == 0) continue;
 
-	    uint64_t *src_l2 = (uint64_t *)(uintptr_t)kernel_direct_map_va(src_l1[j] & PTE_ADDR_MASK);
+	        uint64_t *src_l2 = (uint64_t *)(uintptr_t)kernel_direct_map_va(src_l1[j] & PTE_ADDR_MASK);
             uint64_t *dst_l2 = (uint64_t *)alloc_page();
             if (dst_l2 == NULL) return;
             dst_l1[j] = table_desc(dst_l2);
 
-	    for (short k = 0; k < PAGE_TABLE_ENTRIES; k++) {
-		if ((src_l2[k] & DESC_VALID) == 0) continue;
+	        for (short k = 0; k < PAGE_TABLE_ENTRIES; k++) {
+		        if ((src_l2[k] & DESC_VALID) == 0) continue;
 
-		uint64_t *src_l3 = (uint64_t *)(uintptr_t)kernel_direct_map_va(src_l2[k] & PTE_ADDR_MASK);
+		        uint64_t *src_l3 = (uint64_t *)(uintptr_t)kernel_direct_map_va(src_l2[k] & PTE_ADDR_MASK);
                 uint64_t *dst_l3 = (uint64_t *)alloc_page();
                 if (dst_l3 == NULL) return;
                 dst_l2[k] = table_desc(dst_l3);
 
-		for (short l = 0; l < PAGE_TABLE_ENTRIES; l++) {
-		    if ((src_l3[l] & DESC_VALID) == 0) continue;
+		        for (short l = 0; l < PAGE_TABLE_ENTRIES; l++) {
+		            if ((src_l3[l] & DESC_VALID) == 0) continue;
 
-		    uint64_t src_pa = src_l3[l] & PTE_ADDR_MASK;
-                    uint64_t *dst_page = (uint64_t *)alloc_page();
-                    if (dst_page == NULL) return;
+		            uint64_t src_pa = src_l3[l] & PTE_ADDR_MASK;
+                    uint64_t src_attrs = src_l3[l] & ~PTE_ADDR_MASK;
 
-                    uint64_t dst_pa = kernel_phys_addr((uint64_t)(uintptr_t)dst_page);
-                    copy_phys_page(src_pa, dst_pa);
+                    if (!pte_is_user(src_l3[l])) { // kernel/device mapping -> do not COW
+                        uint64_t *dst_page = (uint64_t *)alloc_page();
+                        if (dst_page == NULL) return;
+                        uint64_t dst_pa = kernel_phys_addr((uint64_t)(uintptr_t)dst_page);
+                        copy_phys_page(src_pa, dst_pa);
 
-                    uint64_t attrs = src_l3[l] & ~PTE_ADDR_MASK;
-                    dst_l3[l] = (dst_pa & PTE_ADDR_MASK) | attrs;
-		}
+                        dst_l3[l] = (dst_pa & PTE_ADDR_MASK) | src_attrs;
+                    } else { // user mapping -> COW
+                        if (pte_is_writable(src_l3[l])) pte_make_readonly_and_mark_cow(&src_l3[l]);
+                        else pte_set_cow_flag(src_pa, PTE_FLAG_COW);
+                    
+                        uint64_t child_pte = (src_pa & PTE_ADDR_MASK) | (src_l3[l] & ~PTE_ADDR_MASK);
+                        child_pte &= ~(PTE_AP_EL0_RW | PTE_AP_EL1_RW); // clear write bits
+                        child_pte |= PTE_AP_EL0_RO; // set EL0 read-only
+                        dst_l3[l] = child_pte;
+
+                        inc_pte_refcount_pa(src_pa);
+                    }
+                }
+	        }
 	    }
-	}
     }
+    tlb_invalidate_all_user();
 }
 
 pid_t fork() {
