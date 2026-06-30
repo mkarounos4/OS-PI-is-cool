@@ -14,7 +14,6 @@
 
 #define DESC_BLOCK (0ULL << 1)
 #define DESC_TABLE (1ULL << 1)
-#define DESC_PAGE (1ULL << 1)
 
 #define PTE_ATTRINDX(n) (((uint64_t)(n) & 0x7ULL) << 2)
 #define PTE_SH_INNER (3ULL << 8)
@@ -61,7 +60,6 @@ typedef struct FreePage {
 
 static uint64_t next_free_page;
 static FreePage *free_list;
-static uint64_t kernel_phys_addr(uint64_t va);
 
 struct Page *get_page_struct(uint64_t *va) {
   uint64_t pa = kernel_phys_addr(*va);

@@ -315,17 +315,20 @@ void cpy_address_space(pcb_t *src, pcb_t *dst) {
                         uint64_t dst_pa = kernel_phys_addr((uint64_t)(uintptr_t)dst_page);
                         copy_phys_page(src_pa, dst_pa);
 
-                        dst_l3[l] = (dst_pa & PTE_ADDR_MASK) | src_attrs;
+                        dst_l3[l] = (dst_pa & PTE_ADDR_MASK) | src_attrs | DESC_VALID | DESC_PAGE;
                     } else { // user mapping -> COW
-                        if (pte_is_writable(src_l3[l])) pte_make_readonly_and_mark_cow(&src_l3[l]);
-                        else pte_set_cow_flag(src_pa, PTE_FLAG_COW);
-                    
-                        uint64_t child_pte = (src_pa & PTE_ADDR_MASK) | (src_l3[l] & ~PTE_ADDR_MASK);
-                        child_pte &= ~(PTE_AP_EL0_RW | PTE_AP_EL1_RW); // clear write bits
-                        child_pte |= PTE_AP_EL0_RO; // set EL0 read-only
-                        dst_l3[l] = child_pte;
+                        if (pte_is_writable(src_l3[l])) { // page not readonly -> make readonly
+                            pte_make_readonly_and_mark_cow(&src_l3[l]);
+                            uint64_t child_pte = (src_pa & PTE_ADDR_MASK) | (src_l3[l] & ~PTE_ADDR_MASK);
+                            child_pte &= ~(PTE_AP_EL0_RW | PTE_AP_EL1_RW); // clear write bits
+                            child_pte |= PTE_AP_EL0_RO; // set EL0 read-only
+                            dst_l3[l] = child_pte | DESC_VALID | DESC_PAGE;
 
-                        inc_pte_refcount_pa(src_pa);
+                            inc_pte_refcount_pa(src_pa);
+                        } else { // page already readonly -> share to dst
+                            dst_l3[l] = src_l3[l];
+                            inc_pte_refcount_pa(src_pa);
+                        }
                     }
                 }
 	        }

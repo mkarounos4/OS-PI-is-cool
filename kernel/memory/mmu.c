@@ -328,7 +328,71 @@ void handle_data_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t esr) {
 
         fatal_exception("Data Abort: access flag set to 0");
     } else if (fsc < PERMISSION_FAULT + 4) {
-        fatal_exception("Data Abort: Permission fault");
+        // permission fault: attempt to handle COW write fault
+        if (!far_valid) fatal_exception("Data Abort: Permission fault, invalid far"); return;
+        if (!is_write) fatal_exception("Data Abort: Permission fault, read"); return;
+        if ((far >> 48) == 0xFFFF) fatal_exception("Data Abort: Permission fault, kernel addres"); return;
+        pcb_t *curr_proc = get_curr_process();
+        if (curr_proc == NULL) fatal_exception("Data Abort: Permission fault, user address; no process"); return;
+
+        // walk page table
+        uint64_t table_base_va = kernel_direct_map_va(curr_proc->ctx.ttbr0_el1);
+        uint64_t *l0 = (uint64_t *)(uintptr_t)table_base_va;
+
+        uint64_t va = far;
+        uint64_t l0_index = (va >> 39) & 0x1ffULL;
+        uint64_t l1_index = (va >> 30) & 0x1ffULL;
+        uint64_t l2_index = (va >> 21) & 0x1ffULL;
+        uint64_t l3_index = (va >> 12) & 0x1ffULL;
+
+        if ((l0[l0_index] & DESC_VALID) == 0) fatal_exception("Data Abort COW: missing L0 entry"); return;
+        uint64_t *l1 = (uint64_t *)(uintptr_t)kernel_direct_map_va(l0[l0_index] & PTE_ADDR_MASK);
+        if ((l1[l1_index] & DESC_VALID) == 0) fatal_exception("Data Abort COW: missing L1 entry"); return;
+        uint64_t *l2 = (uint64_t *)(uintptr_t)kernel_direct_map_va(l1[l1_index] & PTE_ADDR_MASK);
+        if ((l2[l2_index] & DESC_VALID) == 0) fatal_exception("Data Abort COW: missing L2 entry"); return;
+        uint64_t *l3 = (uint64_t *)(uintptr_t)kernel_direct_map_va(l2[l2_index] & PTE_ADDR_MASK);
+        if ((l3[l3_index] & DESC_VALID) == 0) fatal_exception("Data Abort COW: missing L3 entry"); return;
+
+        uint64_t *pte_ptr = &l3[l3_index];
+        uint64_t pte_val = *pte_ptr;
+
+        // ensure page descriptor and user mapping
+        if ((pte_val & DESC_VALID) == 0) fatal_exception("Data Abort COW: not a page descriptor"); return;
+        if (!pte_is_user(pte_val)) fatal_exception("Data Abort COW: permission fault on non-user page"); return;
+
+        uint64_t pa = pte_val & PTE_ADDR_MASK;
+
+        if (!pte_test_cow_flag(pa, PTE_FLAG_COW)) fatal_exception("Data Abort COW: write to non-COW read-only page"); return;
+
+        uint16_t refcnt = get_pte_refcount_pa(pa);
+        if (refcnt > 1) { // multiple page owners
+            // allocate new page and copy
+            void *new_page_va = alloc_page();
+            if (new_page_va == NULL) fatal_exception("Data Abort COW: out of memory allocating copy page"); return;
+
+            uint64_t new_pa = kernel_phys_addr((uint64_t)(uintptr_t)new_page_va);
+            if (!copy_phys_page(pa, new_pa)) {
+                free_page(new_page_va);
+                fatal_exception("Data Abort COW: failed to copy physical page");
+                return;
+            }
+
+            // decrement refcount for shared page
+            dec_pte_refcount_pa(pa);
+
+            // update PTE, preserve attrs, make writable, clear COW metadata
+            uint64_t attrs = pte_val & ~PTE_ADDR_MASK;
+            *pte_ptr = (new_pa & PTE_ADDR_MASK) | attrs;
+            pte_clear_cow_and_make_writable(pte_ptr);
+
+            invalidate_all_stage1_tlbs();
+            return;
+        } else { // sole owner of page
+            pte_clear_cow_and_make_writable(pte_ptr);
+            pte_clear_cow_flag(pa, PTE_FLAG_COW);
+            invalidate_all_stage1_tlbs();
+            return;
+        }
     } else if (fsc == SYNC_EXT_ABORT_NON_WALK) {
         fatal_exception("Data Abort: synchronous external abort");
     } else if (fsc == SYNC_TAG_CHECK_FAULT) {

@@ -6,6 +6,7 @@
 #define PAGE_TABLE_ENTRIES 512ULL
 #define PTE_ADDR_MASK     UINT64_C(0x0000fffffffff000)
 #define DESC_VALID        (1ULL << 0)
+#define DESC_PAGE (1ULL << 1)
 #define KERNEL_VA_BASE UINT64_C(0xffff000000000000)
 #define KERNEL_HEAP_START UINT64_C(0xffff800000000000)
 #define KERNEL_HEAP_SIZE  UINT64_C(0x100000)
@@ -30,6 +31,7 @@ typedef struct Page {
 } Page;
 
 void pt_init(struct Page *pages);
+static uint64_t kernel_phys_addr(uint64_t va);
 
 void *alloc_page(void);
 void free_page(void *page);
