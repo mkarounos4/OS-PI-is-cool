@@ -10,10 +10,6 @@
 
 static pcb_t processes[MAX_PROCESS_COUNT];
 
-static uint64_t kernel_phys_addr(uint64_t va) {
-    return va & PA_MASK;
-}
-
 static void __attribute__((noreturn)) process_first_run(void) {
     struct trap_frame *frame;
     asm volatile ("mov %0, x19" : "=r"(frame));
@@ -353,7 +349,7 @@ pid_t fork(struct trap_frame *frame) {
     }
     
     // save_curr_context(&child->ctx);
-    // add_task_to_scheduler(child);
+    add_task_to_scheduler(child);
     // return child pid to parent's call
     return child->pid;
 }

@@ -166,7 +166,7 @@ uint64_t kernel_direct_map_va(uint64_t pa) {
   return KERNEL_VA_BASE | (pa & PA_MASK);
 }
 
-static uint64_t kernel_phys_addr(uint64_t va) { return va & PA_MASK; }
+uint64_t kernel_phys_addr(uint64_t va) { return va & PA_MASK; }
 
 uint64_t table_desc(uint64_t *table) {
   return ((uint64_t)(uintptr_t)table & PTE_ADDR_MASK) | DESC_VALID | DESC_TABLE;
@@ -465,7 +465,7 @@ void inc_pte_refcount_pa(uint64_t phys_pa) {
     pages[pfn].refcount++;
 }
 
-void dec_pte_refount_pa(uint64_t phys_pa) {
+void dec_pte_refcount_pa(uint64_t phys_pa) {
     int64_t pfn = phys_pa_to_pfn(phys_pa);
     if (pfn < 0) return;
     if (pages[pfn].refcount == 0) {

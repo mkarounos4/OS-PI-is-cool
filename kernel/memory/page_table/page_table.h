@@ -31,7 +31,7 @@ typedef struct Page {
 } Page;
 
 void pt_init(struct Page *pages);
-static uint64_t kernel_phys_addr(uint64_t va);
+uint64_t kernel_phys_addr(uint64_t va);
 
 void *alloc_page(void);
 void free_page(void *page);

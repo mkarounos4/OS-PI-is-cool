@@ -28,10 +28,6 @@ static int curr_pri = 0;
 
 static void scheduler_tick(void *ctx);
 
-static uint64_t kernel_phys_addr(uint64_t va) {
-    return va & PA_MASK;
-}
-
 static void set_ready_to_schedule(void *ctx) {
     ready_to_schedule = 1;
     ready_ctx = ctx;
