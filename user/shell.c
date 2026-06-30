@@ -293,7 +293,10 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
 
     if (parsed_cmd->num_commands == 1) {
         // if only one command, fork and exec
+        printf("start\n");
         pid_t pid = fork();
+        putstr("REACHED\n");
+        printf("pid: %d\n", pid);
 
         // Exec child
         if (pid == 0) {

@@ -10,7 +10,7 @@
 #include "memory/page_table/page_table.h"
 #include "memory/kmalloc.h"
 
-#define SCHEDULER_QUANTUM_MS 10u
+#define SCHEDULER_QUANTUM_MS 1000u
 #define PA_MASK UINT64_C(0x0000ffffffffffff)
 
 static pcb_t *curr_proc;
@@ -182,7 +182,7 @@ void scheduler_tick(void *ctx) {
     }
 
     // If next thread exists, run it
-    // scheduler_print_tick(old_pid, new_pid);
+    scheduler_print_tick(old_pid, new_pid);
     
     // Setup next scheduler interrupt
     timer_schedule_interrupt_ms(SCHEDULER_QUANTUM_MS, set_ready_to_schedule, 0);

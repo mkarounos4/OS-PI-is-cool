@@ -54,6 +54,7 @@ struct cpu_context {
 };
 
 void context_switch(struct cpu_context *old_ctx, struct cpu_context *new_ctx);
+void save_curr_context(struct cpu_context *curr_ctx);
 void context_switch_to(struct cpu_context *new_ctx);
 void trap_frame_restore(struct trap_frame *frame) __attribute__((noreturn));
 

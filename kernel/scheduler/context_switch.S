@@ -85,3 +85,23 @@ context_switch_to:
     mov sp, x2
 
     ret
+
+.global save_curr_context
+save_curr_context:
+    // Save callee saved registers
+    stp x19, x20, [x0, #CPU_CTX_X19]
+    stp x21, x22, [x0, #CPU_CTX_X21]
+    stp x23, x24, [x0, #CPU_CTX_X23]
+    stp x25, x26, [x0, #CPU_CTX_X25]
+    stp x27, x28, [x0, #CPU_CTX_X27]
+    stp x29, x30, [x0, #CPU_CTX_X29]
+
+    // Save SP
+    mov x2, sp
+    str x2, [x0, #CPU_CTX_SP]
+
+    // Save TTBR0_EL1 physical
+    mrs x2, ttbr0_el1
+    str x2, [x0, #CPU_CTX_TTBR0_EL1]
+
+    ret

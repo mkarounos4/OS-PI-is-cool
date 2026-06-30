@@ -74,7 +74,7 @@ void processes_init();
 pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid);
 void proc_destroy(pcb_t *p);
 long s_waitpid_impl(pid_t pid, int *status, int32_t flags);
-pid_t fork();
+pid_t fork(struct trap_frame *frame);
 
 void terminate_process(pcb_t *pcb);
 void stop_process(pcb_t *pcb);
@@ -86,3 +86,4 @@ void send_unblock_event(pid_t pid, uint32_t event);
 pid_t getpgid();
 int setpgrp(pid_t pid, pid_t pgid);
 int dup2(int oldfd, int newfd);
+

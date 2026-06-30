@@ -69,6 +69,7 @@ static long s_spawn(void* (*func)(void*), void *argv) {
     if (new_pcb == NULL) {
         return -1;
     }
+    add_task_to_scheduler(new_pcb);
 
     return new_pcb->pid;
 }
@@ -233,7 +234,9 @@ struct trap_frame *syscall_dispatch(struct trap_frame *frame) {
                         (struct sigaction *)(uintptr_t)frame->regs[2]);
         break;
     case S_FORK:
-        ret = fork();
+        printf("frame; %X", frame->elr);
+        ret = fork(frame);
+        printf("frame; %X", frame->elr);
         break;
     case S_DUP2:
         ret = dup2((pid_t)frame->regs[0], (pid_t)frame->regs[1]);

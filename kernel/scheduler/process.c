@@ -208,8 +208,6 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     new_proc->ctx.ttbr0_el1 = kernel_phys_addr((uint64_t)user_l0);
     new_proc->ctx.ttbr0_el1_va = (uint64_t)user_l0;
 
-    add_task_to_scheduler(new_proc);
-
     return new_proc->pid;
 }
 
@@ -269,7 +267,8 @@ void processes_init() {
         processes[i].pid = i;
     }
 
-    proc_create((void *(*)(void *))(uintptr_t)USER_INIT_PROCESS_ENTRY, NULL, 0);
+    pid_t pid = proc_create((void *(*)(void *))(uintptr_t)USER_INIT_PROCESS_ENTRY, NULL, 0);
+    add_task_to_scheduler(get_pcb_by_pid(pid));
 }
 
 void cpy_address_space(pcb_t *src, pcb_t *dst) {
@@ -338,22 +337,12 @@ void cpy_address_space(pcb_t *src, pcb_t *dst) {
     tlb_invalidate_all_user();
 }
 
-pid_t fork() {
+pid_t fork(struct trap_frame *frame) {
     // create child process off of parent
     pcb_t *parent = get_curr_process();
     pid_t child_pid = proc_create(parent->entry_func, parent->args, parent->pid);
     if (child_pid < 0) return -1;
     pcb_t *child = get_pcb_by_pid(child_pid); 
-    
-    // cpy parent trap frame over to child
-    uint64_t parent_frame_va = parent->ctx.x19;
-    struct trap_frame *parent_frame = (struct trap_frame *)(uintptr_t)parent_frame_va;
-    uint64_t child_frame_va = child->ctx.x19;
-    struct trap_frame *child_frame = (struct trap_frame *)(uintptr_t)child_frame_va;
-    *child_frame = *parent_frame;
-
-    // modify child return register
-    child_frame->regs[0] = 0;
 
     cpy_address_space(parent, child);
 
@@ -364,6 +353,8 @@ pid_t fork() {
         k_file_add_reference((int)(uintptr_t) fd);
     }
     
+    save_curr_context(&child->ctx);
+    add_task_to_scheduler(child);
     // return child pid to parent's call
     return child->pid;
 }
