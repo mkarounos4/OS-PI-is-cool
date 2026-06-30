@@ -1,4 +1,5 @@
 #include "dirs.h"
+#include "devices.h"
 
 err_t add_dirent(const char* name, ino_id_t ino_id, ino_id_t curr_dir) {
     struct fs_dirent *dir = kmalloc(get_bytes_per_block());
@@ -100,7 +101,7 @@ err_t add_dirent_by_path(char *f_path, int file_type, int perm) {
     }
 
     block_no_t block;
-    err_t err = add_new_file_with_id(&block, file_type, perm);
+    err_t err = add_new_file_with_id(&block, file_type, perm, get_default_fops());
     if (err) {
         kfree(f_path_mut_root);
         return err;

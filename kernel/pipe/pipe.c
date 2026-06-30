@@ -15,8 +15,8 @@
 
 int pipe_open(struct oft_entry *entry);
 int pipe_close(struct oft_entry *entry);
-ssize_t pipe_read(struct oft_entry *entry, char *buffer, size_t count);
-ssize_t pipe_write(struct oft_entry *entry, const char *buffer, size_t count);
+int pipe_read(struct oft_entry *entry, char *buffer, size_t count);
+int pipe_write(struct oft_entry *entry, const char *buffer, size_t count);
 
 static const struct file_operations pipe_ops = {
     .open = pipe_open,
@@ -48,7 +48,7 @@ int pipe(int pipefd[2]) {
 
 
     ino_id_t ino_id;
-    err_t err = add_new_file_inode(&ino_id, PIPE_TYPE, 0x7);
+    err_t err = add_new_file_inode(&ino_id, PIPE_TYPE, 0x7, &pipe_ops);
     if (err) {
         return err;
     }
@@ -62,7 +62,6 @@ int pipe(int pipefd[2]) {
         return err;
     }
 
-    metadata.fops = &pipe_ops;
     metadata.i_pipe = pipe;
 
     err = set_inode_metadata(ino_id, &metadata);
@@ -126,7 +125,7 @@ int pipe_close(struct oft_entry *entry) {
     return 0;
 }
 
-ssize_t pipe_read(struct oft_entry *entry, char *buffer, size_t count) {
+int pipe_read(struct oft_entry *entry, char *buffer, size_t count) {
     struct pipe_st *pipe = entry->inode->inode.metadata.i_pipe;
 
     pcb_t *curr_pcb = get_curr_process();
@@ -158,7 +157,7 @@ ssize_t pipe_read(struct oft_entry *entry, char *buffer, size_t count) {
     return num_read;
 }
 
-ssize_t pipe_write(struct oft_entry *entry, const char *buffer, size_t count) {
+int pipe_write(struct oft_entry *entry, const char *buffer, size_t count) {
     struct pipe_st *pipe = entry->inode->inode.metadata.i_pipe;
 
     pcb_t *curr_pcb = get_curr_process();

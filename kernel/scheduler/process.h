@@ -65,6 +65,8 @@ typedef struct pcb_st {
     signalset_t pending_signals;
     
     struct sigaction sigactions[32];
+
+    int priority;
 } pcb_t;
 
 pcb_t *get_pcb_by_pid(pid_t pid);

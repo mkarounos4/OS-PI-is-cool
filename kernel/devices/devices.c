@@ -38,7 +38,7 @@ int devfs_create_char_device(struct dev_st rdev) {
         return -1;
     }
 
-    int ino = add_new_file(NULL, CHAR_DRIVER_TYPE, 0x7);
+    int ino = add_new_file(NULL, CHAR_DRIVER_TYPE, 0x7, char_device_registry[rdev.major]->fops);
     if (ino < 0) {
         return -1;
     }
@@ -50,7 +50,6 @@ int devfs_create_char_device(struct dev_st rdev) {
     }
 
     inode.metadata.i_rdev = rdev;
-    inode.metadata.fops = char_device_registry[rdev.major]->fops;
     
     err = write_inode(&inode, ino);
     if (err) {

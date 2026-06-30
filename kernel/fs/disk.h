@@ -107,7 +107,7 @@ err_t free_file(const char* f_name);
  * @param perm Initial permission bits for the inode.
  * @return SUCCESS on success, or a negative error code on failure.
  */
-err_t add_new_file(struct oft_entry **entry, int file_type, uint8_t perm);
+err_t add_new_file(struct oft_entry **entry, int file_type, uint8_t perm, struct file_operations *fops);
 
 /**
  * @brief Allocate a new file and return just its first-block
@@ -120,7 +120,7 @@ err_t add_new_file(struct oft_entry **entry, int file_type, uint8_t perm);
  * @param perm Initial permission bits for the inode.
  * @return SUCCESS on success, or a negative error code on failure.
  */
-err_t add_new_file_with_id(block_no_t* new_block, int file_type, uint8_t perm);
+err_t add_new_file_with_id(block_no_t* new_block, int file_type, uint8_t perm, struct file_operations *fops);
 
 // ============================================================
 // HELPER FUNCTIONS

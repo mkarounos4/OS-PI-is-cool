@@ -3,6 +3,7 @@
 #include "cmds.h"
 #include "disk.h"
 #include "kapi.h"
+#include "oft.h"
 #include "scheduler/scheduler.h"
 
 int open(const char *fname, int mode) {
@@ -43,11 +44,17 @@ int close(int fd) {
         return INVALID_ARGS;
     }
 
-    err_t err = k_close((int)(uintptr_t)vec_get(&pcb->file_descriptors, fd));
+    int k_fd = (int)(uintptr_t)vec_get(&pcb->file_descriptors, fd);
+    struct oft_entry *entry;
+    err_t err = get_oft_entry_by_fd(k_fd, &entry);
+
+    err = k_close(entry);
     if (err) {
         return err;
     }
     vec_set(&pcb->file_descriptors, -1, (void *)(uintptr_t)fd);
+
+    return SUCCESS;
 }
 
 int read(int fd, char *buf, int n) {
@@ -65,12 +72,16 @@ int read(int fd, char *buf, int n) {
         struct oft_entry *entry;
         err_t err = get_oft_entry_by_fd(kfd, &entry);
         if (err) {
-            printf("WhAAA\n");
             return err;
         }
         int mode;
     }
-    return k_read((int)(uintptr_t)vec_get(&pcb->file_descriptors, fd), buf, n);
+
+    int k_fd = (int)(uintptr_t)vec_get(&pcb->file_descriptors, fd);
+    struct oft_entry *entry;
+    err_t err = get_oft_entry_by_fd(k_fd, &entry);
+
+    return k_read(entry, buf, n);
 }
 
 int write(int fd, char *buf, int n) {
@@ -84,7 +95,10 @@ int write(int fd, char *buf, int n) {
     }
 
     int k_fd = (int)(uintptr_t)vec_get(&pcb->file_descriptors, fd);
-    return k_write(k_fd, buf, n);
+    struct oft_entry *entry;
+    err_t err = get_oft_entry_by_fd(k_fd, &entry);
+
+    return k_write(entry, buf, n);
 }
 
 int lseek(int fd, int offset, int whence) {

@@ -4,6 +4,20 @@
 #include "dirs.h"
 #include "devices/devices.h"
 
+int default_read(struct oft_entry *entry, char *buf, size_t n);
+int default_write(struct oft_entry *entry, const char *buf, size_t n);
+
+const static struct file_operations default_ops = (struct file_operations) {
+    .open = NULL,
+    .close = NULL,
+    .read = default_read,
+    .write = default_write,
+};
+
+struct file_operations *get_default_fops() {
+    return &default_ops;
+}
+
 int k_open(const char *fname, int mode) {
     // Return if not mounted
     if (!get_is_mounted()) {
@@ -70,37 +84,26 @@ int k_open(const char *fname, int mode) {
     return fd;
 }
 
-int k_close(int fd) {
+int k_close(struct oft_entry *entry) {
     // Return if not mounted
     if (!get_is_mounted()) {
         return FS_NOT_MOUNTED;
     }
 
-    struct oft_entry *entry;
-    err_t err = get_oft_entry_by_fd(fd, &entry);
-    if (err) {
-        return err;
-    }
     if (entry->inode->inode.metadata.fops != NULL) {
-        err = entry->inode->inode.metadata.fops->close(entry);
+        err_t err = entry->inode->inode.metadata.fops->close(entry);
         if (err) {
             return err;
         }
     }
 
-    return oft_close_file(fd);
+    return oft_close_file(entry);
 }
 
-int k_read(int fd, char *buf, int n) {
+int k_read(struct oft_entry *entry, char *buf, size_t n) {
     // Return if not mounted
     if (!get_is_mounted()) {
         return FS_NOT_MOUNTED;
-    }
-
-    int tot_bytes_read = 0;
-    struct oft_entry* entry;
-    if (get_oft_entry_by_fd(fd, &entry) == OFT_FD_DOES_NOT_EXIST) {
-        return OFT_FD_DOES_NOT_EXIST;
     }
 
     if (!(entry->mode & O_RDONLY)) {
@@ -110,7 +113,11 @@ int k_read(int fd, char *buf, int n) {
     if (entry->inode->inode.metadata.fops != NULL) {
         return entry->inode->inode.metadata.fops->read(entry, buf, n);
     }
+    return 0;
+}
 
+int default_read(struct oft_entry *entry, char *buf, size_t n) {
+    int tot_bytes_read = 0;
     int size = get_file_size(entry);
     if (entry->cursor >= (uint32_t) size) {
         return 0;
@@ -182,17 +189,12 @@ int k_file_add_reference(int fd) {
     return oft_add_reference(fd);
 }
 
-int k_write(int fd, char *buf, int n) {
+int k_write(struct oft_entry *entry, const char *buf, size_t n) {
     // Return if not mounted
     if (!get_is_mounted()) {
         return FS_NOT_MOUNTED;
     }
 
-    int tot_bytes_written = 0;
-    struct oft_entry* entry;
-    if (get_oft_entry_by_fd(fd, &entry) == OFT_FD_DOES_NOT_EXIST) {
-        return OFT_FD_DOES_NOT_EXIST;
-    }
 
     if (!(entry->mode & O_WRONLY)) {
         return INVALID_PERMISSIONS;
@@ -201,7 +203,12 @@ int k_write(int fd, char *buf, int n) {
     if (entry->inode->inode.metadata.fops != NULL) {
         return entry->inode->inode.metadata.fops->write(entry, buf, n);
     }
-    
+    return 0;
+}
+
+int default_write(struct oft_entry *entry, const char *buf, size_t n) {
+    int tot_bytes_written = 0;
+
     // Move real cursor to correct position in binary file, do special math for first offset.
     int size = get_file_size(entry);
     uint32_t offset;

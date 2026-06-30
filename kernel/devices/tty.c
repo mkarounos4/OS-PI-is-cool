@@ -4,7 +4,7 @@
 
 int tty_open(struct oft_entry *entry);
 int tty_close(struct oft_entry *entry);
-ssize_t tty_read(struct oft_entry *entry, char *buffer, size_t count);
+int tty_read(struct oft_entry *entry, char *buffer, size_t count);
 
 static struct tty_driver_state tty_state;
 
@@ -88,7 +88,7 @@ int tty_close(struct oft_entry *entry) {
     return 0;
 }
 
-ssize_t tty_read(struct oft_entry *entry, char *buffer, size_t count) {
+int tty_read(struct oft_entry *entry, char *buffer, size_t count) {
     uint16_t minor = entry->inode->inode.metadata.i_rdev.minor;
 
     struct tty_device *curr_tty = tty_state.devices[minor];
@@ -122,7 +122,7 @@ ssize_t tty_read(struct oft_entry *entry, char *buffer, size_t count) {
     return num_read;
 }
 
-ssize_t tty_write(struct oft_entry *entry, const char *buffer, size_t count) {
+int tty_write(struct oft_entry *entry, const char *buffer, size_t count) {
     (void)entry;
     /*uint16_t minor = entry->inode->inode.metadata.i_rdev.major;
 

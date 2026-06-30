@@ -938,7 +938,7 @@ err_t free_file_inode(struct cached_inode_st *cache_inode) {
     return clear_blocks_of_inode(inode, 0);
 }
 
-err_t add_new_file_inode(ino_id_t *inode_num, int file_type, uint8_t perm) {
+err_t add_new_file_inode(ino_id_t *inode_num, int file_type, uint8_t perm, struct file_operations *fops) {
     // If return params are NULL, give temp values to not cause null reference errors
     if (inode_num == NULL) {
         ino_id_t inode_temp = 0;
@@ -969,7 +969,7 @@ err_t add_new_file_inode(ino_id_t *inode_num, int file_type, uint8_t perm) {
     new_node->metadata.perm = perm;
     new_node->metadata.i_blocks = 0;
     new_node->metadata.mtime = timer_get_ticks();
-    new_node->metadata.fops = NULL;
+    new_node->metadata.fops = fops;
     new_node->metadata.i_pipe = NULL;
 
     // Write data back

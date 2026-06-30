@@ -68,7 +68,7 @@ int oft_open_file(int mode, const char *file_name, ino_id_t ino_id, ino_id_t dir
  * @param oft_id Index into the OFT (same as kernel fd for regular files).
  * @return SUCCESS (0) on success, or a negative err_t on failure.
  */
-int oft_close_file(int oft_id);
+int oft_close_file(struct oft_entry *entry);
 
 /**
  * @brief Find the OFT index for a file already open.
