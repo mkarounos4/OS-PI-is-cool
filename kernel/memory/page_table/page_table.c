@@ -4,6 +4,7 @@
 #include "traps.h"
 #include <stddef.h>
 #include <stdint.h>
+#include "uart.h"
 
 #include "user_image.h"
 

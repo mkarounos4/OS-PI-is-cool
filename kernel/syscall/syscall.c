@@ -234,9 +234,7 @@ struct trap_frame *syscall_dispatch(struct trap_frame *frame) {
                         (struct sigaction *)(uintptr_t)frame->regs[2]);
         break;
     case S_FORK:
-        printf("frame; %X", frame->elr);
         ret = fork(frame);
-        printf("frame; %X", frame->elr);
         break;
     case S_DUP2:
         ret = dup2((pid_t)frame->regs[0], (pid_t)frame->regs[1]);

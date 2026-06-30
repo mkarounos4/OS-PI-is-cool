@@ -273,7 +273,6 @@ void processes_init() {
 
 void cpy_address_space(pcb_t *src, pcb_t *dst) {
     uint64_t *src_l0 = (uint64_t *)src->ctx.ttbr0_el1_va;
-    printf("test %X\n", src_l0);
     uint64_t *dst_l0 = (uint64_t *)alloc_page();
     if (dst_l0 == NULL) return;
     dst->ctx.ttbr0_el1 = (uint64_t)(uintptr_t)kernel_phys_addr((uint64_t)(uintptr_t)dst_l0);
@@ -334,7 +333,7 @@ void cpy_address_space(pcb_t *src, pcb_t *dst) {
 	        }
 	    }
     }
-    tlb_invalidate_all_user();
+    // tlb_invalidate_all_user();
 }
 
 pid_t fork(struct trap_frame *frame) {
@@ -353,9 +352,8 @@ pid_t fork(struct trap_frame *frame) {
         k_file_add_reference((int)(uintptr_t) fd);
     }
     
-    save_curr_context(&child->ctx);
-    add_task_to_scheduler(child);
-    
+    // save_curr_context(&child->ctx);
+    // add_task_to_scheduler(child);
     // return child pid to parent's call
     return child->pid;
 }

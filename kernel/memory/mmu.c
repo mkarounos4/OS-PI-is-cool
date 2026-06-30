@@ -167,6 +167,8 @@ void install_kernel_page_table(void) {
         : "memory");
 }
 
+static void dump_mmu_state(void);
+
 void handle_instruction_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t esr) {
     (void)far;
     (void)elr;
@@ -179,6 +181,7 @@ void handle_instruction_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t
     } else if (fsc < ACCESS_FLAG_FAULT + 4) {
         fatal_exception("Instruction Abort: access flag set to 0");
     } else if (fsc < PERMISSION_FAULT + 4) {
+        dump_mmu_state();
         fatal_exception("Instruction Abort: Permission fault");
     } else if (fsc == SYNC_EXT_ABORT_NON_WALK) {
         fatal_exception("Instruction Abort: synchronous external abort");
