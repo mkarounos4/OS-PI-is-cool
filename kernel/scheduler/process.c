@@ -355,6 +355,7 @@ pid_t fork(struct trap_frame *frame) {
     
     save_curr_context(&child->ctx);
     add_task_to_scheduler(child);
+    
     // return child pid to parent's call
     return child->pid;
 }
