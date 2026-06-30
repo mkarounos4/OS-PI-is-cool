@@ -54,7 +54,7 @@ int oft_open_file(int mode, const char *file_name, ino_id_t ino_id, ino_id_t dir
         struct fs_dirent dir;
         err = get_dirent_by_f_name(file_name, FILE_TYPE, &dir, dir_block);
         if (err != SUCCESS) {
-            add_new_file(&new_entry, FILE_TYPE, 6);
+            add_new_file(&new_entry, FILE_TYPE, 6, get_default_fops());
             err = add_dirent(file_name, new_entry->ino_id, dir_block);
             if (err) {
                 return err;
@@ -86,22 +86,36 @@ int oft_add_reference(int fd) {
     return SUCCESS;
 }
 
-int oft_close_file(int oft_id) {
-    if (oft_id > vec_len(&open_file_table)) {
+int oft_close_file(struct oft_entry *entry) {
+    if (entry == NULL) {
+        return INVALID_ARGS;
+    }
+
+    int oft_id = -1;
+    for (int i = 0; i < vec_len(&open_file_table); i++) {
+        void *elem_void = vec_get(&open_file_table, i);
+        if (elem_void == NULL) {
+            continue;
+        }
+
+        struct oft_entry *curr = (struct oft_entry*) elem_void;
+        if (curr != entry) {
+            continue;
+        }
+
+        oft_id = i;
+        break;
+    }
+
+    if (oft_id == -1) {
         return FILE_NOT_FOUND;
     }
 
-    void *elem_void = vec_get(&open_file_table, oft_id);
-    if (elem_void == NULL) {
-        return FILE_NOT_FOUND;
-    }
-
-    struct oft_entry *entry = (struct oft_entry*) elem_void;
     entry->ref_count--;
     if (entry->ref_count == 0) {
         if (vec_len(&open_file_table) == oft_id + 1) {
             vec_pop_back(&open_file_table, NULL);
-            entry_deletor(elem_void);
+            entry_deletor((void*)entry);
         } else {
             vec_set(&open_file_table, oft_id, NULL);
         }

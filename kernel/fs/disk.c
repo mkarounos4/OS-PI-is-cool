@@ -754,9 +754,9 @@ err_t clear_blocks_of_file_by_id(ino_id_t id) {
     return to_ret;
 }
 
-int add_new_file(struct oft_entry **entry, int file_type, uint8_t perm) {
+int add_new_file(struct oft_entry **entry, int file_type, uint8_t perm, struct file_operations *fops) {
     ino_id_t ino_id;
-    err_t error = add_new_file_inode(&ino_id, file_type, perm);
+    err_t error = add_new_file_inode(&ino_id, file_type, perm, fops);
     if (error != SUCCESS) {
         return error;
     }
@@ -769,8 +769,8 @@ int add_new_file(struct oft_entry **entry, int file_type, uint8_t perm) {
     return ino_id;
 }
 
-err_t add_new_file_with_id(block_no_t* new_block, int file_type, uint8_t perm) {
-    return add_new_file_inode(new_block, file_type, perm);
+err_t add_new_file_with_id(block_no_t* new_block, int file_type, uint8_t perm, struct file_operations *fops) {
+    return add_new_file_inode(new_block, file_type, perm, fops);
 }
 
 err_t remove_last_block(ino_id_t id_in_fs) {

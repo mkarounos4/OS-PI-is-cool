@@ -227,7 +227,7 @@ err_t free_file_inode(struct cached_inode_st *cache_inode);
  * @return SUCCESS on success, INODE_FULL if no free inode slots,
  * or a negative error code on failure.
  */
-err_t add_new_file_inode(ino_id_t *inode_num, int file_type, uint8_t perm);
+err_t add_new_file_inode(ino_id_t *inode_num, int file_type, uint8_t perm, struct file_operations *fops);
 
 /**
  * @brief Read an inode directly from disk, bypassing the inode cache.

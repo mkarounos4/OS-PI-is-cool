@@ -2,6 +2,7 @@
 
 #include "errors.h"
 #include "memory/kmalloc.h"
+#include "oft.h"
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
@@ -36,7 +37,7 @@ int k_open(const char *fname, int mode);
  * @param fd Kernel file descriptor returned by k_open.
  * @return SUCCESS (0) on success, or a negative err_t on failure.
  */
-int k_close(int fd);
+int k_close(struct oft_entry *entry);
 
 /**
  * @brief Read at most n bytes from the file at fd into buf.
@@ -46,7 +47,7 @@ int k_close(int fd);
  * @param n Maximum number of bytes to read.
  * @return Number of bytes read, 0 on EOF, or a negative err_t on error.
  */
-int k_read(int fd, char *buf, int n);
+int k_read(struct oft_entry *entry, char *buf, size_t n);
 
 /**
  * @brief Write at most n bytes from buf into the file at fd.
@@ -56,7 +57,7 @@ int k_read(int fd, char *buf, int n);
  * @param n Number of bytes to write.
  * @return Number of bytes written on success, or a negative err_t on error.
  */
-int k_write(int fd, char *buf, int n);
+int k_write(struct oft_entry *entry, const char *buf, size_t n);
 
 /**
  * @brief Update the modification time on the dirent for file_name.
@@ -155,3 +156,5 @@ int k_change_directory(char *f_path);
  * @return true if executable, false otherwise.
  */
 bool k_check_if_executable(char *f_name);
+
+struct file_operations *get_default_fops();
