@@ -154,6 +154,7 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     new_proc->name = NULL;
     new_proc->entry_func = func;
     new_proc->args = args;
+    new_proc->priority = 1;
 
     uint64_t *user_l0 = initialize_user_page_table();
     if (user_l0 == NULL) {

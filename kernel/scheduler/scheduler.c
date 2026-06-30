@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 
+#include "process.h"
 #include "timer/timer.h"
 #include "uart/uart.h"
 #include "syscall/syscall.h"
@@ -12,14 +13,6 @@
 #define SCHEDULER_QUANTUM_MS 10u
 #define PA_MASK UINT64_C(0x0000ffffffffffff)
 
-struct sched_task_node {
-    pcb_t *pcb;
-    struct sched_task_node *next;
-};
-struct sched_task_node *sched_queue_head;
-struct sched_task_node *sched_queue_tail;
-int sched_queue_size;
-
 static pcb_t *curr_proc;
 static uint64_t curr_tick;
 
@@ -27,6 +20,11 @@ static struct cpu_context boot_ctx;
 static struct cpu_context idle_ctx;
 static volatile int ready_to_schedule = 0;
 static void *ready_ctx = NULL;
+
+static Vec pri_qs[3];
+static int pri_counters[3] = {0, 0, 0};
+static const int MAX_PRI_CNTRS[3] = {9, 6, 4};
+static int curr_pri = 0;
 
 static void scheduler_tick(void *ctx);
 
@@ -39,71 +37,51 @@ static void set_ready_to_schedule(void *ctx) {
     ready_ctx = ctx;
 }
 
-
-static void add_sched_queue_node(pcb_t *pcb) {
-    if (pcb == NULL) {
-        return;
-    }
-
-    struct sched_task_node *new_node = kmalloc(sizeof(struct sched_task_node));
-    if (new_node == NULL) {
-        uart_puts("ERROR: failed to allocate scheduler queue node\n");
-        return;
-    }
-
-    new_node->pcb = pcb;
-    new_node->next = NULL;
-
-    if (sched_queue_tail == NULL) {
-        sched_queue_head = new_node;
-        sched_queue_tail = new_node;
-    } else {
-        sched_queue_tail->next = new_node;
-        sched_queue_tail = new_node;
-    }
-
-    sched_queue_size++;
+void add_task_to_scheduler(pcb_t *task) {
+    vec_insert(&(pri_qs[task->priority]), 0, (ptr_t *) task);
 }
 
-static pcb_t *pop_sched_queue() {
-    if (sched_queue_size == 0) {
-        return NULL;
+// Runs 4 quantum on 2, 6 on 1, and 9 on 0
+static pcb_t *get_next_task() {
+    for (int i = 0; i < 3; i++) {
+        if (!vec_is_empty(&(pri_qs[curr_pri]))) {
+            ptr_t to_return;
+            vec_pop_back(&(pri_qs[curr_pri]), &to_return);
+            pcb_t *pcb = (pcb_t*) to_return;
+            if (pcb->state != PROC_READY_STATE) {
+                return get_next_task();
+            }
+
+            pri_counters[curr_pri]++;
+            if (pri_counters[curr_pri] > MAX_PRI_CNTRS[curr_pri]) {
+                pri_counters[curr_pri] = 0;
+                curr_pri = (curr_pri+1) % 3;
+            }
+            return pcb;
+        }
+
+        curr_pri = (curr_pri+1) % 3;
     }
 
-    struct sched_task_node *task_node = sched_queue_head;
-    if (sched_queue_size == 1) {
-        sched_queue_head = NULL;
-        sched_queue_tail = NULL;
-    } else {
-        sched_queue_head = sched_queue_head->next;
-    }
-
-    pcb_t *ret = task_node->pcb;
-    kfree(task_node);
-    sched_queue_size--;
-    if (ret->state != PROC_READY_STATE) {
-        return pop_sched_queue();
-    }
-    return ret;
+    return NULL;
 }
 
-void idle_task_fn(void*) {
+void idle_task_fn(void* args) {
+    (void)args;
     while (1) {
         asm volatile ("wfe");
     }
 }
 
-void add_task_to_scheduler(pcb_t *pcb) {
-    add_sched_queue_node(pcb);
-}
-
 void scheduler_init(void) {
     curr_tick = 0;
     curr_proc = NULL;
+    curr_pri = 0;
 
-    sched_queue_head = NULL;
-    sched_queue_tail = NULL;
-    sched_queue_size = 0;
+    for (int i = 0; i < 3; i++) {
+        pri_qs[i] = vec_new(2, NULL);
+        pri_counters[i] = 0;
+    }
 
     processes_init();
 
@@ -136,7 +114,7 @@ void scheduler_init(void) {
 // Starts execution at thread 0. Does not return.
 void scheduler_start(void) {
     timer_schedule_interrupt_ms(SCHEDULER_QUANTUM_MS, set_ready_to_schedule, 0);
-    pcb_t *next_pcb = pop_sched_queue();
+    pcb_t *next_pcb = get_next_task();
     curr_proc = next_pcb;
     
     if (next_pcb != NULL) {
@@ -182,7 +160,7 @@ void scheduler_tick(void *ctx) {
     if (curr_proc != NULL) {
         if (curr_proc->state == PROC_RUNNING_STATE) {
             curr_proc->state = PROC_READY_STATE;
-            add_sched_queue_node(curr_proc);
+            add_task_to_scheduler(curr_proc);
         }
     }
 
@@ -190,7 +168,7 @@ void scheduler_tick(void *ctx) {
     pid_t new_pid;
 
     // idle if no tasks
-    curr_proc = pop_sched_queue();
+    curr_proc = get_next_task();
     // Load new proc heap to malloc
     if (curr_proc == NULL) {
         new_ctx = &idle_ctx;
