@@ -70,6 +70,10 @@ char *str_concat(char *str1, char *str2) {
     size_t len1 = strlen(str1);
     size_t len2 = strlen(str2);
     char *new_str = malloc(sizeof(char)*(len1+len2+1));
+    if (new_str == NULL) {
+        printf("Malloc failed on str_concat\n");
+        return NULL;
+    }
     for (int i = 0; i < len1; i++) {
         new_str[i] = str1[i];
     }

@@ -72,6 +72,9 @@ long s_waitpid_impl(pid_t pid, int *status, int32_t flags) {
             curr_pcb->waiting_for_pid = -2;
         }
     } else {
+        if (pid < 0) {
+            pid *= -1;
+        }
         done_child = get_pcb_by_pid(pid);
         if (done_child == NULL || done_child->ppid != curr_pcb->pid) {
             return -1;
@@ -329,7 +332,7 @@ void cpy_address_space(pcb_t *src, pcb_t *dst) {
 	        }
 	    }
     }
-    // tlb_invalidate_all_user();
+    tlb_invalidate_all_user();
 }
 
 pid_t fork(struct trap_frame *frame) {

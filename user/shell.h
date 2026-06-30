@@ -20,7 +20,7 @@
 #define WRITE_END 1
 #define O_CLOEXEC 1
 
-#define BUF_SIZE 4096
+#define BUF_SIZE 40
 
 void *shell_init(void *args);
 

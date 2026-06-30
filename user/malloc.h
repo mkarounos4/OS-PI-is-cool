@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "stdio.h"
 
 #define USER_HEAP_START UINT64_C(0x400000)
 #define USER_HEAP_SIZE  16384ULL

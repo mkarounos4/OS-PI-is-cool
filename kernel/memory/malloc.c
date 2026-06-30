@@ -1,6 +1,6 @@
 #include "malloc.h"
 
-#include "uart/uart.h"
+#include "stdio.h"
 
 // create pointers to the heads of their segregated explicit free lists of size in double word blocks
 typedef struct {
@@ -47,7 +47,7 @@ void mem_init(void *start, void *end) {
     seg_lists_ptr = NULL;
     
     if (!mm_init()) {
-        uart_puts("ERROR: failed to initialize heap\n");
+        printf("ERROR: failed to initialize heap\n");
         while (1) {
             asm volatile ("wfe");
         }
@@ -58,13 +58,13 @@ void *mem_sbrk(intptr_t incr)
 {
     void *prevBrk = HeapMemoryBrk;
     if (HeapMemoryBrk == NULL || HeapMemoryEnd == NULL || incr < 0) {
-        uart_puts("ERROR: Allocated too much memory!\n");
+        printf("ERROR: Allocated too much memory!\n");
         return (void *) -1;
     }
 
     void *nextBrk = (char *)HeapMemoryBrk + incr;
     if ((uintptr_t)nextBrk > (uintptr_t)HeapMemoryEnd) {
-        uart_puts("ERROR: Allocated too much memory!\n");
+        printf("ERROR: Allocated too much memory!\n");
         return (void *) -1;
     }
     HeapMemoryBrk = nextBrk;
@@ -335,7 +335,8 @@ void *get_allocation(size_t size) {
 
 void *malloc(size_t size)
 {
-    if (size == 0) return NULL;
+    printf("NOO\n");
+    if (size == 0) {printf("error oh nooo\n"); return NULL;}
 
     void *ptr = get_allocation(size);
 
@@ -344,11 +345,11 @@ void *malloc(size_t size)
         size_t extend_size = (aligned_size > PAGE_SIZE) ? aligned_size : PAGE_SIZE;
 
         ptr = extend_heap(extend_size);
-        if (ptr == NULL) return NULL;
+        if (ptr == NULL) {printf("this\n");return NULL;}
 
         // allocate newly confimed/obtained free memory
 	ptr = get_allocation(size);
-        if (ptr == NULL) return NULL;
+        if (ptr == NULL) {printf("this2\n");return NULL;}
     }
 
     return ptr;

@@ -1,4 +1,5 @@
 #include "shell.h"
+#include "malloc.h"
 
 volatile int wasInterrupted = 0;
 int shell_pgid;
@@ -84,6 +85,8 @@ void *shell_init(void *args) {
     background_jobs = vec_new(2, free_job);
     stopped_background_jobs = vec_new(2, NULL);
 
+    mem_init((void*)UINT64_C(0x400000), (void*)(UINT64_C(0x400000)+16384ULL));
+
     prompt();
 
     return 0;
@@ -91,10 +94,6 @@ void *shell_init(void *args) {
 
 
 void exit_shell() {
-}
-
-int get_fg_job_pid(void) {
-    return -1;
 }
 
 int is_integer(const char *str) {
@@ -136,6 +135,7 @@ void prompt() {
             unmount();
             return;
         }
+
 
         // Continue loop on ctr-C interrupt
         if (wasInterrupted) {
@@ -283,6 +283,10 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
 
 	// Setup new job for this command
     job *newJob = malloc(sizeof(job));
+    if (newJob == NULL) {
+        printf("ERROR: Malloc failed %d\n", (long) newJob);
+        return;
+    }
     newJob->id = ++curr_job_id;
     newJob->cmd = parsed_cmd;
     newJob->pids = malloc(sizeof(pid_t)*parsed_cmd->num_commands+1);
@@ -335,6 +339,7 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
             perror("execvp");
             exit(EXIT_FAILURE);
         }
+        printf("parent going\n");
 
         // Set child to new process group
         if (setpgid(pid, pid) == -1) {
@@ -476,7 +481,8 @@ void start_fg_job(job *newJob) {
 
     char *status_update = NULL;
     int status;
-    while (waitpid(-pgid, &status, WUNTRACED) > 0) {
+    int err;
+    while ((err = waitpid(-pgid, &status, WUNTRACED)) > 0) {
 		if (WIFSTOPPED(status)) {
 			newJob->num_procs_stopped++;
 		} else if (WIFEXITED(status) || WIFSIGNALED(status)) {

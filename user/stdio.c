@@ -64,7 +64,7 @@ int printf(const char *fmt, ...) {
             written += print_int(va_arg(args, int));
         } else if (*fmt == 'u') {
             written += print_uint(va_arg(args, unsigned int), 10);
-        } else if (*fmt == 'x') {
+        } else if (*fmt == 'x' || *fmt == 'X') {
             written += print_uint(va_arg(args, unsigned int), 16);
         } else if (*fmt == '%') {
             written += print_char('%');
