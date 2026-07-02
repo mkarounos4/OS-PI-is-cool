@@ -19,7 +19,7 @@ int open(const char *fname, int mode) {
 
     int new_fd = -1;
     for (int i = 0; i < vec_len(&pcb->file_descriptors); i++) {
-        if (vec_get(&pcb->file_descriptors, i) == -1) {
+        if (vec_get(&pcb->file_descriptors, i) == (void *)(uintptr_t)-1) {
             vec_set(&pcb->file_descriptors, i, (ptr_t)(uintptr_t)fd);
             new_fd = i;
             break;
@@ -40,19 +40,26 @@ int close(int fd) {
         return -1;
     }
 
-    if (vec_len(&pcb->file_descriptors) < fd || fd < 0) {
+    if (fd < 0 || (size_t)fd >= vec_len(&pcb->file_descriptors)) {
         return INVALID_ARGS;
     }
 
     int k_fd = (int)(uintptr_t)vec_get(&pcb->file_descriptors, fd);
+    if (k_fd < 0) {
+        return OFT_FD_DOES_NOT_EXIST;
+    }
+
     struct oft_entry *entry;
     err_t err = get_oft_entry_by_fd(k_fd, &entry);
+    if (err) {
+        return err;
+    }
 
     err = k_close(entry);
     if (err) {
         return err;
     }
-    vec_set(&pcb->file_descriptors, -1, (void *)(uintptr_t)fd);
+    vec_set(&pcb->file_descriptors, fd, (void *)(uintptr_t)-1);
 
     return SUCCESS;
 }
@@ -63,23 +70,20 @@ int read(int fd, char *buf, int n) {
         return -1;
     }
 
-    if (vec_len(&pcb->file_descriptors) < fd || fd < 0) {
+    if (fd < 0 || (size_t)fd >= vec_len(&pcb->file_descriptors)) {
         return INVALID_ARGS;
     }
 
-    for (int i = 0; i < vec_len(&pcb->file_descriptors); i++) {
-        int kfd = (int)(uintptr_t)vec_get(&pcb->file_descriptors, i);
-        struct oft_entry *entry;
-        err_t err = get_oft_entry_by_fd(kfd, &entry);
-        if (err) {
-            return err;
-        }
-        int mode;
+    int k_fd = (int)(uintptr_t)vec_get(&pcb->file_descriptors, fd);
+    if (k_fd < 0) {
+        return OFT_FD_DOES_NOT_EXIST;
     }
 
-    int k_fd = (int)(uintptr_t)vec_get(&pcb->file_descriptors, fd);
     struct oft_entry *entry;
     err_t err = get_oft_entry_by_fd(k_fd, &entry);
+    if (err) {
+        return err;
+    }
 
     return k_read(entry, buf, n);
 }
@@ -90,13 +94,20 @@ int write(int fd, char *buf, int n) {
         return -1;
     }
 
-    if (vec_len(&pcb->file_descriptors) < fd || fd < 0) {
+    if (fd < 0 || (size_t)fd >= vec_len(&pcb->file_descriptors)) {
         return INVALID_ARGS;
     }
 
     int k_fd = (int)(uintptr_t)vec_get(&pcb->file_descriptors, fd);
+    if (k_fd < 0) {
+        return OFT_FD_DOES_NOT_EXIST;
+    }
+
     struct oft_entry *entry;
     err_t err = get_oft_entry_by_fd(k_fd, &entry);
+    if (err) {
+        return err;
+    }
 
     return k_write(entry, buf, n);
 }
@@ -107,11 +118,16 @@ int lseek(int fd, int offset, int whence) {
         return -1;
     }
 
-    if (vec_len(&pcb->file_descriptors) < fd || fd < 0) {
+    if (fd < 0 || (size_t)fd >= vec_len(&pcb->file_descriptors)) {
         return INVALID_ARGS;
     }
 
-    return k_lseek((int)(uintptr_t)vec_get(&pcb->file_descriptors, fd), offset, whence);
+    int k_fd = (int)(uintptr_t)vec_get(&pcb->file_descriptors, fd);
+    if (k_fd < 0) {
+        return OFT_FD_DOES_NOT_EXIST;
+    }
+
+    return k_lseek(k_fd, offset, whence);
 }
 
 // Throws FS_not_mounted, k_open errors, k_close errors, k_update_file_time errors

@@ -1,17 +1,14 @@
 #include "shell_cmds.h"
 
 void echo(char **args) {
-    char result[1000] = "";
-    
     int i = 1;
     while (args[i] != NULL) {
-        str_concat(result, args[i]);
-        str_concat(result, " ");
+        write(1, args[i], strlen(args[i]));
+        if (args[i + 1] != NULL) {
+            write(1, " ", 1);
+        }
         i++;
     }
 
-    write(1, result, strlen(result));
     write(1, "\n", 1);
-
-    return;
 }

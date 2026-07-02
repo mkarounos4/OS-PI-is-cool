@@ -55,7 +55,7 @@ int k_open(const char *fname, int mode) {
             return INVALID_PERMISSIONS;
         }
 
-        if (O_TRUNC) {
+        if (mode & O_TRUNC) {
             err_t err = clear_blocks_of_file_by_id(dirent.ino_id);
             if (err) {
                 return err;
@@ -67,6 +67,12 @@ int k_open(const char *fname, int mode) {
 
     // Create open or create new file and then return fd
     int fd = oft_open_file(mode, actual_name, error != FILE_NOT_CREATED ? dirent.ino_id: 0, parent_dir_id);
+    if (actual_name != NULL) {
+        kfree(actual_name);
+    }
+    if (fd < 0) {
+        return fd;
+    }
 
     struct oft_entry *entry;
     err_t err = get_oft_entry_by_fd(fd, &entry);
@@ -74,7 +80,8 @@ int k_open(const char *fname, int mode) {
         return err;
     }
 
-    if (entry->inode->inode.metadata.fops != NULL) {
+    if (entry->inode->inode.metadata.fops != NULL &&
+        entry->inode->inode.metadata.fops->open != NULL) {
         err = entry->inode->inode.metadata.fops->open(entry);
         if (err) {
             return err;
@@ -90,7 +97,8 @@ int k_close(struct oft_entry *entry) {
         return FS_NOT_MOUNTED;
     }
 
-    if (entry->inode->inode.metadata.fops != NULL) {
+    if (entry->inode->inode.metadata.fops != NULL &&
+        entry->inode->inode.metadata.fops->close != NULL) {
         err_t err = entry->inode->inode.metadata.fops->close(entry);
         if (err) {
             return err;
@@ -186,7 +194,23 @@ int k_file_add_reference(int fd) {
         return FS_NOT_MOUNTED;
     }
 
-    return oft_add_reference(fd);
+    struct oft_entry *entry;
+    err_t err = get_oft_entry_by_fd(fd, &entry);
+    if (err != SUCCESS) {
+        return err;
+    }
+
+    err = oft_add_reference(fd);
+    if (err != SUCCESS) {
+        return err;
+    }
+
+    if (entry->inode->inode.metadata.fops != NULL &&
+        entry->inode->inode.metadata.fops->open != NULL) {
+        return entry->inode->inode.metadata.fops->open(entry);
+    }
+
+    return SUCCESS;
 }
 
 int k_write(struct oft_entry *entry, const char *buf, size_t n) {

@@ -250,6 +250,7 @@ struct trap_frame *syscall_dispatch(struct trap_frame *frame) {
         break;
     case S_PIPE:
         ret = pipe((int*)frame->regs[0]);
+        break;
     default:
         ret = SYS_ENOSYS;
         break;

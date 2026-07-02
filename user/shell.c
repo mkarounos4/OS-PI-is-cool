@@ -28,6 +28,7 @@ int execvp(const char *cmd, char **args);
 
 void *shell_init(void *args) {
     setpgid(0, 0);
+    shell_pgid = getpgrp();
 
     int shell_num = (int)(uintptr_t)args;
     char path[10];
@@ -78,14 +79,12 @@ void *shell_init(void *args) {
     sigprocmask(SIG_BLOCK, &mask, NULL);
 
     // give shell tty control
-    tcsetpgrp(shell_num, getpgrp());
+    tcsetpgrp(shell_num, shell_pgid);
 
 	// Setup vectors
     background_status_updates = vec_new(1, free_dtor);
     background_jobs = vec_new(2, free_job);
     stopped_background_jobs = vec_new(2, NULL);
-
-    mem_init((void*)UINT64_C(0x400000), (void*)(UINT64_C(0x400000)+16384ULL));
 
     prompt();
 
@@ -289,7 +288,7 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
     }
     newJob->id = ++curr_job_id;
     newJob->cmd = parsed_cmd;
-    newJob->pids = malloc(sizeof(pid_t)*parsed_cmd->num_commands+1);
+    newJob->pids = malloc(sizeof(pid_t) * (parsed_cmd->num_commands + 1));
     newJob->full_cmd = str_copy(cmd);
     newJob->num_procs_running = 0;
     newJob->status = RUNNING_STATE;
@@ -297,10 +296,7 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
 
     if (parsed_cmd->num_commands == 1) {
         // if only one command, fork and exec
-        printf("start\n");
         pid_t pid = fork();
-        putstr("REACHED\n");
-        printf("pid: %d\n", pid);
 
         // Exec child
         if (pid == 0) {
@@ -309,26 +305,28 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
 
             if (parsed_cmd->stdin_file != NULL) {
                 int fd = open(parsed_cmd->stdin_file, O_RDONLY);
-                if (fd) {
+                if (fd < 0) {
                     perror("failed to open file.");
                     exit(EXIT_FAILURE);
                 }
                 dup2(fd, STDIN_FILENO);
                 err_t err = close(fd);
-                if (err) {
+                if (err < 0) {
                     perror("failed to close file");
                     exit(EXIT_FAILURE);
                 }
             }
             if (parsed_cmd->stdout_file != NULL) {
-                int fd = open(parsed_cmd->stdout_file, O_WRONLY);
-                if (fd) {
+                int flags = O_WRONLY | O_CREAT;
+                flags |= parsed_cmd->is_file_append ? O_APPEND : O_TRUNC;
+                int fd = open(parsed_cmd->stdout_file, flags);
+                if (fd < 0) {
                     perror("failed to open file.");
                     exit(EXIT_FAILURE);
                 }
                 dup2(fd, STDOUT_FILENO);
                 err_t err = close(fd);
-                if (err) {
+                if (err < 0) {
                     perror("failed to close file");
                     exit(EXIT_FAILURE);
                 }
@@ -339,7 +337,6 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
             perror("execvp");
             exit(EXIT_FAILURE);
         }
-        printf("parent going\n");
 
         // Set child to new process group
         if (setpgid(pid, pid) == -1) {
@@ -381,13 +378,13 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
                 } else {
                     if (parsed_cmd->stdin_file != NULL) {
                         int fd = open(parsed_cmd->stdin_file, O_RDONLY);
-                        if (fd) {
+                        if (fd < 0) {
                             perror("failed to open file.");
                             exit(EXIT_FAILURE);
                         }
                         dup2(fd, STDIN_FILENO);
                         err_t err = close(fd);
-                        if (err) {
+                        if (err < 0) {
                             perror("failed to close file");
                             exit(EXIT_FAILURE);
                         }
@@ -396,18 +393,24 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
                 // If we aren't the last pipe, STDOUT should go to from THIS pipe's write end
                 if (i != parsed_cmd->num_commands - 1) {
                     dup2(all_pipes[i][WRITE_END], STDOUT_FILENO);
-                } else {
-                    int fd = open(parsed_cmd->stdout_file, O_WRONLY);
-                    if (fd) {
+                } else if (parsed_cmd->stdout_file != NULL) {
+                    int flags = O_WRONLY | O_CREAT;
+                    flags |= parsed_cmd->is_file_append ? O_APPEND : O_TRUNC;
+                    int fd = open(parsed_cmd->stdout_file, flags);
+                    if (fd < 0) {
                         perror("failed to open file.");
                         exit(EXIT_FAILURE);
                     }
                     dup2(fd, STDOUT_FILENO);
                     err_t err = close(fd);
-                    if (err) {
+                    if (err < 0) {
                         perror("failed to close file");
                         exit(EXIT_FAILURE);
                     }
+                }
+
+                for (int j = 0; j < parsed_cmd->num_commands - 1; j++) {
+                    close_pipe(all_pipes[j]);
                 }
 
                 execvp(parsed_cmd->commands[i][0], parsed_cmd->commands[i]);
@@ -449,17 +452,10 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
 }
 
 void prepare_child_process(struct parsed_command *parsed_cmd) {
+    (void)parsed_cmd;
     sigset_t mask;
     sigemptyset(&mask);
     sigprocmask(SIG_SETMASK, &mask, NULL);
-
-    if (parsed_cmd->stdin_file != NULL) {
-        changeStdInput(parsed_cmd);
-    }
-
-    if (parsed_cmd->stdout_file != NULL) {
-        changeStdOutput(parsed_cmd);
-    }
 }
 
 void start_fg_job(job *newJob) {
@@ -582,9 +578,15 @@ int handle_job_builtins(struct parsed_command *parsed_cmd) {
     return 0;
 }
 
+static void report_command_error(const char *cmd, err_t err) {
+    if (err < 0) {
+        printf("%s: error %d\n", cmd, err);
+    }
+}
+
 int execvp(const char *cmd, char **args) {
     if (strcmp(cmd, "cat") == 0) {
-        char **commands = (char**) args+1;
+        char **commands = args + 1;
         int flag = 0;
         char *output_file = NULL;
 
@@ -610,30 +612,34 @@ int execvp(const char *cmd, char **args) {
             i++;
         }
 
-        cat(commands + 1, output_file, flag);
+        report_command_error(cmd, cat(commands, output_file, flag));
     } else if (strcmp(cmd, "ls") == 0) {
-        ls(args[1], 0);
+        report_command_error(cmd, ls(args[1], STDOUT_FILENO));
     } else if (strcmp(cmd, "touch") == 0) {
-        touch(args+1);
+        report_command_error(cmd, touch(args+1));
     } else if (strcmp(cmd, "mv") == 0) {
         if (args[1] == NULL || args[2] == NULL) {
             exit(-1);
         }
-        mv(args[1], args[2]);
+        report_command_error(cmd, mv(args[1], args[2]));
     } else if (strcmp(cmd, "rm") == 0) {
-        rm(args+1);
+        report_command_error(cmd, rm(args+1));
     } else if (strcmp(cmd, "cp") == 0) {
         if (args[1] == NULL || args[2] == NULL) {
             exit(-1);
         }
-        cp(args[1], args[2], 0);
+        report_command_error(cmd, cp(args[1], args[2], 0));
     } else if (strcmp(cmd, "mkdir") == 0) {
-        fs_mkdir(args+1);
+        report_command_error(cmd, fs_mkdir(args+1));
     } else if (strcmp(cmd, "cd") == 0) {
-        cd(args[1]);
+        report_command_error(cmd, cd(args[1]));
     } else if (strcmp(cmd, "echo") == 0) {
-        echo(args+1);
+        echo(args);
+    } else {
+        perror("unknown command\n");
+        exit(EXIT_FAILURE);
     }
 
     exit(EXIT_SUCCESS);
+    return EXIT_SUCCESS;
 }

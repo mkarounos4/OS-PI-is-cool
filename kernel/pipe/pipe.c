@@ -25,6 +25,18 @@ static const struct file_operations pipe_ops = {
     .write = pipe_write,
 };
 
+static int install_process_fd(pcb_t *pcb, int k_fd) {
+    for (int i = 0; i < vec_len(&pcb->file_descriptors); i++) {
+        if (vec_get(&pcb->file_descriptors, i) == (void *)(uintptr_t)-1) {
+            vec_set(&pcb->file_descriptors, i, (void *)(uintptr_t)k_fd);
+            return i;
+        }
+    }
+
+    vec_push_back(&pcb->file_descriptors, (void *)(uintptr_t)k_fd);
+    return (int)vec_len(&pcb->file_descriptors) - 1;
+}
+
 struct pipe_st {
     int num_readers;
     int num_writers;
@@ -36,6 +48,11 @@ struct pipe_st {
 };
 
 int pipe(int pipefd[2]) {
+    pcb_t *pcb = get_curr_process();
+    if (pcb == NULL) {
+        return -1;
+    }
+
     struct pipe_st *pipe = kmalloc(sizeof(struct pipe_st));
     
     pipe->num_readers = 1;
@@ -53,8 +70,18 @@ int pipe(int pipefd[2]) {
         return err;
     }
 
-    pipefd[0] = oft_open_file(O_RDONLY, NULL, ino_id, 0);
-    pipefd[1] = oft_open_file(O_WRONLY, NULL, ino_id, 0);
+    int read_fd = oft_open_file(O_RDONLY, NULL, ino_id, 0);
+    if (read_fd < 0) {
+        return read_fd;
+    }
+
+    int write_fd = oft_open_file(O_WRONLY, NULL, ino_id, 0);
+    if (write_fd < 0) {
+        return write_fd;
+    }
+
+    pipefd[0] = install_process_fd(pcb, read_fd);
+    pipefd[1] = install_process_fd(pcb, write_fd);
 
     attributes_t metadata;
     err = get_inode_metadata(ino_id, &metadata);
@@ -84,7 +111,7 @@ void pipe_wake_up_readers(struct pipe_st *pipe) {
 }
 
 void pipe_wake_up_writers(struct pipe_st *pipe) {
-    while (!vec_is_empty(&pipe->rx_wait_queue)) {
+    while (!vec_is_empty(&pipe->tx_wait_queue)) {
         void *pid;
         int removed = (int)(uintptr_t)vec_pop_back(&pipe->tx_wait_queue, &pid);
         if (!removed) {
@@ -95,16 +122,30 @@ void pipe_wake_up_writers(struct pipe_st *pipe) {
 }
 
 int pipe_open(struct oft_entry *entry) {
+    struct pipe_st *pipe = entry->inode->inode.metadata.i_pipe;
+    if (pipe == NULL) {
+        return -1;
+    }
+
+    if (entry->mode & O_RDONLY) {
+        pipe->num_readers++;
+    }
+    if (entry->mode & O_WRONLY) {
+        pipe->num_writers++;
+    }
     return 0;
 }
 
 int pipe_close(struct oft_entry *entry) {
     struct pipe_st *pipe = entry->inode->inode.metadata.i_pipe;
+    if (pipe == NULL) {
+        return -1;
+    }
 
-    if (entry->inode->inode.metadata.perm & O_RDONLY) {
+    if (entry->mode & O_RDONLY) {
         pipe->num_readers--;
     }
-    if (entry->inode->inode.metadata.perm & O_WRONLY) {
+    if (entry->mode & O_WRONLY) {
         pipe->num_writers--;
         if (pipe->num_writers == 0) {
             char next_char = 0x04;
@@ -138,6 +179,9 @@ int pipe_read(struct oft_entry *entry, char *buffer, size_t count) {
         char char_void;
         bool read_char = consume_ring_buffer(&pipe->buffer, &char_void);
         if (!read_char) {
+            if (pipe->num_writers == 0) {
+                return num_read;
+            }
             pipe_wake_up_writers(pipe);
             vec_push_back(&pipe->rx_wait_queue, (ptr_t)(uintptr_t)curr_pcb->pid);
             block_process(curr_pcb);
@@ -170,7 +214,7 @@ int pipe_write(struct oft_entry *entry, const char *buffer, size_t count) {
         bool wrote_char = produce_ring_buffer(&pipe->buffer, buffer);
         if (!wrote_char) {
             pipe_wake_up_readers(pipe);
-            vec_push_back(&pipe->rx_wait_queue, (ptr_t)(uintptr_t)curr_pcb->pid);
+            vec_push_back(&pipe->tx_wait_queue, (ptr_t)(uintptr_t)curr_pcb->pid);
             block_process(curr_pcb);
             continue;
         }
@@ -179,17 +223,6 @@ int pipe_write(struct oft_entry *entry, const char *buffer, size_t count) {
         num_read++;
     }
     
-    bool wrote_char;
-    do {
-        char eof_char = 0x04;
-        wrote_char = produce_ring_buffer(&pipe->buffer, &eof_char);
-        if (!wrote_char) {
-            pipe_wake_up_readers(pipe);
-            vec_push_back(&pipe->rx_wait_queue, (ptr_t)(uintptr_t)curr_pcb->pid);
-            block_process(curr_pcb);
-            continue;
-        }
-    } while (wrote_char);
-
+    pipe_wake_up_readers(pipe);
     return num_read;
 }

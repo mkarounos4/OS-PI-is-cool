@@ -214,6 +214,19 @@ void proc_destroy(pcb_t *p) {
     uart_puts("Cleaning up ");
     uart_puthex(p->pid);
     uart_puts("\n");
+    for (int i = 0; i < (int)vec_len(&p->file_descriptors); i++) {
+        int k_fd = (int)(uintptr_t)vec_get(&p->file_descriptors, i);
+        if (k_fd < 0) {
+            continue;
+        }
+
+        struct oft_entry *entry;
+        if (get_oft_entry_by_fd(k_fd, &entry) == SUCCESS) {
+            k_close(entry);
+        }
+    }
+    vec_destroy(&p->file_descriptors);
+
     // Rn, stack and heap are tied to pcb, so automatically "free" when create new process
     // When adding VM, TODO add cleanup of stack/heap
     p->state = PROC_UNUSED_STATE;
@@ -348,7 +361,9 @@ pid_t fork(struct trap_frame *frame) {
     for (int i = 0; i < vec_len(&parent->file_descriptors); i++) {
         void *fd = vec_get(&parent->file_descriptors, i);
         vec_push_back(&child->file_descriptors, fd);
-        k_file_add_reference((int)(uintptr_t) fd);
+        if ((int)(uintptr_t)fd >= 0) {
+            k_file_add_reference((int)(uintptr_t) fd);
+        }
     }
     
     // save_curr_context(&child->ctx);

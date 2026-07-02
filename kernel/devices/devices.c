@@ -38,26 +38,8 @@ int devfs_create_char_device(struct dev_st rdev) {
         return -1;
     }
 
-    int ino = add_new_file(NULL, CHAR_DRIVER_TYPE, 0x7, char_device_registry[rdev.major]->fops);
-    if (ino < 0) {
-        return -1;
-    }
-
-    struct inode_st inode;
-    err_t err = get_inode_raw(&inode, ino);
-    if (err != SUCCESS) {
-        return err;
-    }
-
-    inode.metadata.i_rdev = rdev;
-    
-    err = write_inode(&inode, ino);
-    if (err) {
-        return err;
-    }
-
     struct fs_dirent dirent;
-    err = get_dirent_by_path("/dev", &dirent, 1, NULL, NULL);
+    err_t err = get_dirent_by_path("/dev", &dirent, 1, NULL, NULL);
     if (err == FILE_NOT_CREATED) {
         char **paths = kmalloc(sizeof(char*) * 2);
         paths[1] = NULL;
@@ -76,10 +58,7 @@ int devfs_create_char_device(struct dev_st rdev) {
         return err;
     }
 
-    char *name = kmalloc(sizeof(char) * 32);
-    if (name == NULL) {
-        return -1;
-    }
+    char name[32];
     strcpy(name, char_device_registry[rdev.major]->name);
     int len = strlen(char_device_registry[rdev.major]->name);
     if (len > 30) {
@@ -88,6 +67,44 @@ int devfs_create_char_device(struct dev_st rdev) {
     } else {
         name[len] = '0'+ rdev.minor;
         name[len+1] = '\0';
+    }
+
+    struct fs_dirent existing;
+    err = get_dirent_by_f_name(name, 0, &existing, dirent.ino_id);
+    if (err == SUCCESS) {
+        attributes_t metadata;
+        err = get_inode_metadata(existing.ino_id, &metadata);
+        if (err != SUCCESS) {
+            return err;
+        }
+
+        metadata.type = CHAR_DRIVER_TYPE;
+        metadata.perm = 0x7;
+        metadata.fops = (struct file_operations *)char_device_registry[rdev.major]->fops;
+        metadata.i_rdev = rdev;
+        return set_inode_metadata(existing.ino_id, &metadata);
+    }
+    if (err != FILE_NOT_FOUND) {
+        return err;
+    }
+
+    int ino = add_new_file(NULL, CHAR_DRIVER_TYPE, 0x7,
+                           (struct file_operations *)char_device_registry[rdev.major]->fops);
+    if (ino < 0) {
+        return -1;
+    }
+
+    struct inode_st inode;
+    err = get_inode_raw(&inode, ino);
+    if (err != SUCCESS) {
+        return err;
+    }
+
+    inode.metadata.i_rdev = rdev;
+
+    err = write_inode(&inode, ino);
+    if (err) {
+        return err;
     }
 
     err = add_dirent(name, ino, dirent.ino_id);

@@ -54,15 +54,26 @@ int oft_open_file(int mode, const char *file_name, ino_id_t ino_id, ino_id_t dir
         struct fs_dirent dir;
         err = get_dirent_by_f_name(file_name, FILE_TYPE, &dir, dir_block);
         if (err != SUCCESS) {
-            add_new_file(&new_entry, FILE_TYPE, 6, get_default_fops());
+            err = add_new_file(&new_entry, FILE_TYPE, 6, get_default_fops());
+            if (err < 0) {
+                kfree(new_entry);
+                return err;
+            }
             err = add_dirent(file_name, new_entry->ino_id, dir_block);
             if (err) {
+                remove_ref_from_cache(new_entry->ino_id);
+                kfree(new_entry);
                 return err;
             }
         }
+    } else {
+        new_entry->inode = get_inode_from_cache(ino_id);
     }
 
-    new_entry->inode = get_inode_from_cache(ino_id);
+    if (new_entry->inode == NULL) {
+        kfree(new_entry);
+        return FILE_READ_ERROR;
+    }
 
     // adds to open_file_table
     if (oft_id == vec_len(&open_file_table) || oft_id == -1) {
