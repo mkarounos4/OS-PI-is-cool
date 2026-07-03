@@ -126,7 +126,7 @@ void scheduler_start(void) {
 }
 
 // Prints scheduler tick info to the console for debugging purposes.
-static void scheduler_print_tick(unsigned int tid1, unsigned int tid2) {
+static void __attribute__((unused)) scheduler_print_tick(unsigned int tid1, unsigned int tid2) {
     uart_puts("scheduler tick ");
     uart_puthex(curr_tick++);
     uart_puts(" switching ");
@@ -160,21 +160,16 @@ void scheduler_tick(void *ctx) {
         }
     }
 
-    pid_t old_pid = curr_proc == NULL ? -1 : curr_proc->pid;
-    pid_t new_pid;
-
     // idle if no tasks
     curr_proc = get_next_task();
     // Load new proc heap to malloc
     if (curr_proc == NULL) {
         new_ctx = &idle_ctx;
-        new_pid = -1;
     } else {
         new_ctx = &curr_proc->ctx;
 
         // Update new thread data
         curr_proc->state = PROC_RUNNING_STATE;
-        new_pid = curr_proc->pid;
     }
 
     // If next thread exists, run it

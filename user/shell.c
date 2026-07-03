@@ -352,7 +352,7 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
         int (*all_pipes)[2] = calloc((parsed_cmd->num_commands - 1), sizeof(*all_pipes));
 
         int pgid = 0;
-        for (int i=0; i < parsed_cmd->num_commands; i++) {
+        for (size_t i = 0; i < parsed_cmd->num_commands; i++) {
             // We don't need a pipe for the last command
             if (i != parsed_cmd->num_commands - 1) {
                 pipe(all_pipes[i]);
@@ -409,7 +409,7 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
                     }
                 }
 
-                for (int j = 0; j < parsed_cmd->num_commands - 1; j++) {
+                for (size_t j = 0; j < parsed_cmd->num_commands - 1; j++) {
                     close_pipe(all_pipes[j]);
                 }
 
@@ -427,7 +427,7 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
             newJob->num_procs_running++;
         }
 
-        for (int i=0; i < parsed_cmd->num_commands - 1; i++) {
+        for (size_t i = 0; i < parsed_cmd->num_commands - 1; i++) {
             close_pipe(all_pipes[i]);
         }
         free(all_pipes);
@@ -513,7 +513,7 @@ void start_fg_job(job *newJob) {
 int handle_job_builtins(struct parsed_command *parsed_cmd) {
 	// For all jobs, print relevant information
     if (strcmp(parsed_cmd->commands[0][0], "jobs") == 0) {
-        for (int i = 0; i < vec_len(&background_jobs); i++) {
+        for (size_t i = 0; i < vec_len(&background_jobs); i++) {
             job *curr_job = vec_get(&background_jobs, i);
 
             char *curr_job_status;

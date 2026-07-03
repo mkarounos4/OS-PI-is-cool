@@ -802,14 +802,14 @@ int free_from_single_ptr(block_no_t single_block, struct inode_st *inode, int *t
         kfree(single_ptr_data);
         return err_code;
     }
-    for (int i = 0; i < BLOCKS_IN_SINGLE_PTR; i++) {
+    for (size_t i = 0; i < BLOCKS_IN_SINGLE_PTR; i++) {
         err_code = set_block_allocated(single_ptr_data[i], 0);
         if (err_code != SUCCESS) {
             kfree(single_ptr_data);
             return err_code;
         }
         (*total_removed)++;
-        if ((*total_removed) == inode->metadata.i_blocks) {
+        if ((uint32_t)(*total_removed) == inode->metadata.i_blocks) {
             kfree(single_ptr_data);
             return -1;
         }
@@ -831,7 +831,7 @@ int free_from_double_ptr(block_no_t double_block, struct inode_st *inode, int *t
         return err_code;
     }
 
-    for (int i = 0; i < BLOCKS_IN_SINGLE_PTR; i++) {
+    for (size_t i = 0; i < BLOCKS_IN_SINGLE_PTR; i++) {
         int ret_val = free_from_single_ptr(double_ptr_data[i], inode, total_removed);
         if (ret_val != SUCCESS) {
             kfree(double_ptr_data);
@@ -855,7 +855,7 @@ int free_from_triple_ptr(block_no_t triple_block, struct inode_st *inode, int *t
         return err_code;
     }
 
-    for (int i = 0; i < BLOCKS_IN_SINGLE_PTR; i++) {
+    for (size_t i = 0; i < BLOCKS_IN_SINGLE_PTR; i++) {
         int ret_val = free_from_double_ptr(triple_ptr_data[i], inode, total_removed);
         if (ret_val != SUCCESS) {
             kfree(triple_ptr_data);

@@ -3,7 +3,7 @@
 
 // Removes the job with the given id from the Vec self
 int vec_remove_job_by_id(Vec *self, jid_t id) {
-	for (int i = 0; i < vec_len(self); i++) {
+	for (size_t i = 0; i < vec_len(self); i++) {
 	    if (((job*)self->data[i])->id == id) {
 	        vec_erase(self, i);
 		return 1;
@@ -14,13 +14,13 @@ int vec_remove_job_by_id(Vec *self, jid_t id) {
 
 // Returns job containing specified pid.
 job *get_job_by_pid(pid_t pid, int *idx, Vec *background_jobs) {
-    int curr_elem = 0;
+    size_t curr_elem = 0;
     while (curr_elem < vec_len(background_jobs)) {
         job *temp_job = (job*) vec_get(background_jobs, curr_elem);
-        for (int i = 0; i < temp_job->cmd->num_commands; i++) {
+        for (size_t i = 0; i < temp_job->cmd->num_commands; i++) {
             if (pid == temp_job->pids[i]) {
                 if (idx) {
-                    *idx = curr_elem;
+                    *idx = (int)curr_elem;
                 }
 
                 return temp_job;
@@ -69,7 +69,7 @@ job *get_job_bg_fg(char *job_id_str, Vec *stopped_background_jobs, Vec *backgrou
 	}
 
 	// Get job with specified jid
-	for (int i = 0; i < vec_len(background_jobs); i++) {
+	for (size_t i = 0; i < vec_len(background_jobs); i++) {
 		job *temp_job = vec_get(background_jobs, i);
 		if (temp_job->id == jid) {
 			job_to_continue = temp_job;

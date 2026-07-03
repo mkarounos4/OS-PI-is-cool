@@ -31,7 +31,7 @@ void *kmalloc_memcpy(void *dst, const void *src, size_t num)
 }
 
 void *kmemset(void *ptr, int value, size_t num) {
-    kmalloc_memset(ptr, value, num);
+    return kmalloc_memset(ptr, value, num);
 }
 
 /* Heap and Brk */

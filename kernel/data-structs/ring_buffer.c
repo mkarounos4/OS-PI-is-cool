@@ -32,7 +32,7 @@ bool consume_ring_buffer(struct RingBuffer *buf, char *next) {
     return true;
 }
 
-bool produce_ring_buffer(struct RingBuffer *buf, char *next) {
+bool produce_ring_buffer(struct RingBuffer *buf, const char *next) {
     if (buf == NULL) {
         return false;
     }
@@ -58,7 +58,7 @@ bool produce_ring_buffer(struct RingBuffer *buf, char *next) {
 
 int destroy_ring_buffer(struct RingBuffer *buf) {
     kfree(buf->data);
-    kfree(buf);
+    return 0;
 }
 
 bool remove_back_ring_buffer(struct RingBuffer *buf) {

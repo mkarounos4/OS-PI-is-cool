@@ -65,7 +65,6 @@ void kernel_main(void) {
         printf("[boot] block_init failed\n");
     }
 
-    int fs_ready = 0;
     int err = SUCCESS;
     if (block_ready) {
         err = mount();
@@ -83,7 +82,6 @@ void kernel_main(void) {
         }
 
         if (err == SUCCESS) {
-            fs_ready = 1;
             printf("[fs] mounted fs\n");
         } else {
             printf("[fs] ERROR: failed to mount fs\n");

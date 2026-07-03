@@ -43,7 +43,7 @@ static inline int read(int fd, char *buf, int n) {
     return (int)sys_call3(S_FS_READ, fd, (long)(uintptr_t)buf, n);
 }
 
-static inline int write(int fd, char *buf, int n) {
+static inline int write(int fd, const char *buf, int n) {
     return (int)sys_call3(S_FS_WRITE, fd, (long)(uintptr_t)buf, n);
 }
 

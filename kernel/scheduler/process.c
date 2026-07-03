@@ -409,7 +409,7 @@ void cpy_address_space(pcb_t *src, pcb_t *dst) {
     dst->ctx.ttbr0_el1 = (uint64_t)(uintptr_t)kernel_phys_addr((uint64_t)(uintptr_t)dst_l0);
     dst->ctx.ttbr0_el1_va = (uint64_t)dst_l0;
 
-    for (short i = 0; i < PAGE_TABLE_ENTRIES; i++) {
+    for (size_t i = 0; i < PAGE_TABLE_ENTRIES; i++) {
 	    if ((src_l0[i] & DESC_VALID) == 0) continue;
 
 	    uint64_t *src_l1 = (uint64_t *)(uintptr_t)kernel_direct_map_va(src_l0[i] & PTE_ADDR_MASK);
@@ -417,7 +417,7 @@ void cpy_address_space(pcb_t *src, pcb_t *dst) {
 	    if (dst_l1 == NULL) return;
 	    dst_l0[i] = table_desc(dst_l1);
 
-	    for (short j = 0; j < PAGE_TABLE_ENTRIES; j++) {
+	    for (size_t j = 0; j < PAGE_TABLE_ENTRIES; j++) {
 	        if ((src_l1[j] & DESC_VALID) == 0) continue;
 
 	        uint64_t *src_l2 = (uint64_t *)(uintptr_t)kernel_direct_map_va(src_l1[j] & PTE_ADDR_MASK);
@@ -425,7 +425,7 @@ void cpy_address_space(pcb_t *src, pcb_t *dst) {
             if (dst_l2 == NULL) return;
             dst_l1[j] = table_desc(dst_l2);
 
-	        for (short k = 0; k < PAGE_TABLE_ENTRIES; k++) {
+	        for (size_t k = 0; k < PAGE_TABLE_ENTRIES; k++) {
 		        if ((src_l2[k] & DESC_VALID) == 0) continue;
 
 		        uint64_t *src_l3 = (uint64_t *)(uintptr_t)kernel_direct_map_va(src_l2[k] & PTE_ADDR_MASK);
@@ -433,7 +433,7 @@ void cpy_address_space(pcb_t *src, pcb_t *dst) {
                 if (dst_l3 == NULL) return;
                 dst_l2[k] = table_desc(dst_l3);
 
-		        for (short l = 0; l < PAGE_TABLE_ENTRIES; l++) {
+		        for (size_t l = 0; l < PAGE_TABLE_ENTRIES; l++) {
 		            if ((src_l3[l] & DESC_VALID) == 0) continue;
 
 		            uint64_t src_pa = src_l3[l] & PTE_ADDR_MASK;
@@ -468,6 +468,7 @@ void cpy_address_space(pcb_t *src, pcb_t *dst) {
 }
 
 pid_t fork(struct trap_frame *frame) {
+    (void)frame;
     // create child process off of parent
     pcb_t *parent = get_curr_process();
     pid_t child_pid = proc_create(parent->entry_func, parent->args, parent->pid);
@@ -476,7 +477,7 @@ pid_t fork(struct trap_frame *frame) {
 
     cpy_address_space(parent, child);
 
-    for (int i = 0; i < vec_len(&parent->file_descriptors); i++) {
+    for (size_t i = 0; i < vec_len(&parent->file_descriptors); i++) {
         void *fd = vec_get(&parent->file_descriptors, i);
         vec_push_back(&child->file_descriptors, fd);
         if ((int)(uintptr_t)fd >= 0) {

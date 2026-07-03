@@ -1,4 +1,4 @@
-#import "pipe.h"
+#include "pipe.h"
 #include "scheduler.h"
 #include "oft.h"
 #include "disk.h"
@@ -18,7 +18,7 @@ int pipe_close(struct oft_entry *entry);
 int pipe_read(struct oft_entry *entry, char *buffer, size_t count);
 int pipe_write(struct oft_entry *entry, const char *buffer, size_t count);
 
-static const struct file_operations pipe_ops = {
+static struct file_operations pipe_ops = {
     .open = pipe_open,
     .close = pipe_close,
     .read = pipe_read,
@@ -26,10 +26,10 @@ static const struct file_operations pipe_ops = {
 };
 
 static int install_process_fd(pcb_t *pcb, int k_fd) {
-    for (int i = 0; i < vec_len(&pcb->file_descriptors); i++) {
+    for (size_t i = 0; i < vec_len(&pcb->file_descriptors); i++) {
         if (vec_get(&pcb->file_descriptors, i) == (void *)(uintptr_t)-1) {
             vec_set(&pcb->file_descriptors, i, (void *)(uintptr_t)k_fd);
-            return i;
+            return (int)i;
         }
     }
 
@@ -47,6 +47,17 @@ struct pipe_st {
     Vec tx_wait_queue;
 };
 
+static void pipe_free(struct pipe_st *pipe) {
+    if (pipe == NULL) {
+        return;
+    }
+
+    vec_destroy(&pipe->rx_wait_queue);
+    vec_destroy(&pipe->tx_wait_queue);
+    destroy_ring_buffer(&pipe->buffer);
+    kfree(pipe);
+}
+
 int pipe(int pipefd[2]) {
     pcb_t *pcb = get_curr_process();
     if (pcb == NULL) {
@@ -54,6 +65,9 @@ int pipe(int pipefd[2]) {
     }
 
     struct pipe_st *pipe = kmalloc(sizeof(struct pipe_st));
+    if (pipe == NULL) {
+        return -1;
+    }
     
     pipe->num_readers = 1;
     pipe->num_writers = 1;
@@ -67,16 +81,19 @@ int pipe(int pipefd[2]) {
     ino_id_t ino_id;
     err_t err = add_new_file_inode(&ino_id, PIPE_TYPE, 0x7, &pipe_ops);
     if (err) {
+        pipe_free(pipe);
         return err;
     }
 
     int read_fd = oft_open_file(O_RDONLY, NULL, ino_id, 0);
     if (read_fd < 0) {
+        pipe_free(pipe);
         return read_fd;
     }
 
     int write_fd = oft_open_file(O_WRONLY, NULL, ino_id, 0);
     if (write_fd < 0) {
+        pipe_free(pipe);
         return write_fd;
     }
 
@@ -86,6 +103,7 @@ int pipe(int pipefd[2]) {
     attributes_t metadata;
     err = get_inode_metadata(ino_id, &metadata);
     if (err) {
+        pipe_free(pipe);
         return err;
     }
 
@@ -93,6 +111,7 @@ int pipe(int pipefd[2]) {
 
     err = set_inode_metadata(ino_id, &metadata);
     if (err) {
+        pipe_free(pipe);
         return err;
     }
 
@@ -159,8 +178,7 @@ int pipe_close(struct oft_entry *entry) {
 
     if (pipe->num_readers == 0 && pipe->num_writers == 0) {
         // clean pipe
-        destroy_ring_buffer(&pipe->buffer);
-        kfree(pipe);
+        pipe_free(pipe);
     }
 
     return 0;

@@ -44,7 +44,7 @@ void SIG_NOT_IMPLEMENTED(int signum) {
 
 void user_def_sig_handler(int signum) {
     pcb_t *pcb = get_curr_process();
-    signalset_t old_mask;
+    signalset_t old_mask = 0;
     signalset_t new_mask = pcb->sigactions[signum].sa_mask | (1 << signum);
     sigprocmask(SIG_BLOCK, &new_mask, &old_mask);
     pcb->sigactions[signum].sa_handler(signum);
@@ -210,7 +210,7 @@ int sigsuspend(const signalset_t *mask) {
         return -1;
     }
 
-    signalset_t old_set;
+    signalset_t old_set = 0;
     sigprocmask(SIG_SETMASK, mask, &old_set);
     pcb->blocked_until |= (1 << BLOCK_UNTIL_SIGNAL);
     block_process(pcb);

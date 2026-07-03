@@ -7,7 +7,7 @@
 int default_read(struct oft_entry *entry, char *buf, size_t n);
 int default_write(struct oft_entry *entry, const char *buf, size_t n);
 
-const static struct file_operations default_ops = (struct file_operations) {
+static struct file_operations default_ops = (struct file_operations) {
     .open = NULL,
     .close = NULL,
     .read = default_read,
@@ -135,7 +135,8 @@ int default_read(struct oft_entry *entry, char *buf, size_t n) {
     unsigned int curr_block_index = entry->cursor / get_bytes_per_block();
     block_no_t curr_block_no = get_ith_block_of_file(entry, curr_block_index);
     int remainder_offset = entry->cursor % get_bytes_per_block();
-    int bytes_to_read = MIN((int) (size - entry->cursor), MIN(n, get_bytes_per_block() - remainder_offset));
+    int bytes_to_read = MIN(size - (int)entry->cursor,
+                            MIN((int)n, get_bytes_per_block() - remainder_offset));
     int start = 1;
     
     char *data = kmalloc(get_bytes_per_block());
@@ -182,7 +183,8 @@ int default_read(struct oft_entry *entry, char *buf, size_t n) {
 
         // Go to next block in FAT, update real cursor and number bytes to read.
         curr_block_no = get_ith_block_of_file(entry, curr_block_index);
-        bytes_to_read = MIN((int) (size - entry->cursor), MIN(n, get_bytes_per_block()));
+        bytes_to_read = MIN(size - (int)entry->cursor,
+                            MIN((int)n, get_bytes_per_block()));
     }
     
     kfree(data);
@@ -253,11 +255,11 @@ int default_write(struct oft_entry *entry, const char *buf, size_t n) {
 
     int remainder_offset = offset % get_bytes_per_block();
 
-    int bytes_to_write = MIN(n, get_bytes_per_block() - remainder_offset);
+    int bytes_to_write = MIN((int)n, get_bytes_per_block() - remainder_offset);
     char *data = kmalloc(get_bytes_per_block());
     int start = 1;
     while (n) {
-        char *to_write;
+        const char *to_write;
         if (curr_block_no == 0) {
             kfree(data);
             return FAT_NO_SPACE_REMAINING;
@@ -282,7 +284,7 @@ int default_write(struct oft_entry *entry, const char *buf, size_t n) {
             to_write = buf;
         }
 
-        err_t err = write_block(to_write, curr_block_no);
+        err_t err = write_block((void *)to_write, curr_block_no);
         if (err != 0) {
             kfree(data);
             return err;
@@ -291,8 +293,8 @@ int default_write(struct oft_entry *entry, const char *buf, size_t n) {
         offset += bytes_to_write;
         entry->cursor = offset;
 
-        if (offset > size) {
-            size = offset;
+        if (offset > (uint32_t)size) {
+            size = (int)offset;
             int res = update_file_size(entry, size);
             if (res != SUCCESS) {
                 kfree(data);
@@ -324,7 +326,7 @@ int default_write(struct oft_entry *entry, const char *buf, size_t n) {
             buf += get_bytes_per_block();
         }
         start = 0;
-        bytes_to_write = MIN(n, get_bytes_per_block());
+        bytes_to_write = MIN((int)n, get_bytes_per_block());
     }
 
     kfree(data);
@@ -400,7 +402,7 @@ int k_lseek(int fd, int offset, int whence) {
     kfree(data);
 
     // Update metadata with file size if necessary
-    if (entry->cursor > file_size) {
+    if (entry->cursor > (uint32_t)file_size) {
         update_file_size(entry, entry->cursor);
     }
 

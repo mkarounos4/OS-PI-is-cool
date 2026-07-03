@@ -18,7 +18,7 @@ int open(const char *fname, int mode) {
     }
 
     int new_fd = -1;
-    for (int i = 0; i < vec_len(&pcb->file_descriptors); i++) {
+    for (size_t i = 0; i < vec_len(&pcb->file_descriptors); i++) {
         if (vec_get(&pcb->file_descriptors, i) == (void *)(uintptr_t)-1) {
             vec_set(&pcb->file_descriptors, i, (ptr_t)(uintptr_t)fd);
             new_fd = i;

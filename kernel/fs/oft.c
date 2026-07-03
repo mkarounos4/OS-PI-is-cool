@@ -76,8 +76,8 @@ int oft_open_file(int mode, const char *file_name, ino_id_t ino_id, ino_id_t dir
     }
 
     // adds to open_file_table
-    if (oft_id == vec_len(&open_file_table) || oft_id == -1) {
-        oft_id = vec_len(&open_file_table);
+    if (oft_id == -1 || (size_t)oft_id == vec_len(&open_file_table)) {
+        oft_id = (int)vec_len(&open_file_table);
         vec_push_back(&open_file_table, new_entry);
     } else {
         vec_set(&open_file_table, oft_id, new_entry);
@@ -103,7 +103,7 @@ int oft_close_file(struct oft_entry *entry) {
     }
 
     int oft_id = -1;
-    for (int i = 0; i < vec_len(&open_file_table); i++) {
+    for (size_t i = 0; i < vec_len(&open_file_table); i++) {
         void *elem_void = vec_get(&open_file_table, i);
         if (elem_void == NULL) {
             continue;
@@ -114,7 +114,7 @@ int oft_close_file(struct oft_entry *entry) {
             continue;
         }
 
-        oft_id = i;
+        oft_id = (int)i;
         break;
     }
 
@@ -124,7 +124,7 @@ int oft_close_file(struct oft_entry *entry) {
 
     entry->ref_count--;
     if (entry->ref_count == 0) {
-        if (vec_len(&open_file_table) == oft_id + 1) {
+        if (vec_len(&open_file_table) == (size_t)oft_id + 1) {
             vec_pop_back(&open_file_table, NULL);
             entry_deletor((void*)entry);
         } else {
@@ -137,7 +137,7 @@ int oft_close_file(struct oft_entry *entry) {
 
 int find_file_in_table(int *oft_id) {
     if (oft_id != NULL)  *oft_id = -1;
-    for (int i = 0; i < vec_len(&open_file_table); i++) {
+    for (size_t i = 0; i < vec_len(&open_file_table); i++) {
         struct oft_entry *next_entry = vec_get(&open_file_table, i);
         if (next_entry == NULL) {
             if (oft_id != NULL && *oft_id == -1) {
@@ -145,12 +145,12 @@ int find_file_in_table(int *oft_id) {
             }
         }
     }
-    if (oft_id != NULL) *oft_id = vec_len(&open_file_table);
+    if (oft_id != NULL) *oft_id = (int)vec_len(&open_file_table);
     return FILE_NOT_FOUND;
 }
 
 err_t get_oft_entry_by_fd(int fd, struct oft_entry** entry_res) {
-    if (fd < 0 || fd >= vec_len(&open_file_table)) {
+    if (fd < 0 || (size_t)fd >= vec_len(&open_file_table)) {
         return OFT_FD_DOES_NOT_EXIST;
     } 
 

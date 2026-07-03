@@ -74,10 +74,10 @@ char *str_concat(char *str1, char *str2) {
         printf("Malloc failed on str_concat\n");
         return NULL;
     }
-    for (int i = 0; i < len1; i++) {
+    for (size_t i = 0; i < len1; i++) {
         new_str[i] = str1[i];
     }
-    for (int i = 0; i < len2; i++) {
+    for (size_t i = 0; i < len2; i++) {
         new_str[len1+i] = str2[i];
     }
     new_str[len1+len2] = '\0';
@@ -88,7 +88,10 @@ char *str_concat(char *str1, char *str2) {
 char *str_copy(char *str) {
     size_t len = strlen(str);
     char *new_str = malloc(sizeof(char)*(len+1));
-    for (int i = 0; i <= len; i++) {
+    if (new_str == NULL) {
+        return NULL;
+    }
+    for (size_t i = 0; i <= len; i++) {
         new_str[i] = str[i];
     }
     return new_str;
