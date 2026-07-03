@@ -183,9 +183,12 @@ void scheduler_tick(void *ctx) {
 
     // Handle queue'd signals
     if (curr_proc != NULL) {
-        if (curr_proc->pending_signals & (1 << SIGKILL)) {
+        if ((curr_proc->pending_signals & (1 << SIGKILL)) &&
+            curr_proc->sigactions[SIGKILL].sa_handler == SIG_DFL) {
+            curr_proc->pending_signals &= ~(1 << SIGKILL);
             terminate_process(curr_proc);
-        } else if (curr_proc->pending_signals & (1 << SIGSTOP)) {
+        } else if ((curr_proc->pending_signals & (1 << SIGSTOP)) &&
+                   curr_proc->sigactions[SIGSTOP].sa_handler == SIG_DFL) {
             curr_proc->pending_signals &= ~(1 << SIGSTOP);
             stop_process(curr_proc);
         }

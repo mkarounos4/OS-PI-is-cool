@@ -43,7 +43,7 @@ typedef struct pcb_st {
     pid_t ppid; // Parent pid
     pid_t pgid; // group id
     
-    const char *name;
+    char name[32];
     pid_t waiting_for_pid;
     uint32_t waiting_for_flags;
     enum process_state state;
@@ -93,3 +93,5 @@ void send_unblock_event(pid_t pid, uint32_t event);
 pid_t getpgid();
 int setpgrp(pid_t pid, pid_t pgid);
 int dup2(int oldfd, int newfd);
+int print_processes(void);
+int set_process_name(const char *name);

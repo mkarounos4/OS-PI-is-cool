@@ -82,8 +82,8 @@ static inline err_t fs_chmod(char *file_name, char *new_perms, int flag) {
                             flag);
 }
 
-static inline err_t ls(char *dir_path, int out_fd) {
-    return (err_t)sys_call2(S_FS_LS, (long)(uintptr_t)dir_path, out_fd);
+static inline err_t ls(char *dir_path) {
+    return (err_t)sys_call1(S_FS_LS, (long)(uintptr_t)dir_path);
 }
 
 static inline err_t fs_mkdir(char **file_paths) {

@@ -23,6 +23,9 @@ struct sigaction {
     int sa_flags;
 };
 
+#define SIG_DFL ((void (*)(int))0)
+#define SIG_IGN ((void (*)(int))1)
+
 static inline int sigprocmask(int how, const sigset_t *set, sigset_t *oldset) {
     return (int)sys_call3(S_SIGPROCMASK,
                           how,

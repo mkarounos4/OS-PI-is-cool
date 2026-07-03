@@ -582,76 +582,8 @@ int handle_job_builtins(struct parsed_command *parsed_cmd) {
 
     return 0;
 }
-static void report_command_error(const char *cmd, err_t err) {
-    if (err < 0) {
-        printf("%s: error %d\n", cmd, err);
-    }
-}
-
 int execvp(const char *cmd, char **args) {
-    if (strcmp(cmd, "cat") == 0) {
-        char **commands = args + 1;
-        int flag = 0;
-        char *output_file = NULL;
-
-        // Gets output flag and file if applicable
-        int i = 0;
-        while (commands[i] != NULL) {
-            if (commands[i][0] == '-') {
-                if (commands[i+1] == NULL) {
-                    return 0;
-                }
-
-                if (commands[i][1] == 'a') {
-                    flag = O_WRONLY | O_APPEND;
-                } else if (commands[i][1] == 'w') {
-                    flag = O_WRONLY;
-                } else {
-                    return 1;
-                }
-                output_file = commands[i+1];
-                commands[i] = NULL;
-                break;
-            }
-            i++;
-        }
-
-        report_command_error(cmd, cat(commands, output_file, flag));
-    } else if (strcmp(cmd, "ls") == 0) {
-        report_command_error(cmd, ls(args[1], STDOUT_FILENO));
-    } else if (strcmp(cmd, "touch") == 0) {
-        report_command_error(cmd, touch(args+1));
-    } else if (strcmp(cmd, "mv") == 0) {
-        if (args[1] == NULL || args[2] == NULL) {
-            exit(-1);
-        }
-        report_command_error(cmd, mv(args[1], args[2]));
-    } else if (strcmp(cmd, "rm") == 0) {
-        report_command_error(cmd, rm(args+1));
-    } else if (strcmp(cmd, "cp") == 0) {
-        if (args[1] == NULL || args[2] == NULL) {
-            exit(-1);
-        }
-        report_command_error(cmd, cp(args[1], args[2], 0));
-    } else if (strcmp(cmd, "mkdir") == 0) {
-        report_command_error(cmd, fs_mkdir(args+1));
-    } else if (strcmp(cmd, "cd") == 0) {
-        report_command_error(cmd, cd(args[1]));
-    } else if (strcmp(cmd, "echo") == 0) {
-        int i = 1;
-        while (args[i] != NULL) {
-            write(1, args[i], strlen(args[i]));
-            if (args[i + 1] != NULL) {
-                write(1, " ", 1);
-            }
-            i++;
-        }
-        write(1, "\n", 1);
-    } else {
-        perror("unknown command\n");
-        exit(EXIT_FAILURE);
-    }
-
-    exit(EXIT_SUCCESS);
-    return EXIT_SUCCESS;
+    (void)cmd;
+    (void)args;
+    return -1;
 }

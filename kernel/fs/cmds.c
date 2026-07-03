@@ -435,12 +435,12 @@ err_t fs_chmod(char *file_name, char *new_perms, int flag) {
     return k_chmod(file_name, perm_to_add, flag);
 }
 
-err_t ls(char *dir_path, int out_fd) {
+err_t ls(char *dir_path) {
     // Return if not mounted
     if (!get_is_mounted()) {
         return FS_NOT_MOUNTED;
     }
-    err_t res = k_ls(dir_path, out_fd);
+    err_t res = k_ls(dir_path, 1);
     return res;
 }
 

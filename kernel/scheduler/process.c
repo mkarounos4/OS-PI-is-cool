@@ -224,6 +224,71 @@ static pcb_t *get_next_unused_pcb() {
     return NULL;
 }
 
+static const char *process_state_char(enum process_state state) {
+    if (state == PROC_READY_STATE || state == PROC_RUNNING_STATE) {
+        return "R";
+    }
+    if (state == PROC_BLOCKED_STATE) {
+        return "B";
+    }
+    if (state == PROC_STOPPED_STATE) {
+        return "S";
+    }
+    if (state == PROC_ZOMBIE_STATE) {
+        return "Z";
+    }
+    return "?";
+}
+
+int print_processes(void) {
+    int err = fprintf(1, "PID PPID PRI STAT CMD\n");
+    if (err < 0) {
+        return err;
+    }
+
+    for (int i = 0; i < MAX_PROCESS_COUNT; i++) {
+        pcb_t *pcb = &processes[i];
+        if (pcb->state == PROC_UNUSED_STATE) {
+            continue;
+        }
+
+        err = fprintf(1, "%d %d %d %s %s\n",
+                      pcb->pid,
+                      pcb->ppid,
+                      pcb->priority,
+                      process_state_char(pcb->state),
+                      pcb->name);
+        if (err < 0) {
+            return err;
+        }
+    }
+
+    return SUCCESS;
+}
+
+static void process_copy_name(pcb_t *pcb, const char *name) {
+    size_t i = 0;
+    if (name == NULL || name[0] == '\0') {
+        name = "?";
+    }
+
+    while (i + 1 < sizeof(pcb->name) && name[i] != '\0') {
+        pcb->name[i] = name[i];
+        i++;
+    }
+    pcb->name[i] = '\0';
+}
+
+int set_process_name(const char *name) {
+    pcb_t *pcb = get_curr_process();
+    if (pcb == NULL) {
+        return -1;
+    }
+
+    process_copy_name(pcb, name);
+    return 0;
+}
+
 pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     pcb_t *new_proc = get_next_unused_pcb();
     if (new_proc == NULL) {
@@ -254,7 +319,7 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     new_proc->wait_cont_pending = 0;
     new_proc->waiting_for_flags = 0;
     new_proc->exit_code = 0;
-    new_proc->name = NULL;
+    process_copy_name(new_proc, parent_proc != NULL ? parent_proc->name : "?");
     new_proc->entry_func = func;
     new_proc->args = args;
     new_proc->priority = 1;
@@ -399,6 +464,10 @@ void processes_init() {
     }
 
     pid_t pid = proc_create((void *(*)(void *))(uintptr_t)USER_INIT_PROCESS_ENTRY, NULL, 0);
+    pcb_t *init_pcb = get_pcb_by_pid(pid);
+    if (init_pcb != NULL) {
+        process_copy_name(init_pcb, "init");
+    }
     add_task_to_scheduler(get_pcb_by_pid(pid));
 }
 

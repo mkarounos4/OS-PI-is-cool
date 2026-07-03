@@ -1,6 +1,5 @@
-#include "lib/fs_syscall.h"
+#include "lib/cmd_utils.h"
 
 int main(int argc, char **argv) {
-    (void)argc;
-    return cat(argv + 1, NULL, 0);
+    return cmd_cat(argc, argv);
 }

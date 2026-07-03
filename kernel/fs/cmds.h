@@ -93,17 +93,15 @@ err_t cp(char *src_path, char *dest_path, int flag);
 err_t fs_chmod(char *file_name, char *new_perms, int flag);
 
 /**
- * @brief List the directory entries of dir_path and write a formatted
- * listing to the given fd. If dir_path is NULL, the current working
- * directory is listed.
+ * @brief List the directory entries of dir_path to stdout. If dir_path
+ * is NULL, the current working directory is listed.
  *
  * @param dir_path Path to the directory to list, or NULL for the
  * current directory.
- * @param out_fd File descriptor to write the listing to.
  * @return SUCCESS on success, FS_NOT_MOUNTED if no filesystem is mounted,
  * or an error code propagated from k_ls.
  */
-err_t ls(char *dir_path, int out_fd);
+err_t ls(char *dir_path);
 
 /**
  * @brief Create each directory in a NULL-terminated list. Stops and

@@ -182,7 +182,7 @@ struct trap_frame *syscall_dispatch(struct trap_frame *frame) {
                        (int)frame->regs[2]);
         break;
     case S_FS_LS:
-        ret = ls((char *)(uintptr_t)frame->regs[0], (int)frame->regs[1]);
+        ret = ls((char *)(uintptr_t)frame->regs[0]);
         break;
     case S_FS_MKDIR:
         ret = fs_mkdir((char **)(uintptr_t)frame->regs[0]);
@@ -250,6 +250,9 @@ struct trap_frame *syscall_dispatch(struct trap_frame *frame) {
         break;
     case S_PIPE:
         ret = pipe((int*)frame->regs[0]);
+        break;
+    case S_PS:
+        ret = print_processes();
         break;
     default:
         ret = SYS_ENOSYS;

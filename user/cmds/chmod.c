@@ -1,9 +1,5 @@
-#include "lib/fs_syscall.h"
+#include "lib/cmd_utils.h"
 
 int main(int argc, char **argv) {
-    if (argc < 3) {
-        return -1;
-    }
-
-    return fs_chmod(argv[1], argv[2], 0);
+    return cmd_chmod(argc, argv);
 }
