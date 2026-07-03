@@ -60,3 +60,27 @@ int destroy_ring_buffer(struct RingBuffer *buf) {
     kfree(buf->data);
     kfree(buf);
 }
+
+bool remove_back_ring_buffer(struct RingBuffer *buf) {
+    if (buf == NULL) {
+        return false;
+    }
+
+    if (buf->size == 0) {
+        return false;
+    }
+
+    buf->size--;
+    if (buf->tail == buf->data) {
+        buf->tail = buf->data + buf->capacity - 1;
+    } else {
+        buf->tail--;
+    }
+
+    if (buf->size == 0) {
+        buf->tail = NULL;
+        buf->head = NULL;
+    }
+    
+    return true;
+}

@@ -111,12 +111,18 @@ int tty_read(struct oft_entry *entry, char *buffer, size_t count) {
             continue;
         }
 
-        if (char_void == 0x04 || char_void == '\n') {
+        if (char_void == 0x04) {
             return num_read;
         }
+
         *buffer = char_void;
         buffer++;
         num_read++;
+
+        if (char_void == '\n') {
+            return num_read;
+        }
+
     }
 
     return num_read;
@@ -176,6 +182,10 @@ void tty_send_input(int minor, const char *buffer, size_t count) {
         } else if (*buffer == 0x1A) {
             s_kill(SIGTSTP, -tty_state.devices[minor]->fg_pgid);
             tty_write(NULL, "^Z", 2);
+            to_write = 0;
+        } else if (*buffer == 0x7F) {
+            remove_back_ring_buffer(&tty_state.devices[minor]->rx);
+            tty_write(NULL, "\b \b", 3);
             to_write = 0;
         } else if (*buffer != 0x04){
             tty_write(NULL, buffer, 1);
