@@ -399,7 +399,8 @@ struct trap_frame *exception_dispatch(struct trap_frame *frame) {
     }
 
     if (is_sync_type(frame->type)) {
-        return handle_sync_exception(frame);
+        struct trap_frame *ret = handle_sync_exception(frame);
+        return ret;
     }
 
     handle_fatal_exception("unknown exception vector", frame);

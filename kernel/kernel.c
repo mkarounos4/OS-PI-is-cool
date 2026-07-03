@@ -22,83 +22,86 @@
 
 #define FS_DEFAULT_INODE_TABLE_BLOCKS 4
 #define FS_DEFAULT_BLOCK_SIZE_CONFIG 1
+#define RAM_END_PHYS 0x40000000
 
 void kernel_main(void) {
     uart_init();
-    uart_puts("\nAArch64 bare-metal kernel entered\n");
+    printf("\nAArch64 bare-metal kernel entered\n");
     fan_init();
 
     exceptions_init();
 
-    uart_puts("[boot] irq_init begin\n");
+    printf("[boot] irq_init begin\n");
     irq_init();
-    uart_puts("[boot] irq_init done\n");
+    printf("[boot] irq_init done\n");
     uart_irq_init();
-    uart_puts("[boot] timer_init begin\n");
+    printf("[boot] timer_init begin\n");
     timer_init();
-    uart_puts("[boot] timer_init done\n");
-    uart_puts("[boot] timer frequency=");
-    uart_puthex(timer_get_frequency());
-    uart_puts("\n");
+    printf("[boot] timer_init done\n");
+    printf("[boot] timer frequency=");
+    printf("%x", timer_get_frequency());
+    printf("\n");
     irq_enable();
-    uart_puts("[boot] irq_enable done\n");
+    printf("[boot] irq_enable done\n");
 
+    printf("cringe %d\n", -17);
+    
     install_kernel_page_table();
-    uart_puts("[boot] final kernel page table installed\n");
+    printf("[boot] final kernel page table installed\n");
 
     kmem_init((void *)(uintptr_t)KERNEL_HEAP_START,
               (void *)(uintptr_t)(KERNEL_HEAP_START + KERNEL_HEAP_SIZE));
-    uart_puts("[boot] kernel heap ready\n");
-    uart_puts("[boot] virtual memory enabled\n");
+    printf("[boot] kernel heap ready\n");
+    struct Page *pages = kmalloc(RAM_END_PHYS / PAGE_SIZE);
+    pt_init(pages);
+    printf("[boot] virtual memory enabled\n");
 
     int block_ready = 0;
-    uart_puts("[boot] block_init begin\n");
+    printf("[boot] block_init begin\n");
     if (block_init() == 0) {
         block_ready = 1;
-        uart_puts("[boot] block_init done\n");
+        printf("[boot] block_init done\n");
     } else {
-        uart_puts("[boot] block_init failed\n");
+        printf("[boot] block_init failed\n");
     }
 
-    int fs_ready = 0;
     int err = SUCCESS;
     if (block_ready) {
         err = mount();
         if (err == FS_INVALID) {
-            uart_puts("[fs] invalid fs, running mkfs\n");
+            printf("[fs] invalid fs, running mkfs\n");
             err = mkfs(FS_DEFAULT_INODE_TABLE_BLOCKS,
                        FS_DEFAULT_BLOCK_SIZE_CONFIG);
             if (err != SUCCESS) {
-                uart_puts("[fs] ERROR: failed to mkfs\n");
+                printf("[fs] ERROR: failed to mkfs\n");
                 print_error(err);
             } else {
-                uart_puts("[fs] mkfs done, mounting\n");
+                printf("[fs] mkfs done, mounting\n");
                 err = mount();
             }
         }
 
         if (err == SUCCESS) {
-            fs_ready = 1;
-            uart_puts("[fs] mounted fs\n");
+            printf("[fs] mounted fs\n");
         } else {
-            uart_puts("[fs] ERROR: failed to mount fs\n");
+            printf("[fs] ERROR: failed to mount fs\n");
             print_error(err);
         }
     }
 
     initialize_char_device_registry();
-    uart_puts("[tty] Intialized char device registry.");
+    printf("[tty] Intialized char device registry.");
     err = tty_drivers_init();
     if (err) {
-        uart_puts("[tty] ERROR: failed to init tty driver\n");
+        printf("[tty] ERROR: failed to init tty driver\n");
     } else {
-        uart_puts("[tty] Initialized tty driver.");
+        printf("[tty] Initialized tty driver.");
     }
     int tty = tty_create();
     if (tty < 0) {
-        uart_puts("[tty] ERROR: failed to create tty instance\n");
+        printf("[tty] ERROR: failed to create tty instance\n");
     } else {
-        uart_puts("[tty] Created terminal");
+        printf("[tty] Created terminal");
     }
 
     scheduler_init();
@@ -106,6 +109,6 @@ void kernel_main(void) {
 
     while (1) {
         timer_delay_ms(750);
-        uart_puts("while loop heartbeat\n");
+        printf("while loop heartbeat\n");
     }
 }

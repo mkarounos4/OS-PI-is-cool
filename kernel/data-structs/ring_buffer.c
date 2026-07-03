@@ -1,56 +1,86 @@
 #include "ring_buffer.h"
+#include "uart.h"
 
-struct RingBuffer *create_ring_buffer(int capacity) {
-    struct RingBuffer *buf = malloc(sizeof(struct RingBuffer));
-    buf->data = malloc(sizeof(void*) * capacity);
+struct RingBuffer create_ring_buffer(int capacity) {
+    struct RingBuffer buf;
+    buf.head = NULL;
+    buf.tail = NULL;
+    buf.size = 0;
+    buf.capacity = capacity;
+    buf.data = kmalloc(sizeof(char*) * capacity);
+    return buf;
 }
 
-bool consume_ring_buffer(struct RingBuffer *buf, void *next) {
-    if (size == 0) {
+bool consume_ring_buffer(struct RingBuffer *buf, char *next) {
+    if (buf->size == 0) {
         return false;
     }
 
-    next = *head;
-    size--;
-    if (head = data + capacity - 1) {
-        head = data;
+    *next = *(buf->head);
+    buf->size--;
+    if (buf->head == buf->data + buf->capacity - 1) {
+        buf->head = buf->data;
     } else {
-        head++;
+        buf->head++;
     }
 
-    if (size == 0) {
-        tail = NULL;
-        head = NULL;
+    if (buf->size == 0) {
+        buf->tail = NULL;
+        buf->head = NULL;
     }
 
     return true;
 }
 
-bool produce_ring_buffer(struct RingBuffer *buf, void *next) {
+bool produce_ring_buffer(struct RingBuffer *buf, const char *next) {
     if (buf == NULL) {
         return false;
     }
 
-    if (size == capacity) {
+    if (buf->size == buf->capacity) {
         return false;
     }
 
-    if (size == 0) {
-        tail = data;
-        head = data;
-    } else if (tail == data + capacity - 1) {
-        tail = data;
+    if (buf->size == 0) {
+        buf->tail = buf->data;
+        buf->head = buf->data;
+    } else if (buf->tail == buf->data + buf->capacity - 1) {
+        buf->tail = buf->data;
     } else {
-        tail++;
+        buf->tail++;
     }
-    *tail = next;
+    *(buf->tail) = *next;
 
-    size++;
+    buf->size++;
 
     return true;
 }
 
 int destroy_ring_buffer(struct RingBuffer *buf) {
     kfree(buf->data);
-    kfree(buf);
+    return 0;
+}
+
+bool remove_back_ring_buffer(struct RingBuffer *buf) {
+    if (buf == NULL) {
+        return false;
+    }
+
+    if (buf->size == 0) {
+        return false;
+    }
+
+    buf->size--;
+    if (buf->tail == buf->data) {
+        buf->tail = buf->data + buf->capacity - 1;
+    } else {
+        buf->tail--;
+    }
+
+    if (buf->size == 0) {
+        buf->tail = NULL;
+        buf->head = NULL;
+    }
+    
+    return true;
 }

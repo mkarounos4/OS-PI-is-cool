@@ -2,6 +2,7 @@
 
 #include "disk/block.h"
 #include "timer/timer.h"
+#include "devices/devices.h"
 
 #define MKFS_FILL_CHUNK_BLOCKS 32u
 
@@ -223,7 +224,7 @@ err_t mkfs_inode(int inode_table_blocks, int bytes_per_block) {
     memset(&root_node, 0, sizeof(root_node));
     attributes_t meta = {
         .i_links_count = 2,
-        .type = DIRECTORY_F_TYPE,
+        .type = DIRECTORY_TYPE,
         .perm = 0x7,
         .i_blocks = 1,
         .mtime = timer_get_ticks(),
@@ -393,6 +394,23 @@ err_t update_inode_metadata(ino_id_t id, int flags, uint8_t type, uint8_t perm) 
     }
 
     node->dirty = 1;
+    remove_ref_from_cache(id);
+    return SUCCESS;
+}
+
+err_t set_inode_metadata(ino_id_t id, attributes_t *metadata) {
+    if (id == 0) {
+        return INVALID_ARGS;
+    }
+
+    struct cached_inode_st *node;
+    err_t err = get_inode(&node, id);
+    if (err) {
+        return err;
+    }
+
+    node->dirty = 1;
+    node->inode.metadata = *metadata;
     remove_ref_from_cache(id);
     return SUCCESS;
 }
@@ -784,14 +802,14 @@ int free_from_single_ptr(block_no_t single_block, struct inode_st *inode, int *t
         kfree(single_ptr_data);
         return err_code;
     }
-    for (int i = 0; i < BLOCKS_IN_SINGLE_PTR; i++) {
+    for (size_t i = 0; i < BLOCKS_IN_SINGLE_PTR; i++) {
         err_code = set_block_allocated(single_ptr_data[i], 0);
         if (err_code != SUCCESS) {
             kfree(single_ptr_data);
             return err_code;
         }
         (*total_removed)++;
-        if ((*total_removed) == inode->metadata.i_blocks) {
+        if ((uint32_t)(*total_removed) == inode->metadata.i_blocks) {
             kfree(single_ptr_data);
             return -1;
         }
@@ -813,7 +831,7 @@ int free_from_double_ptr(block_no_t double_block, struct inode_st *inode, int *t
         return err_code;
     }
 
-    for (int i = 0; i < BLOCKS_IN_SINGLE_PTR; i++) {
+    for (size_t i = 0; i < BLOCKS_IN_SINGLE_PTR; i++) {
         int ret_val = free_from_single_ptr(double_ptr_data[i], inode, total_removed);
         if (ret_val != SUCCESS) {
             kfree(double_ptr_data);
@@ -837,7 +855,7 @@ int free_from_triple_ptr(block_no_t triple_block, struct inode_st *inode, int *t
         return err_code;
     }
 
-    for (int i = 0; i < BLOCKS_IN_SINGLE_PTR; i++) {
+    for (size_t i = 0; i < BLOCKS_IN_SINGLE_PTR; i++) {
         int ret_val = free_from_double_ptr(triple_ptr_data[i], inode, total_removed);
         if (ret_val != SUCCESS) {
             kfree(triple_ptr_data);
@@ -920,7 +938,7 @@ err_t free_file_inode(struct cached_inode_st *cache_inode) {
     return clear_blocks_of_inode(inode, 0);
 }
 
-err_t add_new_file_inode(ino_id_t *inode_num, int file_type, uint8_t perm) {
+err_t add_new_file_inode(ino_id_t *inode_num, int file_type, uint8_t perm, struct file_operations *fops) {
     // If return params are NULL, give temp values to not cause null reference errors
     if (inode_num == NULL) {
         ino_id_t inode_temp = 0;
@@ -951,6 +969,8 @@ err_t add_new_file_inode(ino_id_t *inode_num, int file_type, uint8_t perm) {
     new_node->metadata.perm = perm;
     new_node->metadata.i_blocks = 0;
     new_node->metadata.mtime = timer_get_ticks();
+    new_node->metadata.fops = fops;
+    new_node->metadata.i_pipe = NULL;
 
     // Write data back
     err_code = write_block(data, block_with_inode);

@@ -28,8 +28,10 @@
 #define BOOT_DEVICE_BLOCK  (DESC_VALID | DESC_BLOCK | PTE_AF | PTE_PXN | PTE_UXN)
 
 #define L1_INDEX_QEMU_LOCAL 1ULL
+#define L1_INDEX_RPI5_PCIE   64ULL
 #define L1_INDEX_RPI_GIC    65ULL
-#define L1_INDEX_RPI5_RP1   112ULL
+#define L1_INDEX_RPI5_RP1_PERIPH 112ULL
+#define L1_INDEX_RPI5_RP1_MSIX   126ULL
 
 #define TCR_T0SZ_48BIT      (16ULL << 0)
 #define TCR_IRGN0_WB_RA_WA  (1ULL << 8)
@@ -91,13 +93,17 @@ static void BOOT_TEXT initialize_boot_tables(void) {
 
     map_l1_block(boot_ttbr0_l1, 0, BOOT_NORMAL_BLOCK);
     map_l1_block(boot_ttbr0_l1, L1_INDEX_QEMU_LOCAL, BOOT_DEVICE_BLOCK);
+    map_l1_block(boot_ttbr0_l1, L1_INDEX_RPI5_PCIE, BOOT_DEVICE_BLOCK);
     map_l1_block(boot_ttbr0_l1, L1_INDEX_RPI_GIC, BOOT_DEVICE_BLOCK);
-    map_l1_block(boot_ttbr0_l1, L1_INDEX_RPI5_RP1, BOOT_DEVICE_BLOCK);
+    map_l1_block(boot_ttbr0_l1, L1_INDEX_RPI5_RP1_PERIPH, BOOT_DEVICE_BLOCK);
+    map_l1_block(boot_ttbr0_l1, L1_INDEX_RPI5_RP1_MSIX, BOOT_DEVICE_BLOCK);
 
     map_l1_block(boot_ttbr1_l1, 0, BOOT_NORMAL_BLOCK);
     map_l1_block(boot_ttbr1_l1, L1_INDEX_QEMU_LOCAL, BOOT_DEVICE_BLOCK);
+    map_l1_block(boot_ttbr1_l1, L1_INDEX_RPI5_PCIE, BOOT_DEVICE_BLOCK);
     map_l1_block(boot_ttbr1_l1, L1_INDEX_RPI_GIC, BOOT_DEVICE_BLOCK);
-    map_l1_block(boot_ttbr1_l1, L1_INDEX_RPI5_RP1, BOOT_DEVICE_BLOCK);
+    map_l1_block(boot_ttbr1_l1, L1_INDEX_RPI5_RP1_PERIPH, BOOT_DEVICE_BLOCK);
+    map_l1_block(boot_ttbr1_l1, L1_INDEX_RPI5_RP1_MSIX, BOOT_DEVICE_BLOCK);
 }
 
 void BOOT_TEXT initialize_vm(void) {
@@ -167,6 +173,8 @@ void install_kernel_page_table(void) {
         : "memory");
 }
 
+static void dump_mmu_state(void);
+
 void handle_instruction_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t esr) {
     (void)far;
     (void)elr;
@@ -179,6 +187,7 @@ void handle_instruction_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t
     } else if (fsc < ACCESS_FLAG_FAULT + 4) {
         fatal_exception("Instruction Abort: access flag set to 0");
     } else if (fsc < PERMISSION_FAULT + 4) {
+        dump_mmu_state();
         fatal_exception("Instruction Abort: Permission fault");
     } else if (fsc == SYNC_EXT_ABORT_NON_WALK) {
         fatal_exception("Instruction Abort: synchronous external abort");
@@ -195,6 +204,65 @@ void handle_instruction_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t
     } else {
         fatal_exception("Instruction Abort: Unknown fsc.");
     }
+}
+
+static void dump_mmu_state(void)
+{
+    uint64_t current_pc;
+    uint64_t sp;
+    uint64_t ttbr0;
+    uint64_t ttbr1;
+    uint64_t tcr;
+    uint64_t sctlr;
+    uint64_t vbar;
+    uint64_t el;
+    uint64_t esr;
+    uint64_t far;
+    uint64_t elr;
+
+    asm volatile("adr %0, ." : "=r"(current_pc));
+    asm volatile("mov %0, sp" : "=r"(sp));
+
+    asm volatile("mrs %0, CurrentEL" : "=r"(el));
+    asm volatile("mrs %0, ttbr0_el1" : "=r"(ttbr0));
+    asm volatile("mrs %0, ttbr1_el1" : "=r"(ttbr1));
+    asm volatile("mrs %0, tcr_el1" : "=r"(tcr));
+    asm volatile("mrs %0, sctlr_el1" : "=r"(sctlr));
+    asm volatile("mrs %0, vbar_el1" : "=r"(vbar));
+
+    asm volatile("mrs %0, esr_el1" : "=r"(esr));
+    asm volatile("mrs %0, far_el1" : "=r"(far));
+    asm volatile("mrs %0, elr_el1" : "=r"(elr));
+
+    printf("CurrentEL : %x\n", el);
+    printf("PC        : %x\n", current_pc);
+    printf("SP        : %x\n", sp);
+
+    printf("TTBR0_EL1 : %x\n", ttbr0);
+    printf("TTBR1_EL1 : %x\n", ttbr1);
+
+    printf("TCR_EL1   : %x\n", tcr);
+    printf("SCTLR_EL1 : %x\n", sctlr);
+
+    printf("VBAR_EL1  : %x\n", vbar);
+
+    printf("ELR_EL1   : %x\n", elr);
+    printf("ESR_EL1   : %x\n", esr);
+    printf("FAR_EL1   : %x\n", far);
+}
+
+extern char _stack_top;
+extern char __kernel_start;
+extern char __kernel_end;
+
+void dump_symbols(void)
+{
+    int local;
+
+    printf("&local         : %x\n", (uint64_t)&local);
+    printf("_stack_top     : %x\n", (uint64_t)&_stack_top);
+    printf("__kernel_start : %x\n", (uint64_t)&__kernel_start);
+    printf("__kernel_end   : %x\n", (uint64_t)&__kernel_end);
 }
 
 void handle_data_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t esr) {
@@ -269,7 +337,106 @@ void handle_data_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t esr) {
 
         fatal_exception("Data Abort: access flag set to 0");
     } else if (fsc < PERMISSION_FAULT + 4) {
-        fatal_exception("Data Abort: Permission fault");
+        // permission fault: attempt to handle COW write fault
+        if (!far_valid) {
+            fatal_exception("Data Abort: Permission fault, invalid far"); 
+            return;
+        }
+        if (!is_write) {
+            fatal_exception("Data Abort: Permission fault, read");
+            return;
+        }
+        if ((far >> 48) == 0xFFFF) {
+            fatal_exception("Data Abort: Permission fault, kernel addres"); 
+            return;
+        }
+        pcb_t *curr_proc = get_curr_process();
+        if (curr_proc == NULL) {
+            fatal_exception("Data Abort: Permission fault, user address; no process"); 
+            return;
+        }
+
+        // walk page table
+        uint64_t table_base_va = kernel_direct_map_va(curr_proc->ctx.ttbr0_el1);
+        uint64_t *l0 = (uint64_t *)(uintptr_t)table_base_va;
+
+        uint64_t va = far;
+        uint64_t l0_index = (va >> 39) & 0x1ffULL;
+        uint64_t l1_index = (va >> 30) & 0x1ffULL;
+        uint64_t l2_index = (va >> 21) & 0x1ffULL;
+        uint64_t l3_index = (va >> 12) & 0x1ffULL;
+
+        if ((l0[l0_index] & DESC_VALID) == 0) {
+            fatal_exception("Data Abort COW: missing L0 entry"); 
+            return;
+        }
+        uint64_t *l1 = (uint64_t *)(uintptr_t)kernel_direct_map_va(l0[l0_index] & PTE_ADDR_MASK);
+        if ((l1[l1_index] & DESC_VALID) == 0) {
+            fatal_exception("Data Abort COW: missing L1 entry"); 
+            return;
+        }
+        uint64_t *l2 = (uint64_t *)(uintptr_t)kernel_direct_map_va(l1[l1_index] & PTE_ADDR_MASK);
+        if ((l2[l2_index] & DESC_VALID) == 0) {
+            fatal_exception("Data Abort COW: missing L2 entry"); 
+            return;
+        }
+        uint64_t *l3 = (uint64_t *)(uintptr_t)kernel_direct_map_va(l2[l2_index] & PTE_ADDR_MASK);
+        if ((l3[l3_index] & DESC_VALID) == 0) {
+            fatal_exception("Data Abort COW: missing L3 entry"); 
+            return;
+        }
+        uint64_t *pte_ptr = &l3[l3_index];
+        uint64_t pte_val = *pte_ptr;
+
+        // ensure page descriptor and user mapping
+        if ((pte_val & DESC_VALID) == 0) {
+            fatal_exception("Data Abort COW: not a page descriptor"); 
+            return;
+        }
+        if (!pte_is_user(pte_val)) {
+            fatal_exception("Data Abort COW: permission fault on non-user page"); 
+            return;
+        }
+
+        uint64_t pa = pte_val & PTE_ADDR_MASK;
+
+        if (!pte_test_cow_flag(pa, PTE_FLAG_COW)) {
+            fatal_exception("Data Abort COW: write to non-COW read-only page"); 
+            return;
+        }
+
+        uint16_t refcnt = get_pte_refcount_pa(pa);
+        if (refcnt > 1) { // multiple page owners
+            // allocate new page and copy
+            void *new_page_va = alloc_page();
+            if (new_page_va == NULL) {
+                fatal_exception("Data Abort COW: out of memory allocating copy page"); 
+                return;
+            }
+
+            uint64_t new_pa = kernel_phys_addr((uint64_t)(uintptr_t)new_page_va);
+            if (!copy_phys_page(pa, new_pa)) {
+                free_page(new_page_va);
+                fatal_exception("Data Abort COW: failed to copy physical page");
+                return;
+            }
+
+            // decrement refcount for shared page
+            dec_pte_refcount_pa(pa);
+
+            // update PTE, preserve attrs, make writable, clear COW metadata
+            uint64_t attrs = pte_val & ~PTE_ADDR_MASK;
+            *pte_ptr = (new_pa & PTE_ADDR_MASK) | attrs;
+            pte_clear_cow_and_make_writable(pte_ptr);
+
+            invalidate_all_stage1_tlbs();
+            return;
+        } else { // sole owner of page
+            pte_clear_cow_and_make_writable(pte_ptr);
+            pte_clear_cow_flag(pa, PTE_FLAG_COW);
+            invalidate_all_stage1_tlbs();
+            return;
+        }
     } else if (fsc == SYNC_EXT_ABORT_NON_WALK) {
         fatal_exception("Data Abort: synchronous external abort");
     } else if (fsc == SYNC_TAG_CHECK_FAULT) {

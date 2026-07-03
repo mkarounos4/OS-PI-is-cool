@@ -2,6 +2,9 @@
 
 #include "disk/block.h"
 #include "dirs.h"
+#include "fs_test.h"
+#include "inodes.h"
+#include "fs/caches/inode_cache.h"
 
 #define FS_MOUNT_BLOCK_BUFFER_SIZE 4096
 
@@ -322,8 +325,8 @@ static err_t validate_root_directory(void) {
                 strcmp(dir[1].name, "..") != 0 ||
                 dir[0].ino_id != ROOT_INO ||
                 dir[1].ino_id != ROOT_INO ||
-                first_metadata.type != DIRECTORY_F_TYPE ||
-                second_metadata.type != DIRECTORY_F_TYPE) {
+                first_metadata.type != DIRECTORY_TYPE ||
+                second_metadata.type != DIRECTORY_TYPE ) {
                 kfree(dir);
                 return FS_INVALID;
             }
@@ -739,9 +742,21 @@ err_t clear_blocks_of_file(struct oft_entry *entry) {
     return clear_blocks_of_inode(&entry->inode->inode, 1);
 }
 
-int add_new_file(struct oft_entry **entry, int file_type, uint8_t perm) {
+err_t clear_blocks_of_file_by_id(ino_id_t id) {
+    struct cached_inode_st *inode_cached = get_inode_from_cache(id);
+    if (inode_cached == 0) {
+        return -1;
+    }
+
+    int to_ret = clear_blocks_of_inode(&inode_cached->inode, 1);
+    err_t error = remove_ref_from_cache(id);
+    if (error) return error;
+    return to_ret;
+}
+
+int add_new_file(struct oft_entry **entry, int file_type, uint8_t perm, struct file_operations *fops) {
     ino_id_t ino_id;
-    err_t error = add_new_file_inode(&ino_id, file_type, perm);
+    err_t error = add_new_file_inode(&ino_id, file_type, perm, fops);
     if (error != SUCCESS) {
         return error;
     }
@@ -754,8 +769,8 @@ int add_new_file(struct oft_entry **entry, int file_type, uint8_t perm) {
     return ino_id;
 }
 
-err_t add_new_file_with_id(block_no_t* new_block, int file_type, uint8_t perm) {
-    return add_new_file_inode(new_block, file_type, perm);
+err_t add_new_file_with_id(block_no_t* new_block, int file_type, uint8_t perm, struct file_operations *fops) {
+    return add_new_file_inode(new_block, file_type, perm, fops);
 }
 
 err_t remove_last_block(ino_id_t id_in_fs) {

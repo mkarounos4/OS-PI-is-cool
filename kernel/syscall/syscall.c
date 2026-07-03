@@ -9,6 +9,7 @@
 #include "signals/signals.h"
 #include "memory/page_table/page_table.h"
 #include "fs/cmds.h"
+#include "pipe/pipe.h"
 
 #define SYS_WRITE_CONSOLE_MAX 1024u
 #define SYS_USER_PTR_MIN      UINT64_C(0x1000)
@@ -68,6 +69,7 @@ static long s_spawn(void* (*func)(void*), void *argv) {
     if (new_pcb == NULL) {
         return -1;
     }
+    add_task_to_scheduler(new_pcb);
 
     return new_pcb->pid;
 }
@@ -208,6 +210,46 @@ struct trap_frame *syscall_dispatch(struct trap_frame *frame) {
         ret = write((int)frame->regs[0],
                     (char *)(uintptr_t)frame->regs[1],
                     (int)frame->regs[2]);
+        break;
+    case S_SIGPROCMASK:
+        ret = sigprocmask((int)frame->regs[0],
+                          (const signalset_t *)(uintptr_t)frame->regs[1],
+                          (signalset_t *)(uintptr_t)frame->regs[2]);
+        break;
+    case S_SIGEMPTYSET:
+        ret = sigemptyset((signalset_t *)(uintptr_t)frame->regs[0]);
+        break;
+    case S_SIGADDSET:
+        ret = sigaddset((signalset_t *)(uintptr_t)frame->regs[0], (int)frame->regs[1]);
+        break;
+    case S_SIGFILLSET:
+        ret = sigfillset((signalset_t *)(uintptr_t)frame->regs[0]);
+        break;
+    case S_SIGSUSPEND:
+        ret = sigsuspend((const signalset_t *)(uintptr_t)frame->regs[0]);
+        break;
+    case S_SIGACTION:
+        ret = sigaction((int)frame->regs[0],
+                        (struct sigaction *)(uintptr_t)frame->regs[1],
+                        (struct sigaction *)(uintptr_t)frame->regs[2]);
+        break;
+    case S_FORK:
+        ret = fork(frame);
+        break;
+    case S_DUP2:
+        ret = dup2((pid_t)frame->regs[0], (pid_t)frame->regs[1]);
+        break;
+    case S_SETPGID:
+        ret = setpgrp((pid_t)frame->regs[0], (pid_t)frame->regs[1]);
+        break;
+    case S_GETPGRP:
+        ret = getpgid();
+        break;
+    case S_TCSETPGRP:
+        ret = tcsetpgrp((int)frame->regs[0], (pid_t)frame->regs[1]);
+        break;
+    case S_PIPE:
+        ret = pipe((int*)frame->regs[0]);
         break;
     default:
         ret = SYS_ENOSYS;

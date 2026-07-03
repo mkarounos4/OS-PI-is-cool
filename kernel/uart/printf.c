@@ -23,11 +23,11 @@ void printf(const char *fmt, ...) {
 		uart_puts(va_arg(args, const char *));
 	    	break;
 	    case 'u':
-		uart_putint(va_arg(args, unsigned int));
+		uart_putuint(va_arg(args, unsigned int));
 	    	break;
 	    case 'x':
 	    case 'X':
-		uart_puthex(va_arg(args, unsigned int));
+		uart_puthex(va_arg(args, unsigned long));
 	    	break;
 	    case '%':
 		uart_putc('%');

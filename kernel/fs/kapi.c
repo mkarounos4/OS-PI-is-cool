@@ -1,5 +1,22 @@
 #include "kapi.h"
 #include "uart/uart.h"
+#include "oft.h"
+#include "dirs.h"
+#include "devices/devices.h"
+
+int default_read(struct oft_entry *entry, char *buf, size_t n);
+int default_write(struct oft_entry *entry, const char *buf, size_t n);
+
+static struct file_operations default_ops = (struct file_operations) {
+    .open = NULL,
+    .close = NULL,
+    .read = default_read,
+    .write = default_write,
+};
+
+struct file_operations *get_default_fops() {
+    return &default_ops;
+}
 
 int k_open(const char *fname, int mode) {
     // Return if not mounted
@@ -21,7 +38,7 @@ int k_open(const char *fname, int mode) {
     struct fs_dirent dirent;
     ino_id_t parent_dir_id;
     char *actual_name;
-    err_t error = get_dirent_by_path(fname, &dirent, FILE_TYPE, &parent_dir_id, &actual_name);
+    err_t error = get_dirent_by_path(fname, &dirent, 0, &parent_dir_id, &actual_name);
     if (error == FILE_NOT_FOUND) {
         return FILE_NOT_FOUND;
     }
@@ -32,40 +49,40 @@ int k_open(const char *fname, int mode) {
         if (error != SUCCESS) {
             return error;
         }
-        if (!(metadata.perm & 0x4) && mode == F_READ) {
+        if (!(metadata.perm & 0x4) && (mode & O_RDONLY)) {
             return INVALID_PERMISSIONS;
-        } else if (!(metadata.perm & 0x2) && (mode == F_WRITE || mode == F_APPEND)) {
+        } if (!(metadata.perm & 0x2) && ((mode & O_WRONLY) || (mode & O_APPEND))) {
             return INVALID_PERMISSIONS;
         }
+
+        if (mode & O_TRUNC) {
+            err_t err = clear_blocks_of_file_by_id(dirent.ino_id);
+            if (err) {
+                return err;
+            }
+        }
+    } else if (!(mode & O_CREAT)) {
+        return FILE_NOT_FOUND;
     }
 
     // Create open or create new file and then return fd
     int fd = oft_open_file(mode, actual_name, error != FILE_NOT_CREATED ? dirent.ino_id: 0, parent_dir_id);
-    // Truncate on write if not a new file
-    if (fd > 0 && error != FILE_NOT_CREATED && mode == F_WRITE && dirent.ino_id != 0) {
-        struct oft_entry *entry;
-        err_t err = get_oft_entry_by_fd(fd, &entry);
-        if (err) {
-            return err;
-        }
-        err = clear_blocks_of_file(entry);
-        if (err) {
-            return err;
-        }
-        update_file_size(entry, 0);
-        entry->cursor = 0;
-        if (err) {
-            return err;
-        }
+    if (actual_name != NULL) {
+        kfree(actual_name);
+    }
+    if (fd < 0) {
+        return fd;
     }
 
     struct oft_entry *entry;
-    error = get_oft_entry_by_fd(fd, &entry);
+    err_t err = get_oft_entry_by_fd(fd, &entry);
     if (err != SUCCESS) {
         return err;
     }
-    if (entry->inode->inode.metadata->type == CHAR_DEVICE_TYPE) {
-        err = entry->inode->inode.metadata->fops->open(entry);
+
+    if (entry->inode->inode.metadata.fops != NULL &&
+        entry->inode->inode.metadata.fops->open != NULL) {
+        err = entry->inode->inode.metadata.fops->open(entry);
         if (err) {
             return err;
         }
@@ -74,42 +91,41 @@ int k_open(const char *fname, int mode) {
     return fd;
 }
 
-int k_close(int fd) {
+int k_close(struct oft_entry *entry) {
     // Return if not mounted
     if (!get_is_mounted()) {
         return FS_NOT_MOUNTED;
     }
 
-    struct oft_entry *entry;
-    if (err) {
-        return err;
-    }
-    if (entry->inode->inode.metadata->type == CHAR_DEVICE_TYPE) {
-        err = entry->inode->inode.metadata->fops.close(entry);
+    if (entry->inode->inode.metadata.fops != NULL &&
+        entry->inode->inode.metadata.fops->close != NULL) {
+        err_t err = entry->inode->inode.metadata.fops->close(entry);
         if (err) {
             return err;
         }
     }
 
-    return oft_close_file(fd);
+    return oft_close_file(entry);
 }
 
-int k_read(int fd, char *buf, int n) {
+int k_read(struct oft_entry *entry, char *buf, size_t n) {
     // Return if not mounted
     if (!get_is_mounted()) {
         return FS_NOT_MOUNTED;
     }
 
+    if (!(entry->mode & O_RDONLY)) {
+        return INVALID_PERMISSIONS;
+    }
+
+    if (entry->inode->inode.metadata.fops != NULL) {
+        return entry->inode->inode.metadata.fops->read(entry, buf, n);
+    }
+    return 0;
+}
+
+int default_read(struct oft_entry *entry, char *buf, size_t n) {
     int tot_bytes_read = 0;
-    struct oft_entry* entry;
-    if (get_oft_entry_by_fd(fd, &entry) == OFT_FD_DOES_NOT_EXIST) {
-        return OFT_FD_DOES_NOT_EXIST;
-    }
-
-    if (entry->inode->inode.metadata->type == CHAR_DEVICE_TYPE) {
-        return entry->inode->inode.metadata->fops.read(entry, buf, n);
-    }
-
     int size = get_file_size(entry);
     if (entry->cursor >= (uint32_t) size) {
         return 0;
@@ -119,7 +135,8 @@ int k_read(int fd, char *buf, int n) {
     unsigned int curr_block_index = entry->cursor / get_bytes_per_block();
     block_no_t curr_block_no = get_ith_block_of_file(entry, curr_block_index);
     int remainder_offset = entry->cursor % get_bytes_per_block();
-    int bytes_to_read = MIN((int) (size - entry->cursor), MIN(n, get_bytes_per_block() - remainder_offset));
+    int bytes_to_read = MIN(size - (int)entry->cursor,
+                            MIN((int)n, get_bytes_per_block() - remainder_offset));
     int start = 1;
     
     char *data = kmalloc(get_bytes_per_block());
@@ -166,7 +183,8 @@ int k_read(int fd, char *buf, int n) {
 
         // Go to next block in FAT, update real cursor and number bytes to read.
         curr_block_no = get_ith_block_of_file(entry, curr_block_index);
-        bytes_to_read = MIN((int) (size - entry->cursor), MIN(n, get_bytes_per_block()));
+        bytes_to_read = MIN(size - (int)entry->cursor,
+                            MIN((int)n, get_bytes_per_block()));
     }
     
     kfree(data);
@@ -178,32 +196,44 @@ int k_file_add_reference(int fd) {
         return FS_NOT_MOUNTED;
     }
 
-    return oft_add_reference(fd);
+    struct oft_entry *entry;
+    err_t err = get_oft_entry_by_fd(fd, &entry);
+    if (err != SUCCESS) {
+        return err;
+    }
+
+    err = oft_add_reference(fd);
+    if (err != SUCCESS) {
+        return err;
+    }
+
+    if (entry->inode->inode.metadata.fops != NULL &&
+        entry->inode->inode.metadata.fops->open != NULL) {
+        return entry->inode->inode.metadata.fops->open(entry);
+    }
+
+    return SUCCESS;
 }
 
-int k_write(int fd, char *buf, int n) {
+int k_write(struct oft_entry *entry, const char *buf, size_t n) {
     // Return if not mounted
     if (!get_is_mounted()) {
         return FS_NOT_MOUNTED;
     }
 
-    int tot_bytes_written = 0;
-    struct oft_entry* entry;
-    if (get_oft_entry_by_fd(fd, &entry) == OFT_FD_DOES_NOT_EXIST) {
-        return OFT_FD_DOES_NOT_EXIST;
+
+    if (!(entry->mode & O_WRONLY)) {
+        return INVALID_PERMISSIONS;
     }
 
-    if (entry->inode->inode.metadata->type == CHAR_DEVICE_TYPE) {
-        return entry->inode->inode.metadata->fops.write(entry, buf, n);
+    if (entry->inode->inode.metadata.fops != NULL) {
+        return entry->inode->inode.metadata.fops->write(entry, buf, n);
     }
-    
-    if (entry->ino_id == 0) {
-        err_t err = add_new_file(&entry, FILE_TYPE, 6);
-        update_dirent_by_f_name(entry->file_name, entry->parent_id, FILE_TYPE, EDIT_ID, 0, 0, "", entry->ino_id);
-        if (err) {
-            return err;
-        }
-    }
+    return 0;
+}
+
+int default_write(struct oft_entry *entry, const char *buf, size_t n) {
+    int tot_bytes_written = 0;
 
     // Move real cursor to correct position in binary file, do special math for first offset.
     int size = get_file_size(entry);
@@ -225,11 +255,11 @@ int k_write(int fd, char *buf, int n) {
 
     int remainder_offset = offset % get_bytes_per_block();
 
-    int bytes_to_write = MIN(n, get_bytes_per_block() - remainder_offset);
+    int bytes_to_write = MIN((int)n, get_bytes_per_block() - remainder_offset);
     char *data = kmalloc(get_bytes_per_block());
     int start = 1;
     while (n) {
-        char *to_write;
+        const char *to_write;
         if (curr_block_no == 0) {
             kfree(data);
             return FAT_NO_SPACE_REMAINING;
@@ -254,7 +284,7 @@ int k_write(int fd, char *buf, int n) {
             to_write = buf;
         }
 
-        err_t err = write_block(to_write, curr_block_no);
+        err_t err = write_block((void *)to_write, curr_block_no);
         if (err != 0) {
             kfree(data);
             return err;
@@ -263,16 +293,9 @@ int k_write(int fd, char *buf, int n) {
         offset += bytes_to_write;
         entry->cursor = offset;
 
-        struct fs_dirent dirent;
-        err_t res;
-        // TODO: Update size in dirent and time last edited.
-        if ((res = get_dirent_by_f_name(entry->file_name, FILE_TYPE, &dirent, entry->parent_id)) != SUCCESS) {
-            kfree(data);
-            return res;
-        }
-        if (offset > size) {
-            size = offset;
-            res = update_file_size(entry, size);
+        if (offset > (uint32_t)size) {
+            size = (int)offset;
+            int res = update_file_size(entry, size);
             if (res != SUCCESS) {
                 kfree(data);
                 return res;
@@ -303,7 +326,7 @@ int k_write(int fd, char *buf, int n) {
             buf += get_bytes_per_block();
         }
         start = 0;
-        bytes_to_write = MIN(n, get_bytes_per_block());
+        bytes_to_write = MIN((int)n, get_bytes_per_block());
     }
 
     kfree(data);
@@ -379,7 +402,7 @@ int k_lseek(int fd, int offset, int whence) {
     kfree(data);
 
     // Update metadata with file size if necessary
-    if (entry->cursor > file_size) {
+    if (entry->cursor > (uint32_t)file_size) {
         update_file_size(entry, entry->cursor);
     }
 
@@ -403,12 +426,12 @@ int k_chmod(const char *file_name, uint8_t new_perms, int flag) {
     char *actual_name;
     struct fs_dirent dirent;
     ino_id_t parent_dir;
-    err_t err = get_dirent_by_path(file_name, &dirent, FILE_TYPE, &parent_dir, &actual_name);
+    err_t err = get_dirent_by_path(file_name, &dirent, 0, &parent_dir, &actual_name);
     if (err) {
         return err;
     }
 
-    err = update_dirent_by_f_name(actual_name, parent_dir, FILE_TYPE, new_flag, new_perms, 0, "", 0);
+    err = update_inode_metadata(dirent.ino_id, EDIT_PERM, 0, new_perms);
     kfree(actual_name);
     return err;
 }
@@ -422,11 +445,11 @@ int k_update_file_time(const char *file_name) {
     char *actual_name;
     struct fs_dirent dirent;
     ino_id_t parent_dir;
-    err_t err = get_dirent_by_path(file_name, &dirent, FILE_TYPE, &parent_dir, &actual_name);
+    err_t err = get_dirent_by_path(file_name, &dirent, 0, &parent_dir, &actual_name);
     if (err) {
         return err;
     }
-    err = update_dirent_by_f_name(actual_name, parent_dir, FILE_TYPE, 0, 0, 0, "", 0);
+    err = update_inode_metadata(dirent.ino_id, 0, 0, 0);
     kfree(actual_name);
     return err;
 }
@@ -447,7 +470,7 @@ int k_ls(const char *filename, int out_fs) {
     ino_id_t dir_block = get_curr_dir();
     if (filename != NULL) {
         struct fs_dirent dir;
-        err_t err = get_dirent_by_path(filename, &dir, DIRECTORY_F_TYPE, NULL, NULL);
+        err_t err = get_dirent_by_path(filename, &dir, 1, NULL, NULL);
         if (err) {
             return err;
         }
@@ -466,7 +489,7 @@ int k_mv_file(const char *src_path, const char *dest_path) {
 
     struct fs_dirent old_dirent;
     ino_id_t parent_dir;
-    int err = get_dirent_by_path(src_path, &old_dirent, FILE_TYPE, &parent_dir, NULL);
+    int err = get_dirent_by_path(src_path, &old_dirent, 0, &parent_dir, NULL);
     if (err) {
         return err;
     }
@@ -474,7 +497,7 @@ int k_mv_file(const char *src_path, const char *dest_path) {
     ino_id_t new_parent_dir;
     struct fs_dirent new_dirent;
     char *actual_name;
-    err = get_dirent_by_path(dest_path, &new_dirent, FILE_TYPE, &new_parent_dir, &actual_name);
+    err = get_dirent_by_path(dest_path, &new_dirent, 0, &new_parent_dir, &actual_name);
     if (err != FILE_NOT_CREATED && err) {
         return err;
     }
@@ -502,7 +525,7 @@ int k_check_if_exists(const char *f_name) {
     }
 
     struct fs_dirent dir;
-    return !get_dirent_by_path(f_name, &dir, FILE_TYPE, NULL, NULL);
+    return !get_dirent_by_path(f_name, &dir, 0, NULL, NULL);
 }
 
 int k_make_directory(char *f_path) {
@@ -510,7 +533,7 @@ int k_make_directory(char *f_path) {
         return FS_NOT_MOUNTED;
     }
 
-    return add_dirent_by_path(f_path, DIRECTORY_F_TYPE, 0x7);
+    return add_dirent_by_path(f_path, DIRECTORY_TYPE, 0x7);
 }
 
 int k_change_directory(char *f_path) {
@@ -519,7 +542,7 @@ int k_change_directory(char *f_path) {
     }
 
     struct fs_dirent dir;
-    err_t err = get_dirent_by_path(f_path, &dir, DIRECTORY_F_TYPE, NULL, NULL);
+    err_t err = get_dirent_by_path(f_path, &dir, 1, NULL, NULL);
     if (err) {
         return err;
     }
@@ -534,7 +557,7 @@ bool k_check_if_executable(char *f_name) {
     }
 
     struct fs_dirent dir;
-    if (!get_dirent_by_path(f_name, &dir, FILE_TYPE, NULL, NULL)) {
+    if (!get_dirent_by_path(f_name, &dir, 0, NULL, NULL)) {
         attributes_t metadata;
         if (get_inode_metadata(dir.ino_id, &metadata) != SUCCESS) {
             return false;

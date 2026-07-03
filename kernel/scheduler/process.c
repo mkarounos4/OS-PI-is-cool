@@ -1,4 +1,6 @@
 #include "scheduler/scheduler.h"
+#include "data-structs/hashmap.h"
+#include "memory/kmalloc.h"
 #include "memory/malloc.h"
 #include "memory/page_table/page_table.h"
 #include "traps/traps.h"
@@ -9,10 +11,7 @@
 #define PA_MASK UINT64_C(0x0000ffffffffffff)
 
 static pcb_t processes[MAX_PROCESS_COUNT];
-
-static uint64_t kernel_phys_addr(uint64_t va) {
-    return va & PA_MASK;
-}
+static HashMap pgrps;
 
 static void __attribute__((noreturn)) process_first_run(void) {
     struct trap_frame *frame;
@@ -35,10 +34,102 @@ uint8_t can_wait_on_child(pcb_t *pcb, uint32_t flags) {
     return 0;
 }
 
-pcb_t *find_waitable_child(Vec *children, uint32_t flags) {
+static void pgrp_destroy(hashmap_value_t value) {
+    pgrp_t *pgrp = (pgrp_t *)value;
+    if (pgrp == NULL) {
+        return;
+    }
+
+    vec_destroy(&pgrp->pids);
+    kfree(pgrp);
+}
+
+pgrp_t *get_pgrp_by_pgid(pid_t pgid) {
+    hashmap_value_t value = NULL;
+    if (!hashmap_get(&pgrps, HASHMAP_KEY_FROM_INT(pgid), &value)) {
+        return NULL;
+    }
+
+    return (pgrp_t *)value;
+}
+
+static int add_to_pgrp(pid_t pid) {
+    pcb_t *pcb = get_pcb_by_pid(pid);
+    if (pcb == NULL) {
+        return -1;
+    }
+
+    pgrp_t *pgrp = get_pgrp_by_pgid(pcb->pgid);
+    if (pgrp == NULL) {
+        pgrp = kmalloc(sizeof(pgrp_t));
+        if (pgrp == NULL) {
+            return -1;
+        }
+
+        pgrp->pids = vec_new(2, NULL);
+        pgrp->refcount = 0;
+        pgrp->pgid = pcb->pgid;
+        if (!hashmap_put(&pgrps, HASHMAP_KEY_FROM_INT(pgrp->pgid), pgrp)) {
+            pgrp_destroy(pgrp);
+            return -1;
+        }
+    }
+
+    for (size_t i = 0; i < vec_len(&pgrp->pids); i++) {
+        if ((pid_t)(uintptr_t)vec_get(&pgrp->pids, i) == pid) {
+            return 0;
+        }
+    }
+
+    vec_push_back(&pgrp->pids, (ptr_t)(uintptr_t)pid);
+    pgrp->refcount++;
+    return 0;
+}
+
+static void remove_from_pgrp(pid_t pid) {
+    pcb_t *pcb = get_pcb_by_pid(pid);
+    if (pcb == NULL) {
+        return;
+    }
+
+    pgrp_t *pgrp = get_pgrp_by_pgid(pcb->pgid);
+    if (pgrp == NULL) {
+        return;
+    }
+
+    for (size_t i = 0; i < vec_len(&pgrp->pids); i++) {
+        if ((pid_t)(uintptr_t)vec_get(&pgrp->pids, i) == pid) {
+            vec_erase(&pgrp->pids, i);
+            pgrp->refcount--;
+            break;
+        }
+    }
+
+    if (pgrp->refcount <= 0) {
+        hashmap_remove(&pgrps, HASHMAP_KEY_FROM_INT(pgrp->pgid), NULL);
+    }
+}
+
+static int child_matches_wait(pid_t wait_pid, pcb_t *pcb) {
+    if (wait_pid == -1) {
+        return 1;
+    }
+
+    if (wait_pid < -1) {
+        return pcb->pgid == -wait_pid;
+    }
+
+    return pcb->pid == wait_pid;
+}
+
+pcb_t *find_waitable_child(Vec *children, pid_t wait_pid, uint32_t flags) {
     for (size_t i = 0; i < vec_len(children); i++) {
         pcb_t *pcb = get_pcb_by_pid((pid_t)(uintptr_t)vec_get(children, i));
         if (pcb == NULL) {
+            continue;
+        }
+
+        if (!child_matches_wait(wait_pid, pcb)) {
             continue;
         }
 
@@ -50,6 +141,17 @@ pcb_t *find_waitable_child(Vec *children, uint32_t flags) {
     return NULL;
 }
 
+static int has_wait_child(Vec *children, pid_t wait_pid) {
+    for (size_t i = 0; i < vec_len(children); i++) {
+        pcb_t *pcb = get_pcb_by_pid((pid_t)(uintptr_t)vec_get(children, i));
+        if (pcb != NULL && child_matches_wait(wait_pid, pcb)) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 long s_waitpid_impl(pid_t pid, int *status, int32_t flags) {
     pcb_t *curr_pcb = get_curr_process();
     if (curr_pcb == NULL) {
@@ -57,21 +159,21 @@ long s_waitpid_impl(pid_t pid, int *status, int32_t flags) {
     }
 
     pcb_t *done_child;
-    if (pid == -1) {
-        if (vec_len(&curr_pcb->children) == 0) {
+    if (pid < 0) {
+        if (!has_wait_child(&curr_pcb->children, pid)) {
             return ECHILD;
         }
-        done_child = find_waitable_child(&curr_pcb->children, flags);
+        done_child = find_waitable_child(&curr_pcb->children, pid, flags);
         if (done_child == NULL) {
             if (flags & WNOHANG) {
                 return 0;
             }
 
-            curr_pcb->waiting_for_pid = -1;
+            curr_pcb->waiting_for_pid = pid;
             curr_pcb->waiting_for_flags = flags;
             while (done_child == NULL) {
                 block_process(curr_pcb);
-                done_child = find_waitable_child(&curr_pcb->children, flags);
+                done_child = find_waitable_child(&curr_pcb->children, pid, flags);
             }
             curr_pcb->waiting_for_pid = -2;
         }
@@ -144,6 +246,7 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
 
     // Setup children array
     new_proc->children = vec_new(5, NULL);
+    new_proc->file_descriptors = vec_new(3, NULL);
 
     new_proc->state = PROC_READY_STATE;
     new_proc->waiting_for_pid = -2;
@@ -154,6 +257,14 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     new_proc->name = NULL;
     new_proc->entry_func = func;
     new_proc->args = args;
+    new_proc->priority = 1;
+    new_proc->mask = 0;
+    new_proc->pending_signals = 0;
+    for (int i = 0; i < 32; i++) {
+        new_proc->sigactions[i].sa_handler = SIG_DFL;
+        new_proc->sigactions[i].sa_mask = 0;
+        new_proc->sigactions[i].sa_flags = 0;
+    }
 
     uint64_t *user_l0 = initialize_user_page_table();
     if (user_l0 == NULL) {
@@ -204,9 +315,13 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     new_proc->ctx.x29 = 0;
     new_proc->ctx.x30 = (uint64_t)(uintptr_t)process_first_run;
     new_proc->ctx.sp = frame_va;
-    new_proc->ctx.ttbr0_el1 = kernel_phys_addr((uint64_t)(uintptr_t)user_l0);
+    new_proc->ctx.ttbr0_el1 = kernel_phys_addr((uint64_t)user_l0);
+    new_proc->ctx.ttbr0_el1_va = (uint64_t)user_l0;
 
-    add_task_to_scheduler(new_proc);
+    if (add_to_pgrp(new_proc->pid) != 0) {
+        uart_puts("ERROR: failed to add process to process group");
+        return -1;
+    }
 
     return new_proc->pid;
 }
@@ -215,6 +330,20 @@ void proc_destroy(pcb_t *p) {
     uart_puts("Cleaning up ");
     uart_puthex(p->pid);
     uart_puts("\n");
+    for (int i = 0; i < (int)vec_len(&p->file_descriptors); i++) {
+        int k_fd = (int)(uintptr_t)vec_get(&p->file_descriptors, i);
+        if (k_fd < 0) {
+            continue;
+        }
+
+        struct oft_entry *entry;
+        if (get_oft_entry_by_fd(k_fd, &entry) == SUCCESS) {
+            k_close(entry);
+        }
+    }
+    vec_destroy(&p->file_descriptors);
+    remove_from_pgrp(p->pid);
+
     // Rn, stack and heap are tied to pcb, so automatically "free" when create new process
     // When adding VM, TODO add cleanup of stack/heap
     p->state = PROC_UNUSED_STATE;
@@ -262,86 +391,102 @@ pcb_t *get_pcb_by_pid(pid_t pid) {
 }
 
 void processes_init() {
+    pgrps = hashmap_new(16, pgrp_destroy);
+
     for (unsigned int i = 0; i < MAX_PROCESS_COUNT; i++) {
         processes[i].state = PROC_UNUSED_STATE;
         processes[i].pid = i;
     }
 
-    proc_create((void *(*)(void *))(uintptr_t)USER_INIT_PROCESS_ENTRY, NULL, 0);
+    pid_t pid = proc_create((void *(*)(void *))(uintptr_t)USER_INIT_PROCESS_ENTRY, NULL, 0);
+    add_task_to_scheduler(get_pcb_by_pid(pid));
 }
 
 void cpy_address_space(pcb_t *src, pcb_t *dst) {
-    uint64_t *src_l0 = (uint64_t *)(uintptr_t)src->ctx.ttbr0_el1;
+    uint64_t *src_l0 = (uint64_t *)src->ctx.ttbr0_el1_va;
     uint64_t *dst_l0 = (uint64_t *)alloc_page();
     if (dst_l0 == NULL) return;
     dst->ctx.ttbr0_el1 = (uint64_t)(uintptr_t)kernel_phys_addr((uint64_t)(uintptr_t)dst_l0);
+    dst->ctx.ttbr0_el1_va = (uint64_t)dst_l0;
 
-    for (short i = 0; i < PAGE_TABLE_ENTRIES; i++) {
-	if ((src_l0[i] & DESC_VALID) == 0) continue;
+    for (size_t i = 0; i < PAGE_TABLE_ENTRIES; i++) {
+	    if ((src_l0[i] & DESC_VALID) == 0) continue;
 
-	uint64_t *src_l1 = (uint64_t *)(uintptr_t)kernel_direct_map_va(src_l0[i] & PTE_ADDR_MASK);
+	    uint64_t *src_l1 = (uint64_t *)(uintptr_t)kernel_direct_map_va(src_l0[i] & PTE_ADDR_MASK);
         uint64_t *dst_l1 = (uint64_t *)alloc_page();
-	if (dst_l1 == NULL) return;
-	dst_l0[i] = table_desc(dst_l1);
+	    if (dst_l1 == NULL) return;
+	    dst_l0[i] = table_desc(dst_l1);
 
-	for (short j = 0; j < PAGE_TABLE_ENTRIES; j++) {
-	    if ((src_l1[j] & DESC_VALID) == 0) continue;
+	    for (size_t j = 0; j < PAGE_TABLE_ENTRIES; j++) {
+	        if ((src_l1[j] & DESC_VALID) == 0) continue;
 
-	    uint64_t *src_l2 = (uint64_t *)(uintptr_t)kernel_direct_map_va(src_l1[j] & PTE_ADDR_MASK);
+	        uint64_t *src_l2 = (uint64_t *)(uintptr_t)kernel_direct_map_va(src_l1[j] & PTE_ADDR_MASK);
             uint64_t *dst_l2 = (uint64_t *)alloc_page();
             if (dst_l2 == NULL) return;
             dst_l1[j] = table_desc(dst_l2);
 
-	    for (short k = 0; k < PAGE_TABLE_ENTRIES; k++) {
-		if ((src_l2[k] & DESC_VALID) == 0) continue;
+	        for (size_t k = 0; k < PAGE_TABLE_ENTRIES; k++) {
+		        if ((src_l2[k] & DESC_VALID) == 0) continue;
 
-		uint64_t *src_l3 = (uint64_t *)(uintptr_t)kernel_direct_map_va(src_l2[k] & PTE_ADDR_MASK);
+		        uint64_t *src_l3 = (uint64_t *)(uintptr_t)kernel_direct_map_va(src_l2[k] & PTE_ADDR_MASK);
                 uint64_t *dst_l3 = (uint64_t *)alloc_page();
                 if (dst_l3 == NULL) return;
                 dst_l2[k] = table_desc(dst_l3);
 
-		for (short l = 0; l < PAGE_TABLE_ENTRIES; l++) {
-		    if ((src_l3[l] & DESC_VALID) == 0) continue;
+		        for (size_t l = 0; l < PAGE_TABLE_ENTRIES; l++) {
+		            if ((src_l3[l] & DESC_VALID) == 0) continue;
 
-		    uint64_t src_pa = src_l3[l] & PTE_ADDR_MASK;
-                    uint64_t *dst_page = (uint64_t *)alloc_page();
-                    if (dst_page == NULL) return;
+		            uint64_t src_pa = src_l3[l] & PTE_ADDR_MASK;
+                    uint64_t src_attrs = src_l3[l] & ~PTE_ADDR_MASK;
 
-                    uint64_t dst_pa = kernel_phys_addr((uint64_t)(uintptr_t)dst_page);
-                    copy_phys_page(src_pa, dst_pa);
+                    if (!pte_is_user(src_l3[l])) { // kernel/device mapping -> do not COW
+                        uint64_t *dst_page = (uint64_t *)alloc_page();
+                        if (dst_page == NULL) return;
+                        uint64_t dst_pa = kernel_phys_addr((uint64_t)(uintptr_t)dst_page);
+                        copy_phys_page(src_pa, dst_pa);
 
-                    uint64_t attrs = src_l3[l] & ~PTE_ADDR_MASK;
-                    dst_l3[l] = (dst_pa & PTE_ADDR_MASK) | attrs;
-		}
+                        dst_l3[l] = (dst_pa & PTE_ADDR_MASK) | src_attrs | DESC_VALID | DESC_PAGE;
+                    } else { // user mapping -> COW
+                        if (pte_is_writable(src_l3[l])) { // page not readonly -> make readonly
+                            pte_make_readonly_and_mark_cow(&src_l3[l]);
+                            uint64_t child_pte = (src_pa & PTE_ADDR_MASK) | (src_l3[l] & ~PTE_ADDR_MASK);
+                            child_pte &= ~(PTE_AP_EL0_RW | PTE_AP_EL1_RW); // clear write bits
+                            child_pte |= PTE_AP_EL0_RO; // set EL0 read-only
+                            dst_l3[l] = child_pte | DESC_VALID | DESC_PAGE;
+
+                            inc_pte_refcount_pa(src_pa);
+                        } else { // page already readonly -> share to dst
+                            dst_l3[l] = src_l3[l];
+                            inc_pte_refcount_pa(src_pa);
+                        }
+                    }
+                }
+	        }
 	    }
-	}
     }
+    tlb_invalidate_all_user();
 }
 
-pid_t fork() {
+pid_t fork(struct trap_frame *frame) {
+    (void)frame;
     // create child process off of parent
     pcb_t *parent = get_curr_process();
     pid_t child_pid = proc_create(parent->entry_func, parent->args, parent->pid);
     if (child_pid < 0) return -1;
     pcb_t *child = get_pcb_by_pid(child_pid); 
+
+    cpy_address_space(parent, child);
+
+    for (size_t i = 0; i < vec_len(&parent->file_descriptors); i++) {
+        void *fd = vec_get(&parent->file_descriptors, i);
+        vec_push_back(&child->file_descriptors, fd);
+        if ((int)(uintptr_t)fd >= 0) {
+            k_file_add_reference((int)(uintptr_t) fd);
+        }
+    }
     
-    // cpy parent trap frame over to child
-    uint64_t parent_frame_va = parent->ctx.x19;
-    struct trap_frame *parent_frame = (struct trap_frame *)(uintptr_t)parent_frame_va;
-    uint64_t child_frame_va = child->ctx.x19;
-    struct trap_frame *child_frame = (struct trap_frame *)(uintptr_t)child_frame_va;
-    *child_frame = *parent_frame;
-
-    // modify child return register
-    child_frame->regs[0] = 0;
-
-    cpy_address_space(child, parent);
-
-    child->file_descriptors = parent->file_descriptors;
-
-    // make child runnable
+    // save_curr_context(&child->ctx);
     add_task_to_scheduler(child);
-
     // return child pid to parent's call
     return child->pid;
 }
@@ -387,8 +532,6 @@ void unblock_process(pcb_t *pcb) {
     pcb->state = PROC_READY_STATE;
     pcb->blocked_until = 0;
     add_task_to_scheduler(pcb);
-
-    // handle all queued signals
 }
 
 void continue_process(pcb_t *pcb) {
@@ -410,4 +553,57 @@ void send_unblock_event(pid_t pid, uint32_t event) {
     if (pcb->blocked_until & event) {
         unblock_process(pcb);
     }
+}
+
+int dup2(int oldfd, int newfd) {
+    pcb_t *pcb = get_curr_process();
+    if (pcb == NULL) {
+        return -1;
+    }
+
+    close(newfd);
+    vec_set(&pcb->file_descriptors, newfd, vec_get(&pcb->file_descriptors, oldfd));
+    k_file_add_reference((int)(uintptr_t)vec_get(&pcb->file_descriptors, oldfd));
+
+    return 0;
+}
+
+int setpgrp(pid_t pid, pid_t pgid) {
+    pcb_t *pcb;
+    if (pid == 0) {
+        pcb = get_curr_process();
+    } else {
+        pcb = get_pcb_by_pid(pid);
+    }
+
+    if (pcb == NULL) {
+        return -1;
+    }
+
+    if (pgid == 0) {
+        pgid = pcb->pid;
+    }
+
+    if (pcb->pgid == pgid) {
+        return 0;
+    }
+
+    pid_t old_pgid = pcb->pgid;
+    remove_from_pgrp(pcb->pid);
+    pcb->pgid = pgid;
+    if (add_to_pgrp(pcb->pid) != 0) {
+        pcb->pgid = old_pgid;
+        add_to_pgrp(pcb->pid);
+        return -1;
+    }
+    return 0;
+}
+
+pid_t getpgid() {
+    pcb_t *pcb = get_curr_process();
+    if (pcb == NULL) {
+        return -1;
+    }
+
+    return pcb->pgid;
 }

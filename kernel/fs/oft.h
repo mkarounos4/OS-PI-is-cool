@@ -4,10 +4,9 @@ struct oft_entry;
 
 #include <stdint.h>
 
+#include "errors.h"
 #include "data-structs/vec.h"
-#include "disk.h"
-#include "fs/caches/inode_cache.h"
-#include "inodes.h"
+#include "caches/inode_cache.h"
 #include "dirs.h"
 
 // Open modes stored in oft_entry::mode.
@@ -28,12 +27,8 @@ struct oft_entry {
     uint32_t cursor;
     /** @brief Reference count; decremented on k_close, row removed at 0. */
     uint16_t ref_count;
-    /** @brief Path string for this open; heap-owned by this entry. */
-    char *file_name;
     /** @brief Inode number */
     ino_id_t ino_id;
-    /** @brief Parent directory inode id or first-block id. */
-    ino_id_t parent_id;
     /** @brief Cached inode when using inode-based storage; FAT. */
     struct cached_inode_st* inode;
 };
@@ -73,7 +68,7 @@ int oft_open_file(int mode, const char *file_name, ino_id_t ino_id, ino_id_t dir
  * @param oft_id Index into the OFT (same as kernel fd for regular files).
  * @return SUCCESS (0) on success, or a negative err_t on failure.
  */
-int oft_close_file(int oft_id);
+int oft_close_file(struct oft_entry *entry);
 
 /**
  * @brief Find the OFT index for a file already open.
@@ -87,7 +82,7 @@ int oft_close_file(int oft_id);
  * @return SUCCESS (0) on success, or a negative err_t if not found or
  * writer conflict.
  */
-int find_file_in_table(ino_id_t ino_id, const char *file_name, ino_id_t parent_id, int mode, int *oft_id);
+int find_file_in_table(int *oft_id);
 
 /**
  * @brief Resolve a kernel fd to its oft_entry pointer.

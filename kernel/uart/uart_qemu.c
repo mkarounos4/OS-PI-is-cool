@@ -90,12 +90,16 @@ void uart_rx_interrupt_hook(void)
     while ((rpi5_mmio_read32(QEMU_RPI3_UART0_BASE + UART_FR) & FR_RXFE) == 0) {
         uint32_t data = rpi5_mmio_read32(QEMU_RPI3_UART0_BASE + UART_DR);
         if (size < UART_RX_BUFFER_SIZE) {
-            uart_rx_buffer[size++] = (unsigned char)(data & 0xffu);
+            char next = (unsigned char)(data & 0xffu);
+            if (next == 0x0D) {
+                next = '\n';
+            }
+            uart_rx_buffer[size++] = next;
         }
     }
 
     if (size > 0) {
-        tty_send_input(0, (void *)uart_rx_buffer, size);
+        tty_send_input(0, (const char *)uart_rx_buffer, size);
     }
 
     uart_rx_buffer_clear();
@@ -134,13 +138,22 @@ void uart_raw_puts(const char *s)
     }
 }
 
-void uart_putint(int i) {
+void uart_putuint(unsigned int u)
+{
+    if (u >= 10)
+        uart_putuint(u / 10);
+
+    uart_putc('0' + (u % 10));
+}
+
+void uart_putint(int i)
+{
     if (i < 0) {
         uart_putc('-');
-	i = -i;
+        uart_putuint((unsigned int)(-i));
+    } else {
+        uart_putuint((unsigned int)i);
     }
-
-    uart_putc((unsigned int)i);
 }
 
 void uart_puthex(uint64_t value)

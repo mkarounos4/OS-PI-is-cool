@@ -9,13 +9,11 @@
 #define FILE_TYPE 1
 #define SYMLINK_TYPE 2
 #define CHAR_DRIVER_TYPE 3
+#define PIPE_TYPE 4
 
-#include "inodes.h"
 #include "oft.h"
 #include "fs/caches/lru_cache.h"
-#include "fs/caches/inode_cache.h"
 #include "errors.h"
-#include "inodes.h"
 
 // ============================================================
 // FAT/INODE WRAPPER FUNCTIONS
@@ -109,7 +107,7 @@ err_t free_file(const char* f_name);
  * @param perm Initial permission bits for the inode.
  * @return SUCCESS on success, or a negative error code on failure.
  */
-err_t add_new_file(struct oft_entry **entry, int file_type, uint8_t perm);
+err_t add_new_file(struct oft_entry **entry, int file_type, uint8_t perm, struct file_operations *fops);
 
 /**
  * @brief Allocate a new file and return just its first-block
@@ -122,7 +120,7 @@ err_t add_new_file(struct oft_entry **entry, int file_type, uint8_t perm);
  * @param perm Initial permission bits for the inode.
  * @return SUCCESS on success, or a negative error code on failure.
  */
-err_t add_new_file_with_id(block_no_t* new_block, int file_type, uint8_t perm);
+err_t add_new_file_with_id(block_no_t* new_block, int file_type, uint8_t perm, struct file_operations *fops);
 
 // ============================================================
 // HELPER FUNCTIONS
@@ -290,3 +288,5 @@ int update_file_size(struct oft_entry *entry, int new_size);
 block_no_t get_ith_block_of_file_by_id(ino_id_t id, unsigned int block_num);
 
 int get_file_size_by_id(ino_id_t ino_id);
+
+int clear_blocks_of_file_by_id(ino_id_t id);

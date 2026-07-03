@@ -17,7 +17,9 @@ void irq_enable_line(unsigned intid);
 
 // Disable one GIC interrupt
 void irq_disable_line(unsigned intid);
-void irq_force_pending(unsigned intid);
+
+// Configure one GIC interrupt as edge-triggered.
+void irq_set_edge_triggered(unsigned intid);
 
 // Calls registered handler for the given trap frame if it's an IRQ exception. Called by trap exception dispatch.
 struct trap_frame *irq_handle_exception(struct trap_frame *frame);

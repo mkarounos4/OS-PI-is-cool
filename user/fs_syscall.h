@@ -5,19 +5,27 @@
 #include "syscall.h"
 
 typedef int32_t err_t;
+typedef __SIZE_TYPE__ size_t;
+typedef __SIZE_TYPE__ ssize_t;
 
-#define F_READ 0x01
-#define F_WRITE 0x02
-#define F_APPEND 0x03
+#define O_TRUNC 4
+#define O_CREAT 8
+#define O_APPEND 16
+#define O_RDONLY 1
+#define O_WRONLY 2
+#define O_RDWR 3
 
 #define F_SEEK_SET 0
 #define F_SEEK_CUR 1
 #define F_SEEK_END 2
 
-#define O_RDONLY F_READ
-#define O_WRONLY F_WRITE
-#define O_RDWR F_WRITE
-#define O_APPEND F_APPEND
+#define STDIN  0
+#define STDOUT 1
+#define STDERR 2
+
+#define STDIN_FILENO STDIN
+#define STDOUT_FILENO STDOUT
+#define STDERR_FILENO STDERR
 
 static inline int open(const char *fname, int mode) {
     return (int)sys_call2(S_FS_OPEN, (long)(uintptr_t)fname, mode);
@@ -35,7 +43,7 @@ static inline int read(int fd, char *buf, int n) {
     return (int)sys_call3(S_FS_READ, fd, (long)(uintptr_t)buf, n);
 }
 
-static inline int write(int fd, char *buf, int n) {
+static inline int write(int fd, const char *buf, int n) {
     return (int)sys_call3(S_FS_WRITE, fd, (long)(uintptr_t)buf, n);
 }
 

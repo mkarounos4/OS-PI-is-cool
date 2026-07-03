@@ -1,7 +1,10 @@
 #include <sys/types.h>
 
 #include "cmds.h"
+#include "disk.h"
 #include "kapi.h"
+#include "oft.h"
+#include "scheduler/scheduler.h"
 
 int open(const char *fname, int mode) {
     pcb_t *pcb = get_curr_process();
@@ -14,8 +17,21 @@ int open(const char *fname, int mode) {
         return fd;
     }
 
-    vec_push_back(&pcb->file_descriptors, fd);
-    reutrn vec_len(&pcb->file_desciptors)-1;
+    int new_fd = -1;
+    for (size_t i = 0; i < vec_len(&pcb->file_descriptors); i++) {
+        if (vec_get(&pcb->file_descriptors, i) == (void *)(uintptr_t)-1) {
+            vec_set(&pcb->file_descriptors, i, (ptr_t)(uintptr_t)fd);
+            new_fd = i;
+            break;
+        }
+    }
+
+    if (new_fd == -1) {
+        vec_push_back(&pcb->file_descriptors, (ptr_t)(uintptr_t)fd);
+        new_fd = vec_len(&pcb->file_descriptors)-1;
+    }
+
+    return new_fd;
 }
 
 int close(int fd) {
@@ -24,11 +40,28 @@ int close(int fd) {
         return -1;
     }
 
-    if (vec_len(&pcb->file_desciptors) < fd || fd < 0) {
+    if (fd < 0 || (size_t)fd >= vec_len(&pcb->file_descriptors)) {
         return INVALID_ARGS;
     }
 
-    return k_close(vec_get(&pcb->file_desciptors, fd));
+    int k_fd = (int)(uintptr_t)vec_get(&pcb->file_descriptors, fd);
+    if (k_fd < 0) {
+        return OFT_FD_DOES_NOT_EXIST;
+    }
+
+    struct oft_entry *entry;
+    err_t err = get_oft_entry_by_fd(k_fd, &entry);
+    if (err) {
+        return err;
+    }
+
+    err = k_close(entry);
+    if (err) {
+        return err;
+    }
+    vec_set(&pcb->file_descriptors, fd, (void *)(uintptr_t)-1);
+
+    return SUCCESS;
 }
 
 int read(int fd, char *buf, int n) {
@@ -37,11 +70,22 @@ int read(int fd, char *buf, int n) {
         return -1;
     }
 
-    if (vec_len(&pcb->file_desciptors) < fd || fd < 0) {
+    if (fd < 0 || (size_t)fd >= vec_len(&pcb->file_descriptors)) {
         return INVALID_ARGS;
     }
 
-    return k_read(vec_get(&pcb->file_desciptors, fd), buf, n);
+    int k_fd = (int)(uintptr_t)vec_get(&pcb->file_descriptors, fd);
+    if (k_fd < 0) {
+        return OFT_FD_DOES_NOT_EXIST;
+    }
+
+    struct oft_entry *entry;
+    err_t err = get_oft_entry_by_fd(k_fd, &entry);
+    if (err) {
+        return err;
+    }
+
+    return k_read(entry, buf, n);
 }
 
 int write(int fd, char *buf, int n) {
@@ -50,11 +94,22 @@ int write(int fd, char *buf, int n) {
         return -1;
     }
 
-    if (vec_len(&pcb->file_desciptors) < fd || fd < 0) {
+    if (fd < 0 || (size_t)fd >= vec_len(&pcb->file_descriptors)) {
         return INVALID_ARGS;
     }
 
-    return k_write(vec_get(&pcb->file_descriptors, fd), buf, n);
+    int k_fd = (int)(uintptr_t)vec_get(&pcb->file_descriptors, fd);
+    if (k_fd < 0) {
+        return OFT_FD_DOES_NOT_EXIST;
+    }
+
+    struct oft_entry *entry;
+    err_t err = get_oft_entry_by_fd(k_fd, &entry);
+    if (err) {
+        return err;
+    }
+
+    return k_write(entry, buf, n);
 }
 
 int lseek(int fd, int offset, int whence) {
@@ -63,11 +118,16 @@ int lseek(int fd, int offset, int whence) {
         return -1;
     }
 
-    if (vec_len(&pcb->file_desciptors) < fd || fd < 0) {
+    if (fd < 0 || (size_t)fd >= vec_len(&pcb->file_descriptors)) {
         return INVALID_ARGS;
     }
 
-    return k_lseek(vec_get(&pcb->file_descriptors, fd), offset, whence);
+    int k_fd = (int)(uintptr_t)vec_get(&pcb->file_descriptors, fd);
+    if (k_fd < 0) {
+        return OFT_FD_DOES_NOT_EXIST;
+    }
+
+    return k_lseek(k_fd, offset, whence);
 }
 
 // Throws FS_not_mounted, k_open errors, k_close errors, k_update_file_time errors
@@ -79,11 +139,11 @@ err_t touch(char **file_paths) {
 
     while (file_paths[0] != NULL) {
         // Open to create file if doesn't exist, and make sure valid name and path
-        int i = k_open(file_paths[0], 0);
+        int i = open(file_paths[0], O_CREAT);
         if (i < 0) {
             return i;
         }
-        if ((i = k_close(i)) < 0) {
+        if ((i = close(i)) < 0) {
             return i;
         }
 
@@ -205,7 +265,7 @@ err_t cat(char **file, char *output_file, int flag) {
     
     int out_fd = 1;
     if (output_file != NULL) {
-        out_fd = k_open(output_file, flag);
+        out_fd = open(output_file, O_WRONLY | flag);
     } 
 
     if (out_fd < 0) {
@@ -225,11 +285,11 @@ err_t cat(char **file, char *output_file, int flag) {
             if (!k_check_if_exists(file[0])) {
                 return FILE_NOT_FOUND;
             }
-            in_fd = k_open(file[0], F_READ);
+            in_fd = open(file[0], O_RDONLY);
         }
         if (in_fd < 0) {
             if (out_fd != 1) {
-                k_close(out_fd);
+                close(out_fd);
             }
             return in_fd;
         }
@@ -237,35 +297,35 @@ err_t cat(char **file, char *output_file, int flag) {
         char *data_read = kmalloc(BUFF_SIZE);
         if (data_read == NULL) {
             if (in_fd != 0) {
-                k_close(in_fd);
+                close(in_fd);
             }
             if (out_fd != 1) {
-                k_close(out_fd);
+                close(out_fd);
             }
             return FILE_READ_ERROR;
         }
 
         int bytes_read;
         do {
-            bytes_read = k_read(in_fd, data_read, BUFF_SIZE);
+            bytes_read = read(in_fd, data_read, BUFF_SIZE);
             if (bytes_read < 0) {
                 if (in_fd != 0) {
-                    k_close(in_fd);
+                    close(in_fd);
                 }
                 if (out_fd != 1) {
-                    k_close(out_fd);
+                    close(out_fd);
                 }
                 kfree(data_read);
                 return FILE_READ_ERROR;
             }
             if (bytes_read > 0) {
-                int bytes_written = k_write(out_fd, data_read, bytes_read);
+                int bytes_written = write(out_fd, data_read, bytes_read);
                 if (bytes_written != bytes_read) {
                     if (in_fd != 0) {
-                        k_close(in_fd);
+                        close(in_fd);
                     }
                     if (out_fd != 1) {
-                        k_close(out_fd);
+                        close(out_fd);
                     }
                     kfree(data_read);
                     return FILE_WRITE_ERROR;
@@ -275,7 +335,7 @@ err_t cat(char **file, char *output_file, int flag) {
         kfree(data_read);
 
         if (in_fd != 0) {
-            k_close(in_fd);
+            close(in_fd);
         }
         
         if (!reading_stdin) {
@@ -286,7 +346,7 @@ err_t cat(char **file, char *output_file, int flag) {
     }
 
     if (output_file != NULL) {
-        k_close(out_fd);
+        close(out_fd);
     }
 
     return SUCCESS;
@@ -307,9 +367,9 @@ err_t cp(char *src_path, char *dest_path, int flag) {
     int src_fd;
     int dest_fd;
 
-    src_fd = k_open(src_path, F_READ);
+    src_fd = open(src_path, O_RDONLY);
 
-    dest_fd = k_open(dest_path, F_WRITE);
+    dest_fd = open(dest_path, O_WRONLY);
 
     const int BUF_SIZE = 1024;
     char* buf = kmalloc(BUF_SIZE);
@@ -317,19 +377,19 @@ err_t cp(char *src_path, char *dest_path, int flag) {
     while (1) {
         int bytes_read;
         
-        bytes_read = k_read(src_fd, buf, BUF_SIZE);
+        bytes_read = read(src_fd, buf, BUF_SIZE);
         if (bytes_read < 0) {
             return bytes_read;
         } else if (bytes_read == 0) {
-            k_close(src_fd);
-            k_close(dest_fd);
+            close(src_fd);
+            close(dest_fd);
             return 0;
         } else {
             int bytes_written;
-            bytes_written = k_write(dest_fd, buf, MIN(bytes_read, BUF_SIZE));
+            bytes_written = write(dest_fd, buf, MIN(bytes_read, BUF_SIZE));
             if (bytes_written < 0) {
-                k_close(src_fd);
-                k_close(dest_fd);
+                close(src_fd);
+                close(dest_fd);
                 return bytes_written;
             }
         }

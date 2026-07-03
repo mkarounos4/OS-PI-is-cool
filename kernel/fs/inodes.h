@@ -5,6 +5,15 @@
 
 #include "types.h"
 
+#ifndef DEV_T_TYPE
+#define DEV_T_TYPE
+struct dev_st {
+    uint16_t major;
+    uint16_t minor;
+};
+#endif
+
+
 // Attributes for inodes
 typedef struct attributes_t_struct {
     uint16_t i_links_count; // Num dir entries pointing to this (deletes inode when erach 0)
@@ -13,8 +22,11 @@ typedef struct attributes_t_struct {
     uint32_t i_size;
     uint32_t i_blocks; // Num blocks
     fs_time_t mtime;
-    dev_t rdev;
+    struct dev_st i_rdev;
     struct file_operations *fops;
+    union {
+        struct pipe_st *i_pipe;
+    };
 } attributes_t;
 
 // Struct for inode data
@@ -26,9 +38,6 @@ struct cached_inode_st;
 
 
 #include "errors.h"
-#include "disk.h"
-#include "fs/caches/inode_cache.h"
-
 
 // Constants
 #define INODE_BYTE_SIZE ((int)sizeof(struct inode_st))
@@ -218,7 +227,7 @@ err_t free_file_inode(struct cached_inode_st *cache_inode);
  * @return SUCCESS on success, INODE_FULL if no free inode slots,
  * or a negative error code on failure.
  */
-err_t add_new_file_inode(ino_id_t *inode_num, int file_type, uint8_t perm);
+err_t add_new_file_inode(ino_id_t *inode_num, int file_type, uint8_t perm, struct file_operations *fops);
 
 /**
  * @brief Read an inode directly from disk, bypassing the inode cache.
@@ -262,3 +271,5 @@ err_t clear_blocks_of_inode(struct inode_st *inode, int skip_first);
  * @return SUCCESS on success, or a negative error code on failure.
  */
 err_t remove_last_block_inode(ino_id_t id);
+
+err_t set_inode_metadata(ino_id_t id, attributes_t *metadata);

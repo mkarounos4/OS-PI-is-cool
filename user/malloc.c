@@ -351,7 +351,6 @@ void *malloc(size_t size)
 
 void free(void *ptr)
 {
-
     if (!ptr) return; // ptr is NULL -> do nothing
     
     void *header_ptr = (char *)ptr - WS;
@@ -379,12 +378,19 @@ void* realloc(void* oldptr, size_t size)
     // try expanding into next block if free
     void *next_hdr = (char *)oldptr - WS + oldsize;
     size_t next_val = *(size_t *)next_hdr;
-    if (!(next_val & 0x1)) {
-        size_t next_size = next_val & ~0xF;
+    size_t next_size = next_val & ~0xF;
+    if (next_size != 0 && !(next_val & 0x1)) {
         if (oldsize + next_size >= needed) {
+            size_t combined_size = oldsize + next_size;
             remove_free((char *)next_hdr + WS, next_size);
-            *(size_t *)((char *)oldptr - WS) = (oldsize + next_size) | 1;
-            *(size_t *)((char *)oldptr - WS + oldsize + next_size - WS) = (oldsize + next_size) | 1;
+            if (combined_size - needed >= 32) {
+                *(size_t *)((char *)oldptr - WS) = needed | 1;
+                *(size_t *)((char *)oldptr - WS + needed - WS) = needed | 1;
+                initialize_free((char *)oldptr - WS + needed, combined_size - needed);
+            } else {
+                *(size_t *)((char *)oldptr - WS) = combined_size | 1;
+                *(size_t *)((char *)oldptr - WS + combined_size - WS) = combined_size | 1;
+            }
             return oldptr;
         }
     }
