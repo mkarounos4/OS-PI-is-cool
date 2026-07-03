@@ -1,4 +1,6 @@
 #include "scheduler/scheduler.h"
+#include "data-structs/hashmap.h"
+#include "memory/kmalloc.h"
 #include "memory/malloc.h"
 #include "memory/page_table/page_table.h"
 #include "traps/traps.h"
@@ -9,6 +11,7 @@
 #define PA_MASK UINT64_C(0x0000ffffffffffff)
 
 static pcb_t processes[MAX_PROCESS_COUNT];
+static HashMap pgrps;
 
 static void __attribute__((noreturn)) process_first_run(void) {
     struct trap_frame *frame;
@@ -31,10 +34,102 @@ uint8_t can_wait_on_child(pcb_t *pcb, uint32_t flags) {
     return 0;
 }
 
-pcb_t *find_waitable_child(Vec *children, uint32_t flags) {
+static void pgrp_destroy(hashmap_value_t value) {
+    pgrp_t *pgrp = (pgrp_t *)value;
+    if (pgrp == NULL) {
+        return;
+    }
+
+    vec_destroy(&pgrp->pids);
+    kfree(pgrp);
+}
+
+pgrp_t *get_pgrp_by_pgid(pid_t pgid) {
+    hashmap_value_t value = NULL;
+    if (!hashmap_get(&pgrps, HASHMAP_KEY_FROM_INT(pgid), &value)) {
+        return NULL;
+    }
+
+    return (pgrp_t *)value;
+}
+
+static int add_to_pgrp(pid_t pid) {
+    pcb_t *pcb = get_pcb_by_pid(pid);
+    if (pcb == NULL) {
+        return -1;
+    }
+
+    pgrp_t *pgrp = get_pgrp_by_pgid(pcb->pgid);
+    if (pgrp == NULL) {
+        pgrp = kmalloc(sizeof(pgrp_t));
+        if (pgrp == NULL) {
+            return -1;
+        }
+
+        pgrp->pids = vec_new(2, NULL);
+        pgrp->refcount = 0;
+        pgrp->pgid = pcb->pgid;
+        if (!hashmap_put(&pgrps, HASHMAP_KEY_FROM_INT(pgrp->pgid), pgrp)) {
+            pgrp_destroy(pgrp);
+            return -1;
+        }
+    }
+
+    for (size_t i = 0; i < vec_len(&pgrp->pids); i++) {
+        if ((pid_t)(uintptr_t)vec_get(&pgrp->pids, i) == pid) {
+            return 0;
+        }
+    }
+
+    vec_push_back(&pgrp->pids, (ptr_t)(uintptr_t)pid);
+    pgrp->refcount++;
+    return 0;
+}
+
+static void remove_from_pgrp(pid_t pid) {
+    pcb_t *pcb = get_pcb_by_pid(pid);
+    if (pcb == NULL) {
+        return;
+    }
+
+    pgrp_t *pgrp = get_pgrp_by_pgid(pcb->pgid);
+    if (pgrp == NULL) {
+        return;
+    }
+
+    for (size_t i = 0; i < vec_len(&pgrp->pids); i++) {
+        if ((pid_t)(uintptr_t)vec_get(&pgrp->pids, i) == pid) {
+            vec_erase(&pgrp->pids, i);
+            pgrp->refcount--;
+            break;
+        }
+    }
+
+    if (pgrp->refcount <= 0) {
+        hashmap_remove(&pgrps, HASHMAP_KEY_FROM_INT(pgrp->pgid), NULL);
+    }
+}
+
+static int child_matches_wait(pid_t wait_pid, pcb_t *pcb) {
+    if (wait_pid == -1) {
+        return 1;
+    }
+
+    if (wait_pid < -1) {
+        return pcb->pgid == -wait_pid;
+    }
+
+    return pcb->pid == wait_pid;
+}
+
+pcb_t *find_waitable_child(Vec *children, pid_t wait_pid, uint32_t flags) {
     for (size_t i = 0; i < vec_len(children); i++) {
         pcb_t *pcb = get_pcb_by_pid((pid_t)(uintptr_t)vec_get(children, i));
         if (pcb == NULL) {
+            continue;
+        }
+
+        if (!child_matches_wait(wait_pid, pcb)) {
             continue;
         }
 
@@ -46,6 +141,17 @@ pcb_t *find_waitable_child(Vec *children, uint32_t flags) {
     return NULL;
 }
 
+static int has_wait_child(Vec *children, pid_t wait_pid) {
+    for (size_t i = 0; i < vec_len(children); i++) {
+        pcb_t *pcb = get_pcb_by_pid((pid_t)(uintptr_t)vec_get(children, i));
+        if (pcb != NULL && child_matches_wait(wait_pid, pcb)) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 long s_waitpid_impl(pid_t pid, int *status, int32_t flags) {
     pcb_t *curr_pcb = get_curr_process();
     if (curr_pcb == NULL) {
@@ -53,28 +159,25 @@ long s_waitpid_impl(pid_t pid, int *status, int32_t flags) {
     }
 
     pcb_t *done_child;
-    if (pid == -1) {
-        if (vec_len(&curr_pcb->children) == 0) {
+    if (pid < 0) {
+        if (!has_wait_child(&curr_pcb->children, pid)) {
             return ECHILD;
         }
-        done_child = find_waitable_child(&curr_pcb->children, flags);
+        done_child = find_waitable_child(&curr_pcb->children, pid, flags);
         if (done_child == NULL) {
             if (flags & WNOHANG) {
                 return 0;
             }
 
-            curr_pcb->waiting_for_pid = -1;
+            curr_pcb->waiting_for_pid = pid;
             curr_pcb->waiting_for_flags = flags;
             while (done_child == NULL) {
                 block_process(curr_pcb);
-                done_child = find_waitable_child(&curr_pcb->children, flags);
+                done_child = find_waitable_child(&curr_pcb->children, pid, flags);
             }
             curr_pcb->waiting_for_pid = -2;
         }
     } else {
-        if (pid < 0) {
-            pid *= -1;
-        }
         done_child = get_pcb_by_pid(pid);
         if (done_child == NULL || done_child->ppid != curr_pcb->pid) {
             return -1;
@@ -143,6 +246,7 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
 
     // Setup children array
     new_proc->children = vec_new(5, NULL);
+    new_proc->file_descriptors = vec_new(3, NULL);
 
     new_proc->state = PROC_READY_STATE;
     new_proc->waiting_for_pid = -2;
@@ -154,6 +258,13 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     new_proc->entry_func = func;
     new_proc->args = args;
     new_proc->priority = 1;
+    new_proc->mask = 0;
+    new_proc->pending_signals = 0;
+    for (int i = 0; i < 32; i++) {
+        new_proc->sigactions[i].sa_handler = SIG_DFL;
+        new_proc->sigactions[i].sa_mask = 0;
+        new_proc->sigactions[i].sa_flags = 0;
+    }
 
     uint64_t *user_l0 = initialize_user_page_table();
     if (user_l0 == NULL) {
@@ -207,6 +318,11 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     new_proc->ctx.ttbr0_el1 = kernel_phys_addr((uint64_t)user_l0);
     new_proc->ctx.ttbr0_el1_va = (uint64_t)user_l0;
 
+    if (add_to_pgrp(new_proc->pid) != 0) {
+        uart_puts("ERROR: failed to add process to process group");
+        return -1;
+    }
+
     return new_proc->pid;
 }
 
@@ -226,6 +342,7 @@ void proc_destroy(pcb_t *p) {
         }
     }
     vec_destroy(&p->file_descriptors);
+    remove_from_pgrp(p->pid);
 
     // Rn, stack and heap are tied to pcb, so automatically "free" when create new process
     // When adding VM, TODO add cleanup of stack/heap
@@ -274,6 +391,8 @@ pcb_t *get_pcb_by_pid(pid_t pid) {
 }
 
 void processes_init() {
+    pgrps = hashmap_new(16, pgrp_destroy);
+
     for (unsigned int i = 0; i < MAX_PROCESS_COUNT; i++) {
         processes[i].state = PROC_UNUSED_STATE;
         processes[i].pid = i;
@@ -357,7 +476,6 @@ pid_t fork(struct trap_frame *frame) {
 
     cpy_address_space(parent, child);
 
-    child->file_descriptors = vec_new(3, NULL);
     for (int i = 0; i < vec_len(&parent->file_descriptors); i++) {
         void *fd = vec_get(&parent->file_descriptors, i);
         vec_push_back(&child->file_descriptors, fd);
@@ -462,14 +580,21 @@ int setpgrp(pid_t pid, pid_t pgid) {
     }
 
     if (pgid == 0) {
-        pcb_t *pcb2 = get_curr_process();
-        if (pcb2 == NULL) {
-            return -1;
-        }
-        pgid = pcb2->pid;
+        pgid = pcb->pid;
     }
 
+    if (pcb->pgid == pgid) {
+        return 0;
+    }
+
+    pid_t old_pgid = pcb->pgid;
+    remove_from_pgrp(pcb->pid);
     pcb->pgid = pgid;
+    if (add_to_pgrp(pcb->pid) != 0) {
+        pcb->pgid = old_pgid;
+        add_to_pgrp(pcb->pid);
+        return -1;
+    }
     return 0;
 }
 

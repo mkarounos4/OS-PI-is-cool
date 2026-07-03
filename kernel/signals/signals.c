@@ -1,4 +1,5 @@
 #include "signals.h"
+#include <stddef.h>
 #include "scheduler/scheduler.h"
 #include "scheduler/process.h"
 
@@ -68,8 +69,23 @@ void initialize_signals() {
 
 int s_kill(pid_t pid, int signal) {
     if (pid < 0) {
-        pid *= -1;
+        pgrp_t *pgrp = get_pgrp_by_pgid(-pid);
+        int sent = 0;
+
+        if (pgrp == NULL) {
+            return -1;
+        }
+
+        for (size_t i = 0; i < vec_len(&pgrp->pids); i++) {
+            pid_t member_pid = (pid_t)(uintptr_t)vec_get(&pgrp->pids, i);
+            if (s_kill(member_pid, signal) == 0) {
+                sent = 1;
+            }
+        }
+
+        return sent ? 0 : -1;
     }
+
     pcb_t *pcb = get_pcb_by_pid(pid);
     if (pcb == NULL) {
         return -1;
@@ -115,7 +131,10 @@ long send_sigchld(pid_t child) {
         return -1;
     }
 
-    if (parent_pcb->waiting_for_pid == -1 || parent_pcb->waiting_for_pid == child) {
+    if (parent_pcb->waiting_for_pid == -1 ||
+        parent_pcb->waiting_for_pid == child ||
+        (parent_pcb->waiting_for_pid < -1 &&
+         child_pcb->pgid == -parent_pcb->waiting_for_pid)) {
         if (child_pcb->state == PROC_ZOMBIE_STATE ||
             (child_pcb->state == PROC_STOPPED_STATE && (parent_pcb->waiting_for_flags & WUNTRACED)) ||
             ((child_pcb->state == PROC_RUNNING_STATE || child_pcb->state == PROC_READY_STATE) &&

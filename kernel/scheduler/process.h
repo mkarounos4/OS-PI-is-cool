@@ -69,7 +69,14 @@ typedef struct pcb_st {
     int priority;
 } pcb_t;
 
+typedef struct pgrp_st {
+    Vec pids;
+    int refcount;
+    pid_t pgid;
+} pgrp_t;
+
 pcb_t *get_pcb_by_pid(pid_t pid);
+pgrp_t *get_pgrp_by_pgid(pid_t pgid);
 void processes_init();
 pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid);
 void proc_destroy(pcb_t *p);
@@ -86,4 +93,3 @@ void send_unblock_event(pid_t pid, uint32_t event);
 pid_t getpgid();
 int setpgrp(pid_t pid, pid_t pgid);
 int dup2(int oldfd, int newfd);
-
