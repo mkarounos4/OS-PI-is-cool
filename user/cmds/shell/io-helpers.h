@@ -1,8 +1,8 @@
 #pragma once
 
 #include "parser.h"
-#include "../fs_syscall.h"
-#include "malloc.h"
+#include "lib/fs_syscall.h"
+#include "lib/malloc.h"
 
 // Redirect std in to input file specified in cmd
 int changeStdInput(struct parsed_command* cmd);

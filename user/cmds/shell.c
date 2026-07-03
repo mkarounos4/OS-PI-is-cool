@@ -1,5 +1,4 @@
 #include "shell.h"
-#include "malloc.h"
 
 volatile int wasInterrupted = 0;
 int shell_pgid;
@@ -25,6 +24,12 @@ int handle_job_builtins(struct parsed_command *parsed_cmd);
 char *get_input(int *nextAddNewLine);
 void print_status_updates();
 int execvp(const char *cmd, char **args);
+
+int main(int argc, char **argv) {
+    (void)argc;
+    shell_init((void*)argv);
+    return 0;
+}
 
 void *shell_init(void *args) {
     setpgid(0, 0);
@@ -577,7 +582,6 @@ int handle_job_builtins(struct parsed_command *parsed_cmd) {
 
     return 0;
 }
-
 static void report_command_error(const char *cmd, err_t err) {
     if (err < 0) {
         printf("%s: error %d\n", cmd, err);
@@ -634,7 +638,15 @@ int execvp(const char *cmd, char **args) {
     } else if (strcmp(cmd, "cd") == 0) {
         report_command_error(cmd, cd(args[1]));
     } else if (strcmp(cmd, "echo") == 0) {
-        echo(args);
+        int i = 1;
+        while (args[i] != NULL) {
+            write(1, args[i], strlen(args[i]));
+            if (args[i + 1] != NULL) {
+                write(1, " ", 1);
+            }
+            i++;
+        }
+        write(1, "\n", 1);
     } else {
         perror("unknown command\n");
         exit(EXIT_FAILURE);

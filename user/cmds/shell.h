@@ -1,17 +1,16 @@
 #pragma once
 
 #include <stdint.h>
-#include "syscall.h"
-#include "fs_syscall.h"
-#include "signals.h"
-#include "stdio.h"
-#include "string.h"
+#include "lib/syscall.h"
+#include "lib/fs_syscall.h"
+#include "lib/signals.h"
+#include "lib/stdio.h"
+#include "lib/string.h"
 #include "shell/Vec.h"
 #include "shell/io-helpers.h"
 #include "shell/Job.h"
 #include "shell/parser.h"
-#include "malloc.h"
-#include "shell_cmds.h"
+#include "lib/malloc.h"
 
 #define EXIT_FAILURE -1
 #define EXIT_SUCCESS 0

@@ -13,21 +13,29 @@ KERNEL_DIR = kernel
 BUILD_DIR  = build/$(PLATFORM)
 USER_DIR   = user
 USER_BUILD_DIR = $(BUILD_DIR)/user
-USER_LINKER = $(USER_DIR)/linker.ld
-USER_IMAGE_ELF = $(USER_BUILD_DIR)/user.elf
-USER_IMAGE_BIN = $(USER_BUILD_DIR)/user.bin
+USER_CMD_DIR = $(USER_DIR)/cmds
+USER_LIB_DIR = $(USER_DIR)/lib
+USER_LINKER = $(USER_DIR)/user_linker.ld
+USER_BOOT_SRC = $(USER_DIR)/user_boot.S
+USER_BOOT_OBJ = $(USER_BUILD_DIR)/user_boot.S.o
+USER_IMAGE_ELF = $(USER_BUILD_DIR)/bin/init.elf
+USER_IMAGE_BIN = $(USER_BUILD_DIR)/init.bin
 USER_IMAGE_ASM = $(USER_BUILD_DIR)/user_image.S
 USER_IMAGE_OBJ = $(USER_BUILD_DIR)/user_image.S.o
 USER_IMAGE_HEADER = $(USER_BUILD_DIR)/user_image.h
+USER_BINS_ASM = $(USER_BUILD_DIR)/user_bins.S
+USER_BINS_C = $(USER_BUILD_DIR)/user_bins.c
+USER_BINS_ASM_OBJ = $(USER_BUILD_DIR)/user_bins.S.o
+USER_BINS_C_OBJ = $(USER_BUILD_DIR)/user_bins.o
 
-HEADERS  := $(shell find $(KERNEL_DIR) -type f -name '*.h') $(USER_IMAGE_HEADER)
+HEADERS  := $(shell find $(KERNEL_DIR) -type f -name '*.h') $(USER_DIR)/user_bins.h $(USER_IMAGE_HEADER)
 INCLUDES := $(shell find $(KERNEL_DIR) -type d | sed 's/^/-I/')
 
 CFLAGS = -Wall -Wextra -O2 \
          -ffreestanding -nostdlib -mgeneral-regs-only \
          -fno-pic -fno-pie -fno-stack-protector \
          -fno-asynchronous-unwind-tables -fno-unwind-tables \
-         $(INCLUDES) -I$(USER_BUILD_DIR)
+         $(INCLUDES) -I$(USER_BUILD_DIR) -I$(USER_DIR)
 
 USER_CFLAGS = -Wall -Wextra -O2 \
               -ffreestanding -nostdlib -mgeneral-regs-only \
@@ -39,7 +47,7 @@ LDFLAGS = -nostdlib -nostartfiles -nodefaultlibs -static -no-pie \
           -Wl,--build-id=none -Wl,-Map=kernel.map
 
 USER_LDFLAGS = -nostdlib -nostartfiles -nodefaultlibs -static -no-pie \
-               -Wl,--build-id=none -Wl,-Map=$(USER_BUILD_DIR)/user.map
+               -Wl,--build-id=none
 
 ifeq ($(PLATFORM),rpi)
     CFLAGS += -DPLATFORM_RPI -DPLATFORM_RPI5 -mcpu=cortex-a76
@@ -57,15 +65,21 @@ endif
 
 ALL_C_SRCS := $(shell find $(KERNEL_DIR) -type f -name '*.c')
 ASM_SRCS   := $(shell find $(KERNEL_DIR) -type f -name '*.S')
-USER_C_SRCS := $(shell find $(USER_DIR) -type f -name '*.c')
+USER_LIB_SRCS := $(shell find $(USER_LIB_DIR) -type f -name '*.c')
+USER_CMD_SRCS := $(shell find $(USER_CMD_DIR) -maxdepth 1 -type f -name '*.c' | sort)
+USER_SHELL_SRCS := $(shell find $(USER_CMD_DIR)/shell -type f -name '*.c' | sort)
+USER_CMD_NAMES := $(patsubst $(USER_CMD_DIR)/%.c,%,$(USER_CMD_SRCS))
+USER_CMD_ELFS := $(addprefix $(USER_BUILD_DIR)/bin/,$(addsuffix .elf,$(USER_CMD_NAMES)))
 
 C_SRCS := $(filter-out kernel/uart/uart_rpi.c kernel/uart/uart_qemu.c,$(ALL_C_SRCS)) $(UART_SRC)
 
 OBJS := $(patsubst $(KERNEL_DIR)/%.c,$(BUILD_DIR)/%.o,$(C_SRCS))
 OBJS += $(patsubst $(KERNEL_DIR)/%.S,$(BUILD_DIR)/%.S.o,$(ASM_SRCS))
-OBJS += $(USER_IMAGE_OBJ)
+OBJS += $(USER_IMAGE_OBJ) $(USER_BINS_ASM_OBJ) $(USER_BINS_C_OBJ)
 
-USER_OBJS := $(patsubst $(USER_DIR)/%.c,$(USER_BUILD_DIR)/%.o,$(USER_C_SRCS))
+USER_LIB_OBJS := $(patsubst $(USER_DIR)/%.c,$(USER_BUILD_DIR)/%.o,$(USER_LIB_SRCS))
+USER_CMD_OBJS := $(patsubst $(USER_DIR)/%.c,$(USER_BUILD_DIR)/%.o,$(USER_CMD_SRCS))
+USER_SHELL_OBJS := $(patsubst $(USER_DIR)/%.c,$(USER_BUILD_DIR)/%.o,$(USER_SHELL_SRCS))
 
 .PHONY: all clean dump rpi install qemu build FORCE
 
@@ -81,9 +95,17 @@ $(USER_BUILD_DIR)/%.o: $(USER_DIR)/%.c $(USER_DIR)/*.h
 	@mkdir -p $(dir $@)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(USER_IMAGE_ELF): $(USER_OBJS) $(USER_LINKER)
+$(USER_BOOT_OBJ): $(USER_BOOT_SRC)
 	@mkdir -p $(dir $@)
-	$(CC) -T $(USER_LINKER) $(USER_LDFLAGS) $(USER_OBJS) -o $@
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(USER_BUILD_DIR)/bin/shell.elf: $(USER_BUILD_DIR)/cmds/shell.o $(USER_SHELL_OBJS) $(USER_LIB_OBJS) $(USER_BOOT_OBJ) $(USER_LINKER)
+	@mkdir -p $(dir $@)
+	$(CC) -T $(USER_LINKER) $(USER_LDFLAGS) -Wl,-Map=$(USER_BUILD_DIR)/bin/shell.map $(USER_BOOT_OBJ) $(USER_BUILD_DIR)/cmds/shell.o $(USER_SHELL_OBJS) $(USER_LIB_OBJS) -o $@
+
+$(USER_BUILD_DIR)/bin/%.elf: $(USER_BUILD_DIR)/cmds/%.o $(USER_LIB_OBJS) $(USER_BOOT_OBJ) $(USER_LINKER)
+	@mkdir -p $(dir $@)
+	$(CC) -T $(USER_LINKER) $(USER_LDFLAGS) -Wl,-Map=$(USER_BUILD_DIR)/bin/$*.map $(USER_BOOT_OBJ) $< $(USER_LIB_OBJS) -o $@
 
 $(USER_IMAGE_BIN): $(USER_IMAGE_ELF)
 	$(OBJCOPY) -O binary $< $@
@@ -98,6 +120,38 @@ $(USER_IMAGE_ASM): $(USER_IMAGE_BIN)
 	@printf '.section .user_image, "a"\n.balign 4096\n.incbin "%s"\n.balign 4096\n' "$(abspath $<)" > $@
 
 $(USER_IMAGE_OBJ): $(USER_IMAGE_ASM)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(USER_BINS_ASM): $(USER_CMD_ELFS)
+	@mkdir -p $(dir $@)
+	@printf '.section .rodata.user_bins, "a"\n.balign 8\n' > $@
+	@for elf in $(USER_CMD_ELFS); do \
+		name=$$(basename $$elf .elf); \
+		sym=$$(printf '%s' "$$name" | tr -c 'A-Za-z0-9_' '_'); \
+		printf '.global __user_bin_%s_start\n.global __user_bin_%s_end\n' "$$sym" "$$sym" >> $@; \
+		printf '__user_bin_%s_start:\n.incbin "%s"\n__user_bin_%s_end:\n.balign 8\n' "$$sym" "$$(realpath $$elf)" "$$sym" >> $@; \
+	done
+
+$(USER_BINS_C): $(USER_CMD_ELFS)
+	@mkdir -p $(dir $@)
+	@printf '#include "user_bins.h"\n\n' > $@
+	@for elf in $(USER_CMD_ELFS); do \
+		name=$$(basename $$elf .elf); \
+		sym=$$(printf '%s' "$$name" | tr -c 'A-Za-z0-9_' '_'); \
+		printf 'extern const uint8_t __user_bin_%s_start[];\nextern const uint8_t __user_bin_%s_end[];\n' "$$sym" "$$sym" >> $@; \
+	done
+	@printf '\nconst user_bin_t user_bins[] = {\n' >> $@
+	@for elf in $(USER_CMD_ELFS); do \
+		name=$$(basename $$elf .elf); \
+		sym=$$(printf '%s' "$$name" | tr -c 'A-Za-z0-9_' '_'); \
+		printf '    { "/bin/%s", __user_bin_%s_start, __user_bin_%s_end },\n' "$$name" "$$sym" "$$sym" >> $@; \
+	done
+	@printf '};\n\nconst size_t user_bins_count = sizeof(user_bins) / sizeof(user_bins[0]);\n' >> $@
+
+$(USER_BINS_ASM_OBJ): $(USER_BINS_ASM)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(USER_BINS_C_OBJ): $(USER_BINS_C) $(USER_DIR)/user_bins.h
 	$(CC) $(CFLAGS) -c $< -o $@
 
 all: rpi install

@@ -1,6 +1,12 @@
-#include "syscall.h"
-#include "tests.h"
-#include "shell.h"
+#include "lib/syscall.h"
+#include "lib/tests.h"
+
+static int execvp(const char *path, void *arg) {
+    (void)path;
+    (void)arg;
+    return -1;
+}
+
 void *tests(void *args) {
     (void)args;
 
@@ -16,8 +22,13 @@ void *init_process_entry(void *args) {
     (void)args;
 
     int tty_num = 0;
-    pid_t pid = spawn(shell_init, (void*)(uintptr_t)tty_num);
+    pid_t pid = fork();
+
     setpgid(pid, pid);
+    if (pid == 0) {
+        execvp("/bin/shell", (void*)(uintptr_t)tty_num);
+        exit(-1);
+    }
 
     while (1) {
         int ret = waitpid(-1, NULL, 0);
@@ -27,4 +38,11 @@ void *init_process_entry(void *args) {
     }
 
     return NULL;
+}
+
+int main(int argc, char **argv) {
+     (void)argc;
+     init_process_entry((void*) argv);
+
+     return 0;
 }

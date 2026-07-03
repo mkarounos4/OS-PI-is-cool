@@ -204,7 +204,7 @@ PROCESS_ERROR:
     return ret_code;
 }
 
-#include <stdio.h>
+#include "lib/stdio.h"
 
 void print_parsed_command(const struct parsed_command *const cmd) {
     for (size_t i = 0; i < cmd->num_commands; ++i) {
@@ -249,4 +249,3 @@ void print_parser_errcode(int err_code) {
       break;
   }
 }
-
