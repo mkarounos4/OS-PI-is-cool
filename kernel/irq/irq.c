@@ -217,7 +217,7 @@ void irq_disable_line(unsigned intid) {
 #endif
 }
 
-void irq_force_pending(unsigned intid) {
+void irq_set_edge_triggered(unsigned intid) {
     if (intid >= GIC_MAX_INTIDS) {
         return;
     }
@@ -225,7 +225,13 @@ void irq_force_pending(unsigned intid) {
 #if defined(PLATFORM_QEMU)
     (void)intid;
 #else
-    gicd_write(GICD_ISPENDR + ((intid / 32u) * 4u), 1u << (intid % 32u));
+    uint32_t reg = GICD_ICFGR + ((intid / 16u) * 4u);
+    uint32_t shift = (intid % 16u) * 2u;
+    uint32_t value = gicd_read(reg);
+
+    value &= ~(3u << shift);
+    value |= 2u << shift;
+    gicd_write(reg, value);
 #endif
 }
 

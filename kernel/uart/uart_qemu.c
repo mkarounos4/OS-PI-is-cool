@@ -99,7 +99,7 @@ void uart_rx_interrupt_hook(void)
     }
 
     if (size > 0) {
-        tty_send_input(0, uart_rx_buffer, size);
+        tty_send_input(0, (const char *)uart_rx_buffer, size);
     }
 
     uart_rx_buffer_clear();

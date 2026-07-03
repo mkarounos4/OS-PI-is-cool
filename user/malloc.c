@@ -330,7 +330,6 @@ void *get_allocation(size_t size) {
 
 void *malloc(size_t size)
 {
-    printf("size: %u\n", size);
     if (size == 0) return NULL;
 
     void *ptr = get_allocation(size);
@@ -347,7 +346,6 @@ void *malloc(size_t size)
         if (ptr == NULL) return NULL;
     }
 
-    printf("addr: %x\n", ptr);
     return ptr;
 }
 

@@ -37,8 +37,10 @@
   (PTE_ATTRINDX(0) | PTE_AP_EL1_RW | PTE_AF | PTE_PXN | PTE_UXN)
 
 #define DEVICE_BLOCK_QEMU_LOCAL UINT64_C(0x40000000)
+#define DEVICE_BLOCK_RPI5_PCIE UINT64_C(0x1000000000)
 #define DEVICE_BLOCK_RPI_GIC UINT64_C(0x1040000000)
-#define DEVICE_BLOCK_RPI5_RP1 UINT64_C(0x1c00000000)
+#define DEVICE_BLOCK_RPI5_RP1_PERIPH UINT64_C(0x1c00000000)
+#define DEVICE_BLOCK_RPI5_RP1_MSIX UINT64_C(0x1f80000000)
 
 extern uint8_t __text_start[];
 extern uint8_t __text_end[];
@@ -316,8 +318,10 @@ static uint8_t map_device_block(uint64_t *l0, uint64_t pa) {
 
 static uint8_t map_kernel_devices(uint64_t *l0) {
   return map_device_block(l0, DEVICE_BLOCK_QEMU_LOCAL) &&
+         map_device_block(l0, DEVICE_BLOCK_RPI5_PCIE) &&
          map_device_block(l0, DEVICE_BLOCK_RPI_GIC) &&
-         map_device_block(l0, DEVICE_BLOCK_RPI5_RP1);
+         map_device_block(l0, DEVICE_BLOCK_RPI5_RP1_PERIPH) &&
+         map_device_block(l0, DEVICE_BLOCK_RPI5_RP1_MSIX);
 }
 
 static uint8_t map_embedded_user_range(uint64_t *l0, uint64_t va_start,
@@ -578,4 +582,3 @@ void tlb_invalidate_all_user(void) {
         :
         : "memory");
 }
-

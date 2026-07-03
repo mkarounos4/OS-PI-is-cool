@@ -28,8 +28,10 @@
 #define BOOT_DEVICE_BLOCK  (DESC_VALID | DESC_BLOCK | PTE_AF | PTE_PXN | PTE_UXN)
 
 #define L1_INDEX_QEMU_LOCAL 1ULL
+#define L1_INDEX_RPI5_PCIE   64ULL
 #define L1_INDEX_RPI_GIC    65ULL
-#define L1_INDEX_RPI5_RP1   112ULL
+#define L1_INDEX_RPI5_RP1_PERIPH 112ULL
+#define L1_INDEX_RPI5_RP1_MSIX   126ULL
 
 #define TCR_T0SZ_48BIT      (16ULL << 0)
 #define TCR_IRGN0_WB_RA_WA  (1ULL << 8)
@@ -91,13 +93,17 @@ static void BOOT_TEXT initialize_boot_tables(void) {
 
     map_l1_block(boot_ttbr0_l1, 0, BOOT_NORMAL_BLOCK);
     map_l1_block(boot_ttbr0_l1, L1_INDEX_QEMU_LOCAL, BOOT_DEVICE_BLOCK);
+    map_l1_block(boot_ttbr0_l1, L1_INDEX_RPI5_PCIE, BOOT_DEVICE_BLOCK);
     map_l1_block(boot_ttbr0_l1, L1_INDEX_RPI_GIC, BOOT_DEVICE_BLOCK);
-    map_l1_block(boot_ttbr0_l1, L1_INDEX_RPI5_RP1, BOOT_DEVICE_BLOCK);
+    map_l1_block(boot_ttbr0_l1, L1_INDEX_RPI5_RP1_PERIPH, BOOT_DEVICE_BLOCK);
+    map_l1_block(boot_ttbr0_l1, L1_INDEX_RPI5_RP1_MSIX, BOOT_DEVICE_BLOCK);
 
     map_l1_block(boot_ttbr1_l1, 0, BOOT_NORMAL_BLOCK);
     map_l1_block(boot_ttbr1_l1, L1_INDEX_QEMU_LOCAL, BOOT_DEVICE_BLOCK);
+    map_l1_block(boot_ttbr1_l1, L1_INDEX_RPI5_PCIE, BOOT_DEVICE_BLOCK);
     map_l1_block(boot_ttbr1_l1, L1_INDEX_RPI_GIC, BOOT_DEVICE_BLOCK);
-    map_l1_block(boot_ttbr1_l1, L1_INDEX_RPI5_RP1, BOOT_DEVICE_BLOCK);
+    map_l1_block(boot_ttbr1_l1, L1_INDEX_RPI5_RP1_PERIPH, BOOT_DEVICE_BLOCK);
+    map_l1_block(boot_ttbr1_l1, L1_INDEX_RPI5_RP1_MSIX, BOOT_DEVICE_BLOCK);
 }
 
 void BOOT_TEXT initialize_vm(void) {
