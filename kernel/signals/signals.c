@@ -3,6 +3,9 @@
 #include "scheduler/scheduler.h"
 #include "scheduler/process.h"
 
+#define USER_SIG_DFL ((void (*)(int))0)
+#define USER_SIG_IGN ((void (*)(int))1)
+
 void (*def_signal_handlers[32])(int);
 
 void SIG_IGN(int signum) {
@@ -225,6 +228,10 @@ int sigaction(int signum, struct sigaction *sa, struct sigaction *old) {
         return -1;
     }
 
+    if (signum < 0 || signum >= 32) {
+        return -1;
+    }
+
     if (sa == NULL) {
         return -1;
     }
@@ -233,6 +240,17 @@ int sigaction(int signum, struct sigaction *sa, struct sigaction *old) {
         *old = pcb->sigactions[signum];
     }
 
+    if ((signum == SIGKILL || signum == SIGSTOP) &&
+        sa->sa_handler != USER_SIG_DFL &&
+        sa->sa_handler != SIG_DFL) {
+        return -1;
+    }
+
     pcb->sigactions[signum] = *sa;
+    if (sa->sa_handler == USER_SIG_DFL) {
+        pcb->sigactions[signum].sa_handler = SIG_DFL;
+    } else if (sa->sa_handler == USER_SIG_IGN) {
+        pcb->sigactions[signum].sa_handler = SIG_IGN;
+    }
     return 0;
 }

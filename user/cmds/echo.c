@@ -1,4 +1,5 @@
-#include "shell_cmds.h"
+#include "lib/fs_syscall.h"
+#include "lib/string.h"
 
 void echo(char **args) {
     int i = 1;
@@ -11,4 +12,10 @@ void echo(char **args) {
     }
 
     write(1, "\n", 1);
+}
+
+int main(int argc, char **argv) {
+    (void)argc;
+    echo(argv);
+    return 0;
 }

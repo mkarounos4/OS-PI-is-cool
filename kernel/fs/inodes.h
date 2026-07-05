@@ -47,8 +47,8 @@ struct cached_inode_st;
 #define BLOCKS_IN_SINGLE_PTR (get_bytes_per_block() / sizeof(block_no_t))
 #define BLOCKS_IN_DOUBLE_PTR (BLOCKS_IN_SINGLE_PTR * BLOCKS_IN_SINGLE_PTR)
 #define BLOCKS_IN_TRIPLE_PTR (BLOCKS_IN_DOUBLE_PTR * BLOCKS_IN_SINGLE_PTR)
-#define FS_SIGNATURE_SIZE 8
-#define FS_SIGNATURE "PNFSI001"
+#define FS_SIGNATURE_SIZE 11
+#define FS_SIGNATURE "OSisCOOLv2"
 
 #define ALL_PERMS 0
 #define INODE_EDIT_TYPE 0x01

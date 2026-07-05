@@ -988,33 +988,286 @@ err_t remove_last_block_inode(ino_id_t id) {
     if (err) return err;
 
     inode_cache->dirty = 1;
-
-    int block_idx = inode_cache->inode.metadata.i_blocks - 1;
-    block_no_t block_to_remove = get_block_num_from_inode(&inode_cache->inode, block_idx);
-    if (block_to_remove == 0) {
+    struct inode_st *inode = &inode_cache->inode;
+    uint32_t old_blocks = inode->metadata.i_blocks;
+    if (old_blocks == 0) {
+        remove_ref_from_cache(id);
         return ILLEGAL_BLOCK_NO;
     }
-    inode_cache->inode.metadata.i_blocks--;
 
-    err = set_block_allocated(block_to_remove, 0);
-    if (err) return err;
+    unsigned int block_idx = old_blocks - 1u;
 
-    if (block_idx == 16) {
-        // remove single pointer and puts back into inode blocks 
-        block_no_t single_ptr = inode_cache->inode.blocks[12];
-        block_no_t *data = kmalloc(get_bytes_per_block());
-        read_block(data, single_ptr);
-        inode_cache->inode.blocks[14] = data[2];
-        inode_cache->inode.blocks[13] = data[1];
-        inode_cache->inode.blocks[12] = data[0];
-        err = set_block_allocated(single_ptr, 0);
-        if (err) {
-            kfree(data);
-            return err;
+    if (old_blocks <= 15) {
+        block_no_t block_to_remove = inode->blocks[block_idx];
+        if (block_to_remove == 0) {
+            err = ILLEGAL_BLOCK_NO;
+            goto done;
         }
-        kfree(data);
+
+        err = set_block_allocated(block_to_remove, 0);
+        if (err != SUCCESS) {
+            goto done;
+        }
+        inode->blocks[block_idx] = 0;
+    } else if (old_blocks == 16) {
+        block_no_t single_ptr = inode->blocks[12];
+        block_no_t *single_ptr_data = kmalloc(get_bytes_per_block());
+        err = read_block(single_ptr_data, single_ptr);
+        if (err != SUCCESS) {
+            kfree(single_ptr_data);
+            goto done;
+        }
+
+        block_no_t block_to_remove = single_ptr_data[block_idx - 12u];
+        if (block_to_remove == 0) {
+            kfree(single_ptr_data);
+            err = ILLEGAL_BLOCK_NO;
+            goto done;
+        }
+
+        err = set_block_allocated(block_to_remove, 0);
+        if (err != SUCCESS) {
+            kfree(single_ptr_data);
+            goto done;
+        }
+
+        inode->blocks[12] = single_ptr_data[0];
+        inode->blocks[13] = single_ptr_data[1];
+        inode->blocks[14] = single_ptr_data[2];
+        kfree(single_ptr_data);
+
+        err = set_block_allocated(single_ptr, 0);
+        if (err != SUCCESS) {
+            goto done;
+        }
+    } else if (block_idx < 12 + BLOCKS_IN_SINGLE_PTR) {
+        block_no_t single_ptr = inode->blocks[12];
+        block_no_t *single_ptr_data = kmalloc(get_bytes_per_block());
+        err = read_block(single_ptr_data, single_ptr);
+        if (err != SUCCESS) {
+            kfree(single_ptr_data);
+            goto done;
+        }
+
+        unsigned int index_in_single_ptr = block_idx - 12u;
+        block_no_t block_to_remove = single_ptr_data[index_in_single_ptr];
+        if (block_to_remove == 0) {
+            kfree(single_ptr_data);
+            err = ILLEGAL_BLOCK_NO;
+            goto done;
+        }
+
+        err = set_block_allocated(block_to_remove, 0);
+        if (err != SUCCESS) {
+            kfree(single_ptr_data);
+            goto done;
+        }
+
+        single_ptr_data[index_in_single_ptr] = 0;
+        err = write_block(single_ptr_data, single_ptr);
+        kfree(single_ptr_data);
+        if (err != SUCCESS) {
+            goto done;
+        }
+    } else if (block_idx < 12 + BLOCKS_IN_SINGLE_PTR + BLOCKS_IN_DOUBLE_PTR) {
+        unsigned int num_in_double_ptr =
+            block_idx - 12u - BLOCKS_IN_SINGLE_PTR;
+        unsigned int index_in_single_ptr =
+            num_in_double_ptr % BLOCKS_IN_SINGLE_PTR;
+        unsigned int single_ptr_idx_in_double_ptr =
+            num_in_double_ptr / BLOCKS_IN_SINGLE_PTR;
+
+        block_no_t double_ptr = inode->blocks[13];
+        block_no_t *double_ptr_data = kmalloc(get_bytes_per_block());
+        err = read_block(double_ptr_data, double_ptr);
+        if (err != SUCCESS) {
+            kfree(double_ptr_data);
+            goto done;
+        }
+
+        block_no_t single_ptr = double_ptr_data[single_ptr_idx_in_double_ptr];
+        block_no_t *single_ptr_data = kmalloc(get_bytes_per_block());
+        err = read_block(single_ptr_data, single_ptr);
+        if (err != SUCCESS) {
+            kfree(single_ptr_data);
+            kfree(double_ptr_data);
+            goto done;
+        }
+
+        block_no_t block_to_remove = single_ptr_data[index_in_single_ptr];
+        if (block_to_remove == 0) {
+            kfree(single_ptr_data);
+            kfree(double_ptr_data);
+            err = ILLEGAL_BLOCK_NO;
+            goto done;
+        }
+
+        err = set_block_allocated(block_to_remove, 0);
+        if (err != SUCCESS) {
+            kfree(single_ptr_data);
+            kfree(double_ptr_data);
+            goto done;
+        }
+
+        if (index_in_single_ptr == 0) {
+            err = set_block_allocated(single_ptr, 0);
+            if (err != SUCCESS) {
+                kfree(single_ptr_data);
+                kfree(double_ptr_data);
+                goto done;
+            }
+
+            double_ptr_data[single_ptr_idx_in_double_ptr] = 0;
+            kfree(single_ptr_data);
+
+            if (single_ptr_idx_in_double_ptr == 0) {
+                err = set_block_allocated(double_ptr, 0);
+                if (err == SUCCESS) {
+                    inode->blocks[13] = 0;
+                }
+                kfree(double_ptr_data);
+                if (err != SUCCESS) {
+                    goto done;
+                }
+            } else {
+                err = write_block(double_ptr_data, double_ptr);
+                kfree(double_ptr_data);
+                if (err != SUCCESS) {
+                    goto done;
+                }
+            }
+        } else {
+            single_ptr_data[index_in_single_ptr] = 0;
+            err = write_block(single_ptr_data, single_ptr);
+            kfree(single_ptr_data);
+            kfree(double_ptr_data);
+            if (err != SUCCESS) {
+                goto done;
+            }
+        }
+    } else {
+        unsigned int num_in_triple_ptr =
+            block_idx - 12u - BLOCKS_IN_SINGLE_PTR - BLOCKS_IN_DOUBLE_PTR;
+        unsigned int index_in_double_ptr =
+            num_in_triple_ptr % BLOCKS_IN_DOUBLE_PTR;
+        unsigned int double_ptr_idx_in_triple_ptr =
+            num_in_triple_ptr / BLOCKS_IN_DOUBLE_PTR;
+
+        unsigned int index_in_single_ptr =
+            index_in_double_ptr % BLOCKS_IN_SINGLE_PTR;
+        unsigned int single_ptr_idx_in_double_ptr =
+            index_in_double_ptr / BLOCKS_IN_SINGLE_PTR;
+
+        block_no_t triple_ptr = inode->blocks[14];
+        block_no_t *triple_ptr_data = kmalloc(get_bytes_per_block());
+        err = read_block(triple_ptr_data, triple_ptr);
+        if (err != SUCCESS) {
+            kfree(triple_ptr_data);
+            goto done;
+        }
+
+        block_no_t double_ptr =
+            triple_ptr_data[double_ptr_idx_in_triple_ptr];
+        block_no_t *double_ptr_data = kmalloc(get_bytes_per_block());
+        err = read_block(double_ptr_data, double_ptr);
+        if (err != SUCCESS) {
+            kfree(double_ptr_data);
+            kfree(triple_ptr_data);
+            goto done;
+        }
+
+        block_no_t single_ptr = double_ptr_data[single_ptr_idx_in_double_ptr];
+        block_no_t *single_ptr_data = kmalloc(get_bytes_per_block());
+        err = read_block(single_ptr_data, single_ptr);
+        if (err != SUCCESS) {
+            kfree(single_ptr_data);
+            kfree(double_ptr_data);
+            kfree(triple_ptr_data);
+            goto done;
+        }
+
+        block_no_t block_to_remove = single_ptr_data[index_in_single_ptr];
+        if (block_to_remove == 0) {
+            kfree(single_ptr_data);
+            kfree(double_ptr_data);
+            kfree(triple_ptr_data);
+            err = ILLEGAL_BLOCK_NO;
+            goto done;
+        }
+
+        err = set_block_allocated(block_to_remove, 0);
+        if (err != SUCCESS) {
+            kfree(single_ptr_data);
+            kfree(double_ptr_data);
+            kfree(triple_ptr_data);
+            goto done;
+        }
+
+        if (index_in_single_ptr == 0) {
+            err = set_block_allocated(single_ptr, 0);
+            if (err != SUCCESS) {
+                kfree(single_ptr_data);
+                kfree(double_ptr_data);
+                kfree(triple_ptr_data);
+                goto done;
+            }
+
+            double_ptr_data[single_ptr_idx_in_double_ptr] = 0;
+            kfree(single_ptr_data);
+
+            if (single_ptr_idx_in_double_ptr == 0) {
+                err = set_block_allocated(double_ptr, 0);
+                if (err != SUCCESS) {
+                    kfree(double_ptr_data);
+                    kfree(triple_ptr_data);
+                    goto done;
+                }
+
+                triple_ptr_data[double_ptr_idx_in_triple_ptr] = 0;
+                kfree(double_ptr_data);
+
+                if (double_ptr_idx_in_triple_ptr == 0) {
+                    err = set_block_allocated(triple_ptr, 0);
+                    if (err == SUCCESS) {
+                        inode->blocks[14] = 0;
+                    }
+                    kfree(triple_ptr_data);
+                    if (err != SUCCESS) {
+                        goto done;
+                    }
+                } else {
+                    err = write_block(triple_ptr_data, triple_ptr);
+                    kfree(triple_ptr_data);
+                    if (err != SUCCESS) {
+                        goto done;
+                    }
+                }
+            } else {
+                err = write_block(double_ptr_data, double_ptr);
+                kfree(double_ptr_data);
+                kfree(triple_ptr_data);
+                if (err != SUCCESS) {
+                    goto done;
+                }
+            }
+        } else {
+            single_ptr_data[index_in_single_ptr] = 0;
+            err = write_block(single_ptr_data, single_ptr);
+            kfree(single_ptr_data);
+            kfree(double_ptr_data);
+            kfree(triple_ptr_data);
+            if (err != SUCCESS) {
+                goto done;
+            }
+        }
     }
-    remove_ref_from_cache(id);
-    
-    return SUCCESS;
+
+    inode->metadata.i_blocks = old_blocks - 1u;
+
+done:
+    err_t ref_err = remove_ref_from_cache(id);
+    if (err == SUCCESS) {
+        err = ref_err;
+    }
+    return err;
 }

@@ -5,6 +5,8 @@
 #include "fs_test.h"
 #include "inodes.h"
 #include "fs/caches/inode_cache.h"
+#include "kapi.h"
+#include "user_bins.h"
 
 #define FS_MOUNT_BLOCK_BUFFER_SIZE 4096
 
@@ -21,6 +23,94 @@ static uint32_t inode_bitmap_start = 2;
 static uint32_t inode_bitmap_blocks = 1;
 static uint32_t inode_table_start = 3;
 static uint32_t data_start_block = 4;
+
+static err_t seed_user_bin_file(const user_bin_t *bin) {
+    if (bin == NULL || bin->path == NULL || bin->start == NULL ||
+        bin->end < bin->start) {
+        return INVALID_ARGS;
+    }
+
+    if (k_check_if_exists(bin->path)) {
+        return SUCCESS;
+    }
+
+    size_t size = (size_t)(bin->end - bin->start);
+    int fd = k_open(bin->path, O_CREAT | O_WRONLY);
+    if (fd < 0) {
+        return fd;
+    }
+
+    struct oft_entry *entry;
+    err_t err = get_oft_entry_by_fd(fd, &entry);
+    if (err != SUCCESS) {
+        return err;
+    }
+
+    size_t written = 0;
+    while (written < size) {
+        int chunk = k_write(entry, (const char *)(bin->start + written),
+                            size - written);
+        if (chunk < 0) {
+            k_close(entry);
+            return chunk;
+        }
+        if (chunk == 0) {
+            k_close(entry);
+            return FILE_WRITE_ERROR;
+        }
+        written += (size_t)chunk;
+    }
+
+    return k_close(entry);
+}
+
+static err_t seed_user_bins(void) {
+    struct fs_dirent dir;
+    err_t err = get_dirent_by_path("/bin", &dir, 1, NULL, NULL);
+    if (err == FILE_NOT_CREATED || err == FILE_NOT_FOUND) {
+        err = k_make_directory("/bin");
+    }
+    if (err != SUCCESS) {
+        return err;
+    }
+
+    for (size_t i = 0; i < user_bins_count; i++) {
+        err = seed_user_bin_file(&user_bins[i]);
+        if (err != SUCCESS) {
+            return err;
+        }
+    }
+
+    return SUCCESS;
+}
+
+static err_t seed_user_bins_for_mkfs(void) {
+    is_mounted = 1;
+    curr_dir = ROOT_INO;
+
+    err_t err = initialize_oft();
+    if (err == SUCCESS) {
+        err = seed_user_bins();
+    }
+
+    err_t cleanup_err = empty_oft();
+    is_mounted = 0;
+    curr_dir = ROOT_INO;
+
+    err_t inode_err = unmount_inode();
+    err_t cache_err = lru_cache_empty();
+
+    if (err != SUCCESS) {
+        return err;
+    }
+    if (cleanup_err != SUCCESS) {
+        return cleanup_err;
+    }
+    if (inode_err != SUCCESS) {
+        return inode_err;
+    }
+    return cache_err;
+}
 
 static uint32_t read_le32(const unsigned char *bytes) {
     return (uint32_t)bytes[0] |
@@ -465,6 +555,11 @@ err_t mkfs(int inode_table_blocks, int block_size_config) {
     }
 
     err = mkfs_inode(inode_table_blocks, new_bytes_per_block);
+    if (err != SUCCESS) {
+        return err;
+    }
+
+    err = seed_user_bins_for_mkfs();
     if (err != SUCCESS) {
         return err;
     }

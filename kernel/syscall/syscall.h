@@ -47,6 +47,8 @@ enum syscall_type {
     S_MOUNT = 39,
     S_UNMOUNT = 40,
     S_PIPE = 41,
+    S_PS = 42,
+    S_EXEC = 43,
 };
 
 #define SYS_ENOSYS (-38L)

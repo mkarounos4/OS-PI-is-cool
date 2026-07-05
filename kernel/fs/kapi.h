@@ -1,5 +1,6 @@
 #pragma once
 
+#include "traps/traps.h"
 #include "errors.h"
 #include "memory/kmalloc.h"
 #include "oft.h"
@@ -156,5 +157,18 @@ int k_change_directory(char *f_path);
  * @return true if executable, false otherwise.
  */
 bool k_check_if_executable(char *f_name);
+
+/**
+ * @brief Parse a user ELF image from path and dispatch each loadable
+ * segment to the user table metadata. On success, installs a fresh user
+ * page table and updates the trap frame to enter the ELF.
+ *
+ * @param path Filesystem path to an ELF executable.
+ * @param frame Current syscall trap frame to update for exec return.
+ * @return SUCCESS on successful parse, or a negative err_t on failure.
+ */
+int k_exec(const char *path, char *const argv[], struct trap_frame *frame,
+           struct trap_frame **next_frame);
+int k_exec_process(int pid, const char *path, char *const argv[]);
 
 struct file_operations *get_default_fops();

@@ -20,7 +20,7 @@
 #include "fs/kapi.h"
 #include "fan/fan.h"
 
-#define FS_DEFAULT_INODE_TABLE_BLOCKS 4
+#define FS_DEFAULT_INODE_TABLE_BLOCKS 8
 #define FS_DEFAULT_BLOCK_SIZE_CONFIG 1
 #define RAM_END_PHYS 0x40000000
 

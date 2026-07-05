@@ -5,9 +5,9 @@
 #define PARSER_H_
 
 #include <stdbool.h>
-#include "string.h"
-#include "malloc.h"
-#include "fs_syscall.h"
+#include "lib/string.h"
+#include "lib/malloc.h"
+#include "lib/fs_syscall.h"
 
 /* Here defines all possible parser errors */
 // parser encountered an unexpected file input token '<'

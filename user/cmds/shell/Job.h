@@ -2,9 +2,10 @@
 #define JOB_H_
 
 #include <stdint.h>
-#include "./parser.h"
+#include "parser.h"
 #include "Vec.h"
-#include "malloc.h"
+#include "lib/malloc.h"
+#include "lib/string.h"
 
 #define RUNNING_STATE 0
 #define STOPPED_STATE 1

@@ -1,5 +1,5 @@
 #include "Vec.h"
-#include "malloc.h"
+#include "lib/malloc.h"
 
 Vec vec_new(size_t initial_capacity, ptr_dtor_fn ele_dtor_fn) {
 	ptr_t* data = malloc(sizeof(void*) * initial_capacity);

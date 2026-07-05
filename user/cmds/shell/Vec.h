@@ -2,7 +2,7 @@
 #define VEC_H_
 
 #include <stdbool.h>
-#include "syscall.h"
+#include "lib/syscall.h"
 
 typedef void* ptr_t;
 typedef void(*ptr_dtor_fn)(ptr_t);

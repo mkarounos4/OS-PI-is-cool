@@ -1,5 +1,4 @@
 #include "shell.h"
-#include "malloc.h"
 
 volatile int wasInterrupted = 0;
 int shell_pgid;
@@ -21,10 +20,17 @@ void wait_on_children();
 void prepare_child_process(struct parsed_command *parsed_cmd);
 void start_fg_job(job *newJob);
 void execute_commands(struct parsed_command *parsed_cmd, char *cmd);
+void exec_shell_command(char **argv);
 int handle_job_builtins(struct parsed_command *parsed_cmd);
 char *get_input(int *nextAddNewLine);
 void print_status_updates();
-int execvp(const char *cmd, char **args);
+
+int main(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    shell_init((void*)0);
+    return 0;
+}
 
 void *shell_init(void *args) {
     setpgid(0, 0);
@@ -267,6 +273,31 @@ void wait_on_children() {
 	}
 }
 
+static int command_has_slash(const char *command) {
+    for (size_t i = 0; command[i] != '\0'; i++) {
+        if (command[i] == '/') {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void exec_shell_command(char **argv) {
+    if (argv == NULL || argv[0] == NULL) {
+        exit(EXIT_FAILURE);
+    }
+
+    if (!command_has_slash(argv[0])) {
+        char *bin_path = str_concat("/bin/", argv[0]);
+        if (bin_path != NULL) {
+            exec(bin_path, argv);
+            free(bin_path);
+        }
+    }
+
+    exec(argv[0], argv);
+}
+
 void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
     // exit if no commands
     if (parsed_cmd->num_commands == 0) {
@@ -333,8 +364,8 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
 
             }
 
-            execvp(parsed_cmd->commands[0][0], parsed_cmd->commands[0]);
-            perror("execvp");
+            exec_shell_command(parsed_cmd->commands[0]);
+            perror("exec");
             exit(EXIT_FAILURE);
         }
 
@@ -413,7 +444,7 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
                     close_pipe(all_pipes[j]);
                 }
 
-                execvp(parsed_cmd->commands[i][0], parsed_cmd->commands[i]);
+                exec_shell_command(parsed_cmd->commands[i]);
                 exit(EXIT_FAILURE);
             }
 
@@ -576,70 +607,4 @@ int handle_job_builtins(struct parsed_command *parsed_cmd) {
     }
 
     return 0;
-}
-
-static void report_command_error(const char *cmd, err_t err) {
-    if (err < 0) {
-        printf("%s: error %d\n", cmd, err);
-    }
-}
-
-int execvp(const char *cmd, char **args) {
-    if (strcmp(cmd, "cat") == 0) {
-        char **commands = args + 1;
-        int flag = 0;
-        char *output_file = NULL;
-
-        // Gets output flag and file if applicable
-        int i = 0;
-        while (commands[i] != NULL) {
-            if (commands[i][0] == '-') {
-                if (commands[i+1] == NULL) {
-                    return 0;
-                }
-
-                if (commands[i][1] == 'a') {
-                    flag = O_WRONLY | O_APPEND;
-                } else if (commands[i][1] == 'w') {
-                    flag = O_WRONLY;
-                } else {
-                    return 1;
-                }
-                output_file = commands[i+1];
-                commands[i] = NULL;
-                break;
-            }
-            i++;
-        }
-
-        report_command_error(cmd, cat(commands, output_file, flag));
-    } else if (strcmp(cmd, "ls") == 0) {
-        report_command_error(cmd, ls(args[1], STDOUT_FILENO));
-    } else if (strcmp(cmd, "touch") == 0) {
-        report_command_error(cmd, touch(args+1));
-    } else if (strcmp(cmd, "mv") == 0) {
-        if (args[1] == NULL || args[2] == NULL) {
-            exit(-1);
-        }
-        report_command_error(cmd, mv(args[1], args[2]));
-    } else if (strcmp(cmd, "rm") == 0) {
-        report_command_error(cmd, rm(args+1));
-    } else if (strcmp(cmd, "cp") == 0) {
-        if (args[1] == NULL || args[2] == NULL) {
-            exit(-1);
-        }
-        report_command_error(cmd, cp(args[1], args[2], 0));
-    } else if (strcmp(cmd, "mkdir") == 0) {
-        report_command_error(cmd, fs_mkdir(args+1));
-    } else if (strcmp(cmd, "cd") == 0) {
-        report_command_error(cmd, cd(args[1]));
-    } else if (strcmp(cmd, "echo") == 0) {
-        echo(args);
-    } else {
-        perror("unknown command\n");
-        exit(EXIT_FAILURE);
-    }
-
-    exit(EXIT_SUCCESS);
-    return EXIT_SUCCESS;
 }

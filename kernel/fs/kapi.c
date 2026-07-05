@@ -3,6 +3,9 @@
 #include "oft.h"
 #include "dirs.h"
 #include "devices/devices.h"
+#include "elf_loader.h"
+#include "memory/page_table/page_table.h"
+#include "scheduler/scheduler.h"
 
 int default_read(struct oft_entry *entry, char *buf, size_t n);
 int default_write(struct oft_entry *entry, const char *buf, size_t n);
@@ -565,4 +568,37 @@ bool k_check_if_executable(char *f_name) {
         return (metadata.perm & 0x1);
     }
     return false;
+}
+
+int k_exec(const char *path, char *const argv[], struct trap_frame *frame,
+           struct trap_frame **next_frame) {
+    pcb_t *pcb = get_curr_process();
+    return elf_exec_process(pcb, path, argv, frame,
+                            (uint64_t)(uintptr_t)frame, next_frame, 1);
+}
+
+int k_exec_process(int pid, const char *path, char *const argv[]) {
+    pcb_t *pcb = get_pcb_by_pid(pid);
+    if (pcb == NULL) {
+        return INVALID_ARGS;
+    }
+
+    uint64_t kernel_stack_page_va = PROC_KERNEL_STACK_TOP - PAGE_SIZE;
+    uint64_t frame_va = pcb->ctx.x19;
+    uint64_t frame_offset = frame_va - kernel_stack_page_va;
+    if (frame_offset >= PAGE_SIZE) {
+        return INVALID_ARGS;
+    }
+
+    void *kernel_stack_page =
+        pt_get_mapped_page((uint64_t *)(uintptr_t)pcb->ctx.ttbr0_el1_va,
+                           kernel_stack_page_va);
+    if (kernel_stack_page == NULL) {
+        return INVALID_ARGS;
+    }
+
+    struct trap_frame *frame =
+        (struct trap_frame *)(uintptr_t)((uint8_t *)kernel_stack_page +
+                                         frame_offset);
+    return elf_exec_process(pcb, path, argv, frame, frame_va, NULL, 0);
 }

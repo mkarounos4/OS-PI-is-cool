@@ -37,3 +37,5 @@ void uart_raw_putc(const char c);
 void uart_raw_puts(const char *s);
 
 void printf(const char *fmt, ...);
+int snprintf(char *buf, size_t size, const char *fmt, ...);
+int fprintf(int fd, const char *fmt, ...);

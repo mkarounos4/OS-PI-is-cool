@@ -435,12 +435,12 @@ err_t fs_chmod(char *file_name, char *new_perms, int flag) {
     return k_chmod(file_name, perm_to_add, flag);
 }
 
-err_t ls(char *dir_path, int out_fd) {
+err_t ls(char *dir_path) {
     // Return if not mounted
     if (!get_is_mounted()) {
         return FS_NOT_MOUNTED;
     }
-    err_t res = k_ls(dir_path, out_fd);
+    err_t res = k_ls(dir_path, 1);
     return res;
 }
 
@@ -451,4 +451,19 @@ err_t cd(char *path) {
 
     err_t res = k_change_directory(path);
     return res;
+}
+
+err_t exec(char *path) {
+    if (!get_is_mounted()) {
+        return FS_NOT_MOUNTED;
+    }
+
+    char *argv[] = {path, NULL};
+    pcb_t *pcb = get_curr_process();
+    if (pcb == NULL) {
+        return INVALID_ARGS;
+    }
+
+    err_t err = k_exec_process(pcb->pid, path, argv);
+    return err;
 }

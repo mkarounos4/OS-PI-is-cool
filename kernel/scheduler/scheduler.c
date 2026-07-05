@@ -9,8 +9,9 @@
 #include "data-structs/vec.h"
 #include "memory/page_table/page_table.h"
 #include "memory/kmalloc.h"
+#include "traps/traps.h"
 
-#define SCHEDULER_QUANTUM_MS 1000u
+#define SCHEDULER_QUANTUM_MS 10u
 #define PA_MASK UINT64_C(0x0000ffffffffffff)
 
 static pcb_t *curr_proc;
@@ -183,9 +184,12 @@ void scheduler_tick(void *ctx) {
 
     // Handle queue'd signals
     if (curr_proc != NULL) {
-        if (curr_proc->pending_signals & (1 << SIGKILL)) {
+        if ((curr_proc->pending_signals & (1 << SIGKILL)) &&
+            curr_proc->sigactions[SIGKILL].sa_handler == SIG_DFL) {
+            curr_proc->pending_signals &= ~(1 << SIGKILL);
             terminate_process(curr_proc);
-        } else if (curr_proc->pending_signals & (1 << SIGSTOP)) {
+        } else if ((curr_proc->pending_signals & (1 << SIGSTOP)) &&
+                   curr_proc->sigactions[SIGSTOP].sa_handler == SIG_DFL) {
             curr_proc->pending_signals &= ~(1 << SIGSTOP);
             stop_process(curr_proc);
         }
@@ -206,6 +210,7 @@ pcb_t *get_curr_process() {
 }
 
 void schedule_yield() {
+    irq_enable();
     scheduler_tick(NULL);
 }
 

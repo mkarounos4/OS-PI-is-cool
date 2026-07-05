@@ -1,5 +1,4 @@
 #include "Job.h"
-#include <string.h>
 
 // Removes the job with the given id from the Vec self
 int vec_remove_job_by_id(Vec *self, jid_t id) {

@@ -34,6 +34,7 @@ struct sigaction {
     int sa_flags;
 };
 
+void SIG_IGN(int signum);
 void SIG_DFL(int signum);
 int s_kill(pid_t pid, int signal);
 long send_sigchld(pid_t child);

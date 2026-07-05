@@ -291,9 +291,7 @@ static struct trap_frame *handle_sync_exception(struct trap_frame *frame) {
          * which is already the instruction after the SVC. Unlike BRK above,
          * do not manually advance ELR here.
          */
-        irq_enable();
         struct trap_frame *next_frame = syscall_dispatch(frame);
-        irq_disable();
         return next_frame;
         
     case ESR_EC_DABT_LOWER:

@@ -91,7 +91,7 @@ int devfs_create_char_device(struct dev_st rdev) {
     int ino = add_new_file(NULL, CHAR_DRIVER_TYPE, 0x7,
                            (struct file_operations *)char_device_registry[rdev.major]->fops);
     if (ino < 0) {
-        return -1;
+        return ino;
     }
 
     struct inode_st inode;
