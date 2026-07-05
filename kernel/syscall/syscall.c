@@ -9,6 +9,7 @@
 #include "signals/signals.h"
 #include "memory/page_table/page_table.h"
 #include "fs/cmds.h"
+#include "fs/kapi.h"
 #include "pipe/pipe.h"
 
 #define SYS_WRITE_CONSOLE_MAX 1024u
@@ -46,7 +47,7 @@ static long sys_write_console_impl(const char *s, uint64_t len) {
     return (long)written;
 }
 
-static long s_exit_impl(int code) {
+static void __attribute__((noreturn)) s_exit_impl(int code) {
     pcb_t *curr_proc = get_curr_process();
     if (curr_proc != NULL) {
         curr_proc->state = PROC_ZOMBIE_STATE;
@@ -55,7 +56,9 @@ static long s_exit_impl(int code) {
     }    
 
     schedule_yield();
-    return 0;
+    while (1) {
+        asm volatile("wfe");
+    }
 }
 
 static long s_spawn(void* (*func)(void*), void *argv) {
@@ -74,16 +77,19 @@ static long s_spawn(void* (*func)(void*), void *argv) {
     return new_pcb->pid;
 }
 
-static long s_block_until_event(uint32_t event) {
+static struct trap_frame *s_block_until_event(uint32_t event,
+                                              struct trap_frame *frame) {
     pcb_t *curr_proc = get_curr_process();
     if (curr_proc == NULL) {
-        return -1;
+        frame->regs[0] = (uint64_t)-1;
+        return frame;
     }
 
     curr_proc->blocked_until = event;
+    frame->regs[0] = 0;
     block_process(curr_proc);
 
-    return 0;
+    return frame;
 }
 
 static long s_sbrk_validate(uint64_t old_brk, uint64_t new_brk) {
@@ -125,12 +131,12 @@ struct trap_frame *syscall_dispatch(struct trap_frame *frame) {
         break;
 
     case S_YIELD:
+        frame->regs[0] = 0;
         schedule_yield();
-        break;
+        return frame;
 
     case S_EXIT:
-        ret = s_exit_impl((int)frame->regs[0]);
-        break;
+        s_exit_impl((int)frame->regs[0]);
     case S_GETPID:
         ret = s_getpid();
         break;
@@ -154,8 +160,7 @@ struct trap_frame *syscall_dispatch(struct trap_frame *frame) {
         ret = s_kill((pid_t)frame->regs[0], (int)(uintptr_t)frame->regs[1]);
         break;
     case S_BLOCK_UNTIL_EVENT:
-        ret = s_block_until_event((uint32_t) frame->regs[0]);
-        break;
+        return s_block_until_event((uint32_t) frame->regs[0], frame);
     case S_FS_TOUCH:
         ret = touch((char **)(uintptr_t)frame->regs[0]);
         break;
@@ -254,6 +259,18 @@ struct trap_frame *syscall_dispatch(struct trap_frame *frame) {
     case S_PS:
         ret = print_processes();
         break;
+    case S_EXEC:
+    {
+        struct trap_frame *next_frame = frame;
+        ret = k_exec((char *)(uintptr_t)frame->regs[0],
+                     (char **)(uintptr_t)frame->regs[1],
+                     frame,
+                     &next_frame);
+        if (ret == 0) {
+            return next_frame;
+        }
+        break;
+    }
     default:
         ret = SYS_ENOSYS;
         break;

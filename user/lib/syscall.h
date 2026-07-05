@@ -64,6 +64,7 @@ enum syscall_type {
     S_FS_UNMOUNT = 40,
     S_PIPE = 41,
     S_PS = 42,
+    S_EXEC = 43,
 };
 
 long write_console(const char *s, uint64_t len);
@@ -157,4 +158,8 @@ static inline int pipe(int pipefd[2]) {
 
 static inline int ps(void) {
     return sys_call0(S_PS);
+}
+
+static inline int exec(const char *path, char *const argv[]) {
+    return sys_call2(S_EXEC, (long)(uintptr_t)path, (long)(uintptr_t)argv);
 }

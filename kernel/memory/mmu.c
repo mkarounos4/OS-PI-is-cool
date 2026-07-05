@@ -173,21 +173,36 @@ void install_kernel_page_table(void) {
         : "memory");
 }
 
-static void dump_mmu_state(void);
-
 void handle_instruction_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t esr) {
-    (void)far;
     (void)elr;
     (void)esr;
 
     if (fsc < ADDRESS_SIZE_FAULT + 4) {
         fatal_exception("Instruction Abort: Address size fault");
     } else if (fsc < TRANSLATION_FAULT + 4) {
-        fatal_exception("Instruction Abort: translation fault");
+        pcb_t *curr_proc = get_curr_process();
+        if (curr_proc != NULL) {
+            int fault_status =
+                load_segment_page_for_fault((uint64_t *)(uintptr_t)curr_proc->ctx.ttbr0_el1_va,
+                                            far, 1);
+            if (fault_status == PAGE_FAULT_HANDLED) {
+                invalidate_all_stage1_tlbs();
+                return;
+            }
+            if (fault_status == PAGE_FAULT_PERMISSION) {
+                fatal_exception("Instruction Abort: execute permission denied");
+                return;
+            }
+            if (fault_status == PAGE_FAULT_ERROR) {
+                fatal_exception("Instruction Abort: failed to load segment page");
+                return;
+            }
+        }
+
+        fatal_exception("Instruction Abort: unmapped non-segment address");
     } else if (fsc < ACCESS_FLAG_FAULT + 4) {
         fatal_exception("Instruction Abort: access flag set to 0");
     } else if (fsc < PERMISSION_FAULT + 4) {
-        dump_mmu_state();
         fatal_exception("Instruction Abort: Permission fault");
     } else if (fsc == SYNC_EXT_ABORT_NON_WALK) {
         fatal_exception("Instruction Abort: synchronous external abort");
@@ -204,51 +219,6 @@ void handle_instruction_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t
     } else {
         fatal_exception("Instruction Abort: Unknown fsc.");
     }
-}
-
-static void dump_mmu_state(void)
-{
-    uint64_t current_pc;
-    uint64_t sp;
-    uint64_t ttbr0;
-    uint64_t ttbr1;
-    uint64_t tcr;
-    uint64_t sctlr;
-    uint64_t vbar;
-    uint64_t el;
-    uint64_t esr;
-    uint64_t far;
-    uint64_t elr;
-
-    asm volatile("adr %0, ." : "=r"(current_pc));
-    asm volatile("mov %0, sp" : "=r"(sp));
-
-    asm volatile("mrs %0, CurrentEL" : "=r"(el));
-    asm volatile("mrs %0, ttbr0_el1" : "=r"(ttbr0));
-    asm volatile("mrs %0, ttbr1_el1" : "=r"(ttbr1));
-    asm volatile("mrs %0, tcr_el1" : "=r"(tcr));
-    asm volatile("mrs %0, sctlr_el1" : "=r"(sctlr));
-    asm volatile("mrs %0, vbar_el1" : "=r"(vbar));
-
-    asm volatile("mrs %0, esr_el1" : "=r"(esr));
-    asm volatile("mrs %0, far_el1" : "=r"(far));
-    asm volatile("mrs %0, elr_el1" : "=r"(elr));
-
-    printf("CurrentEL : %x\n", el);
-    printf("PC        : %x\n", current_pc);
-    printf("SP        : %x\n", sp);
-
-    printf("TTBR0_EL1 : %x\n", ttbr0);
-    printf("TTBR1_EL1 : %x\n", ttbr1);
-
-    printf("TCR_EL1   : %x\n", tcr);
-    printf("SCTLR_EL1 : %x\n", sctlr);
-
-    printf("VBAR_EL1  : %x\n", vbar);
-
-    printf("ELR_EL1   : %x\n", elr);
-    printf("ESR_EL1   : %x\n", esr);
-    printf("FAR_EL1   : %x\n", far);
 }
 
 extern char _stack_top;
@@ -319,8 +289,21 @@ void handle_data_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t esr) {
                 mapped = pt_walk_kernel_page((uint64_t *)(uintptr_t)table_base_addr,
                                              far);
             } else {
-                fatal_exception("Data Abort: Translation fault outside process lazy ranges");
-                return;
+                int fault_status =
+                    load_segment_page_for_fault((uint64_t *)(uintptr_t)curr_proc->ctx.ttbr0_el1_va,
+                                                far, 0);
+                if (fault_status == PAGE_FAULT_HANDLED) {
+                    mapped = 1;
+                } else if (fault_status == PAGE_FAULT_PERMISSION) {
+                    fatal_exception("Data Abort: segment data permission denied");
+                    return;
+                } else if (fault_status == PAGE_FAULT_ERROR) {
+                    fatal_exception("Data Abort: failed to load segment page");
+                    return;
+                } else {
+                    fatal_exception("Data Abort: unmapped non-segment address");
+                    return;
+                }
             }
         }
 

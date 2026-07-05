@@ -122,3 +122,11 @@ err_t fs_mkdir(char **file_paths);
  * or an error code propagated from k_change_directory.
  */
 err_t cd(char *path);
+
+/**
+ * @brief Execute an ELF image at path.
+ *
+ * @param path Path to the ELF executable.
+ * @return SUCCESS on successful parse/load dispatch, or a negative err_t.
+ */
+err_t exec(char *path);

@@ -20,14 +20,15 @@ void wait_on_children();
 void prepare_child_process(struct parsed_command *parsed_cmd);
 void start_fg_job(job *newJob);
 void execute_commands(struct parsed_command *parsed_cmd, char *cmd);
+void exec_shell_command(char **argv);
 int handle_job_builtins(struct parsed_command *parsed_cmd);
 char *get_input(int *nextAddNewLine);
 void print_status_updates();
-int execvp(const char *cmd, char **args);
 
 int main(int argc, char **argv) {
     (void)argc;
-    shell_init((void*)argv);
+    (void)argv;
+    shell_init((void*)0);
     return 0;
 }
 
@@ -272,6 +273,31 @@ void wait_on_children() {
 	}
 }
 
+static int command_has_slash(const char *command) {
+    for (size_t i = 0; command[i] != '\0'; i++) {
+        if (command[i] == '/') {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void exec_shell_command(char **argv) {
+    if (argv == NULL || argv[0] == NULL) {
+        exit(EXIT_FAILURE);
+    }
+
+    if (!command_has_slash(argv[0])) {
+        char *bin_path = str_concat("/bin/", argv[0]);
+        if (bin_path != NULL) {
+            exec(bin_path, argv);
+            free(bin_path);
+        }
+    }
+
+    exec(argv[0], argv);
+}
+
 void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
     // exit if no commands
     if (parsed_cmd->num_commands == 0) {
@@ -338,8 +364,8 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
 
             }
 
-            execvp(parsed_cmd->commands[0][0], parsed_cmd->commands[0]);
-            perror("execvp");
+            exec_shell_command(parsed_cmd->commands[0]);
+            perror("exec");
             exit(EXIT_FAILURE);
         }
 
@@ -418,7 +444,7 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
                     close_pipe(all_pipes[j]);
                 }
 
-                execvp(parsed_cmd->commands[i][0], parsed_cmd->commands[i]);
+                exec_shell_command(parsed_cmd->commands[i]);
                 exit(EXIT_FAILURE);
             }
 
@@ -581,9 +607,4 @@ int handle_job_builtins(struct parsed_command *parsed_cmd) {
     }
 
     return 0;
-}
-int execvp(const char *cmd, char **args) {
-    (void)cmd;
-    (void)args;
-    return -1;
 }

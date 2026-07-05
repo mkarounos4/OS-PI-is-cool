@@ -240,13 +240,16 @@ struct trap_frame *irq_handle_exception(struct trap_frame *frame) {
     uint32_t source = local_read(RPI3_LOCAL_CORE0_IRQ_SOURCE);
     unsigned intid = IRQ_SPURIOUS_INTID;
 
-    if ((source & RPI3_LOCAL_CNTP_IRQ_BITS) != 0) {
-        intid = ARM_GENERIC_TIMER_INTID;
-    } else if ((source & RPI3_LOCAL_GPU_IRQ_BIT) != 0) {
+    if ((source & RPI3_LOCAL_GPU_IRQ_BIT) != 0) {
         uint32_t pending2 = bcm_irq_read(BCM2835_IRQ_PENDING2);
         if ((pending2 & BCM2835_UART0_PENDING2_BIT) != 0) {
             intid = BCM2835_UART0_INTID;
         }
+    }
+
+    if (intid == IRQ_SPURIOUS_INTID &&
+        (source & RPI3_LOCAL_CNTP_IRQ_BITS) != 0) {
+        intid = ARM_GENERIC_TIMER_INTID;
     }
 #else
     uint32_t iar = gicc_read(GICC_IAR);

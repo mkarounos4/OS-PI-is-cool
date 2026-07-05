@@ -228,12 +228,22 @@ int sigaction(int signum, struct sigaction *sa, struct sigaction *old) {
         return -1;
     }
 
+    if (signum < 0 || signum >= 32) {
+        return -1;
+    }
+
     if (sa == NULL) {
         return -1;
     }
 
     if (old != NULL) {
         *old = pcb->sigactions[signum];
+    }
+
+    if ((signum == SIGKILL || signum == SIGSTOP) &&
+        sa->sa_handler != USER_SIG_DFL &&
+        sa->sa_handler != SIG_DFL) {
+        return -1;
     }
 
     pcb->sigactions[signum] = *sa;

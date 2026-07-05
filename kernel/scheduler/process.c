@@ -289,6 +289,16 @@ int set_process_name(const char *name) {
     return 0;
 }
 
+int set_process_name_for_pid(pid_t pid, const char *name) {
+    pcb_t *pcb = get_pcb_by_pid(pid);
+    if (pcb == NULL) {
+        return -1;
+    }
+
+    process_copy_name(pcb, name);
+    return 0;
+}
+
 pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     pcb_t *new_proc = get_next_unused_pcb();
     if (new_proc == NULL) {
@@ -408,6 +418,7 @@ void proc_destroy(pcb_t *p) {
     }
     vec_destroy(&p->file_descriptors);
     remove_from_pgrp(p->pid);
+    destroy_page_table((uint64_t *)(uintptr_t)p->ctx.ttbr0_el1_va);
 
     // Rn, stack and heap are tied to pcb, so automatically "free" when create new process
     // When adding VM, TODO add cleanup of stack/heap
@@ -466,7 +477,14 @@ void processes_init() {
     pid_t pid = proc_create((void *(*)(void *))(uintptr_t)USER_INIT_PROCESS_ENTRY, NULL, 0);
     pcb_t *init_pcb = get_pcb_by_pid(pid);
     if (init_pcb != NULL) {
-        process_copy_name(init_pcb, "init");
+        char *argv[] = {"/bin/init", NULL};
+        int err = k_exec_process(pid, "/bin/init", argv);
+        if (err != SUCCESS) {
+            uart_puts("ERROR: failed to exec /bin/init: ");
+            uart_puthex((uint64_t)err);
+            uart_puts("\n");
+            process_copy_name(init_pcb, "init");
+        }
     }
     add_task_to_scheduler(get_pcb_by_pid(pid));
 }
@@ -475,6 +493,8 @@ void cpy_address_space(pcb_t *src, pcb_t *dst) {
     uint64_t *src_l0 = (uint64_t *)src->ctx.ttbr0_el1_va;
     uint64_t *dst_l0 = (uint64_t *)alloc_page();
     if (dst_l0 == NULL) return;
+    if (copy_page_table_struct(src_l0, dst_l0) != SUCCESS) return;
+    destroy_page_table((uint64_t *)(uintptr_t)dst->ctx.ttbr0_el1_va);
     dst->ctx.ttbr0_el1 = (uint64_t)(uintptr_t)kernel_phys_addr((uint64_t)(uintptr_t)dst_l0);
     dst->ctx.ttbr0_el1_va = (uint64_t)dst_l0;
 
@@ -529,6 +549,7 @@ void cpy_address_space(pcb_t *src, pcb_t *dst) {
                             inc_pte_refcount_pa(src_pa);
                         }
                     }
+
                 }
 	        }
 	    }
@@ -537,7 +558,6 @@ void cpy_address_space(pcb_t *src, pcb_t *dst) {
 }
 
 pid_t fork(struct trap_frame *frame) {
-    (void)frame;
     // create child process off of parent
     pcb_t *parent = get_curr_process();
     pid_t child_pid = proc_create(parent->entry_func, parent->args, parent->pid);
@@ -545,6 +565,30 @@ pid_t fork(struct trap_frame *frame) {
     pcb_t *child = get_pcb_by_pid(child_pid); 
 
     cpy_address_space(parent, child);
+
+    uint64_t frame_va = (uint64_t)(uintptr_t)frame;
+    uint64_t kernel_stack_page_va = PROC_KERNEL_STACK_TOP - PAGE_SIZE;
+    uint64_t frame_offset = frame_va - kernel_stack_page_va;
+    if (frame_offset >= PAGE_SIZE) {
+        proc_destroy(child);
+        return -1;
+    }
+
+    void *child_kernel_stack_page =
+        pt_get_mapped_page((uint64_t *)(uintptr_t)child->ctx.ttbr0_el1_va,
+                           kernel_stack_page_va);
+    if (child_kernel_stack_page == NULL) {
+        proc_destroy(child);
+        return -1;
+    }
+
+    struct trap_frame *child_frame =
+        (struct trap_frame *)(uintptr_t)((uint8_t *)child_kernel_stack_page +
+                                         frame_offset);
+    *child_frame = *frame;
+    child_frame->regs[0] = 0;
+    child->ctx.x19 = frame_va;
+    child->ctx.sp = frame_va;
 
     for (size_t i = 0; i < vec_len(&parent->file_descriptors); i++) {
         void *fd = vec_get(&parent->file_descriptors, i);

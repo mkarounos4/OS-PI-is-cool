@@ -176,11 +176,11 @@ void tty_send_input(int minor, const char *buffer, size_t count) {
     while (count > 0) {
         char to_write = *buffer;
         if (*buffer == 0x03) {
-            s_kill(-tty_state.devices[minor]->fg_pgid, SIGINT);
+            s_kill(SIGINT, -tty_state.devices[minor]->fg_pgid);
             tty_write(NULL, "^C", 2);
             to_write = 0x04;
         } else if (*buffer == 0x1A) {
-            s_kill(-tty_state.devices[minor]->fg_pgid, SIGTSTP);
+            s_kill(SIGTSTP, -tty_state.devices[minor]->fg_pgid);
             tty_write(NULL, "^Z", 2);
             to_write = 0;
         } else if (*buffer == 0x7F) {

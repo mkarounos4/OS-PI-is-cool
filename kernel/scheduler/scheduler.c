@@ -9,8 +9,9 @@
 #include "data-structs/vec.h"
 #include "memory/page_table/page_table.h"
 #include "memory/kmalloc.h"
+#include "traps/traps.h"
 
-#define SCHEDULER_QUANTUM_MS 1000u
+#define SCHEDULER_QUANTUM_MS 10u
 #define PA_MASK UINT64_C(0x0000ffffffffffff)
 
 static pcb_t *curr_proc;
@@ -209,6 +210,7 @@ pcb_t *get_curr_process() {
 }
 
 void schedule_yield() {
+    irq_enable();
     scheduler_tick(NULL);
 }
 

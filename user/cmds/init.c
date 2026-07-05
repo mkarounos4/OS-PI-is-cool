@@ -1,12 +1,7 @@
 #include "lib/syscall.h"
 #include "lib/signals.h"
 #include "lib/tests.h"
-
-static int execvp(const char *path, void *arg) {
-    (void)path;
-    (void)arg;
-    return -1;
-}
+#include "lib/stdio.h"
 
 void *tests(void *args) {
     (void)args;
@@ -22,12 +17,12 @@ void *tests(void *args) {
 void *init_process_entry(void *args) {
     (void)args;
 
-    int tty_num = 0;
     pid_t pid = fork();
 
     setpgid(pid, pid);
     if (pid == 0) {
-        execvp("/bin/shell", (void*)(uintptr_t)tty_num);
+        char *argv[] = {"/bin/shell", NULL};
+        exec("/bin/shell", argv);
         exit(-1);
     }
 

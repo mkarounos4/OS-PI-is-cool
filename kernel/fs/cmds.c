@@ -452,3 +452,18 @@ err_t cd(char *path) {
     err_t res = k_change_directory(path);
     return res;
 }
+
+err_t exec(char *path) {
+    if (!get_is_mounted()) {
+        return FS_NOT_MOUNTED;
+    }
+
+    char *argv[] = {path, NULL};
+    pcb_t *pcb = get_curr_process();
+    if (pcb == NULL) {
+        return INVALID_ARGS;
+    }
+
+    err_t err = k_exec_process(pcb->pid, path, argv);
+    return err;
+}

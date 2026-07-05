@@ -95,3 +95,4 @@ int setpgrp(pid_t pid, pid_t pgid);
 int dup2(int oldfd, int newfd);
 int print_processes(void);
 int set_process_name(const char *name);
+int set_process_name_for_pid(pid_t pid, const char *name);

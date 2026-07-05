@@ -176,7 +176,8 @@ qemu:
 	qemu-system-aarch64 \
 	    -M raspi3b \
 	    -cpu cortex-a53 \
-	    -nographic \
+	    -display none \
+	    -serial mon:stdio \
 	    -kernel kernel8.img \
 	    -drive file=$(QEMU_SD_IMG),if=sd,format=raw
 

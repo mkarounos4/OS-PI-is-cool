@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 
+#include "fs/types.h"
+
 #define PAGE_SIZE 4096ULL
 #define PAGE_TABLE_ENTRIES 512ULL
 #define PTE_ADDR_MASK     UINT64_C(0x0000fffffffff000)
@@ -47,9 +49,27 @@ uint8_t pt_walk(uint64_t *l0, uint64_t va);
 uint8_t pt_walk_user_page(uint64_t *l0, uint64_t va);
 uint8_t pt_walk_kernel_page(uint64_t *l0, uint64_t va);
 void *pt_seed_kernel_page(uint64_t *l0, uint64_t va);
+void *pt_seed_user_page(uint64_t *l0, uint64_t va);
+void *pt_get_mapped_page(uint64_t *l0, uint64_t va);
 
 uint64_t *initialize_kernel_page_table(void);
 uint64_t *initialize_user_page_table(void);
+
+int add_page_table_struct(uint64_t *table);
+void free_page_table_struct(uint64_t *table);
+void destroy_page_table(uint64_t *table);
+int copy_page_table_struct(uint64_t *src_table, uint64_t *dst_table);
+#define PAGE_FAULT_NOT_HANDLED 0
+#define PAGE_FAULT_HANDLED 1
+#define PAGE_FAULT_PERMISSION -1
+#define PAGE_FAULT_ERROR -2
+
+int load_memory_segment(uint64_t *table, ino_id_t ino_id,
+                        uint64_t file_offset, uint64_t file_size,
+                        uint64_t va, uint64_t pa, uint64_t mem_size,
+                        uint32_t flags);
+int load_segment_page_for_fault(uint64_t *table, uint64_t fault_va,
+                                int instruction_fault);
 
 /* COW helpers */
 int pte_is_user(uint64_t pte);

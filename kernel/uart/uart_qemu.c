@@ -10,10 +10,18 @@
 
 #define UART_DR 0x00u
 #define UART_FR 0x18u
+#define UART_LCRH 0x2cu
+#define UART_CR 0x30u
 #define UART_IFLS 0x34u
 #define UART_IMSC 0x38u
 #define UART_MIS 0x40u
 #define UART_ICR 0x44u
+
+#define CR_UARTEN (1u << 0)
+#define CR_TXE    (1u << 8)
+#define CR_RXE    (1u << 9)
+#define LCRH_FEN  (1u << 4)
+#define LCRH_WLEN_8 (3u << 5)
 
 #define FR_TXFF (1u << 5)
 #define FR_RXFE (1u << 4)
@@ -57,10 +65,12 @@ static struct trap_frame *uart_irq_handler(unsigned intid, struct trap_frame *fr
 
 void uart_init(void)
 {
-    // QEMU raspi3b firmware leaves PL011 usable for early serial output.
+    rpi5_mmio_write32(QEMU_RPI3_UART0_BASE + UART_CR, 0);
     rpi5_mmio_write32(QEMU_RPI3_UART0_BASE + UART_IMSC, 0);
     rpi5_mmio_write32(QEMU_RPI3_UART0_BASE + UART_ICR, 0x7ffu);
     rpi5_mmio_write32(QEMU_RPI3_UART0_BASE + UART_IFLS, UART_IFLS_RX_1_8);
+    rpi5_mmio_write32(QEMU_RPI3_UART0_BASE + UART_LCRH, LCRH_WLEN_8 | LCRH_FEN);
+    rpi5_mmio_write32(QEMU_RPI3_UART0_BASE + UART_CR, CR_UARTEN | CR_TXE | CR_RXE);
 }
 
 void uart_irq_init(void)

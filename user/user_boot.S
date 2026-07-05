@@ -4,6 +4,14 @@
 _start:
     // x0 = argc
     // x1 = argv
+    stp x0, x1, [sp, #-16]!
+
+    movz x0, #0x40, lsl #16
+    movz x1, #0x4000
+    movk x1, #0x40, lsl #16
+    bl mem_init
+
+    ldp x0, x1, [sp], #16
 
     bl main
 
