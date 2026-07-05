@@ -3,8 +3,13 @@
 
 int main(int argc, char **argv) {
     if (argc < 3) {
+        print_errno("mv", "usage: mv <src> <dest>", -EINVAL);
         return -EINVAL;
     }
 
-    return mv(argv[1], argv[2]);
+    int err = mv(argv[1], argv[2]);
+    if (err < 0) {
+        print_errno("mv", "failed", err);
+    }
+    return err;
 }

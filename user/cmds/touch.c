@@ -4,9 +4,13 @@
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        printf("touch: usage: touch <file>...\n");
+        print_errno("touch", "usage: touch <file>...", -EINVAL);
         return -EINVAL;
     }
 
-    return touch(argv + 1);
+    int err = touch(argv + 1);
+    if (err < 0) {
+        print_errno("touch", "failed", err);
+    }
+    return err;
 }

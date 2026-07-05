@@ -4,9 +4,13 @@
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        printf("mkdir: usage: mkdir <dir>...\n");
+        print_errno("mkdir", "usage: mkdir <dir>...", -EINVAL);
         return -EINVAL;
     }
 
-    return fs_mkdir(argv + 1);
+    int err = fs_mkdir(argv + 1);
+    if (err < 0) {
+        print_errno("mkdir", "failed", err);
+    }
+    return err;
 }

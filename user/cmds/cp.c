@@ -37,18 +37,20 @@ static int copy_fd(int in_fd, int out_fd) {
 
 int main(int argc, char **argv) {
     if (argc < 3) {
-        printf("cp: usage: cp <src> <dest>\n");
+        print_errno("cp", "usage: cp <src> <dest>", -EINVAL);
         return -EINVAL;
     }
 
     int src_fd = open(argv[1], O_RDONLY);
     if (src_fd < 0) {
+        print_errno("cp", argv[1], src_fd);
         return src_fd;
     }
 
     int dest_fd = open(argv[2], O_WRONLY | O_CREAT | O_TRUNC);
     if (dest_fd < 0) {
         close(src_fd);
+        print_errno("cp", argv[2], dest_fd);
         return dest_fd;
     }
 
@@ -60,6 +62,10 @@ int main(int argc, char **argv) {
     }
     if (err == 0 && close_dest_err < 0) {
         err = close_dest_err;
+    }
+
+    if (err < 0) {
+        print_errno("cp", "failed", err);
     }
 
     return err;

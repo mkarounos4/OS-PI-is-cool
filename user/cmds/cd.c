@@ -3,8 +3,13 @@
 
 int main(int argc, char **argv) {
     if (argc < 2) {
+        print_errno("cd", "usage: cd <dir>", -EINVAL);
         return -EINVAL;
     }
 
-    return cd(argv[1]);
+    int err = cd(argv[1]);
+    if (err < 0) {
+        print_errno("cd", argv[1], err);
+    }
+    return err;
 }

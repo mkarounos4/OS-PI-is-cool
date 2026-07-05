@@ -25,3 +25,7 @@
 #define ERANGE   34
 #define ENAMETOOLONG 36
 #define ENOSYS   38
+
+const char *errno_name(long err);
+const char *errno_message(long err);
+void print_errno(const char *cmd, const char *context, long err);

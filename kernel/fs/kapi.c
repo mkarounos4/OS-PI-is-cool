@@ -22,6 +22,17 @@ struct file_operations *get_default_fops() {
     return &default_ops;
 }
 
+static void repair_default_fops(struct oft_entry *entry) {
+    if (entry == NULL || entry->inode == NULL) {
+        return;
+    }
+
+    uint8_t type = entry->inode->inode.metadata.type;
+    if (type == DIRECTORY_TYPE || type == FILE_TYPE || type == SYMLINK_TYPE) {
+        entry->inode->inode.metadata.fops = get_default_fops();
+    }
+}
+
 int k_open(const char *fname, int mode) {
     // Return if not mounted
     if (!get_is_mounted()) {
@@ -84,6 +95,7 @@ int k_open(const char *fname, int mode) {
         return err;
     }
 
+    repair_default_fops(entry);
     if (entry->inode->inode.metadata.fops != NULL &&
         entry->inode->inode.metadata.fops->open != NULL) {
         err = entry->inode->inode.metadata.fops->open(entry);
@@ -101,6 +113,7 @@ int k_close(struct oft_entry *entry) {
         return FS_NOT_MOUNTED;
     }
 
+    repair_default_fops(entry);
     if (entry->inode->inode.metadata.fops != NULL &&
         entry->inode->inode.metadata.fops->close != NULL) {
         err_t err = entry->inode->inode.metadata.fops->close(entry);
@@ -122,6 +135,7 @@ int k_read(struct oft_entry *entry, char *buf, size_t n) {
         return INVALID_PERMISSIONS;
     }
 
+    repair_default_fops(entry);
     if (entry->inode->inode.metadata.fops != NULL) {
         return entry->inode->inode.metadata.fops->read(entry, buf, n);
     }
@@ -211,6 +225,7 @@ int k_file_add_reference(int fd) {
         return err;
     }
 
+    repair_default_fops(entry);
     if (entry->inode->inode.metadata.fops != NULL &&
         entry->inode->inode.metadata.fops->open != NULL) {
         return entry->inode->inode.metadata.fops->open(entry);
@@ -230,6 +245,7 @@ int k_write(struct oft_entry *entry, const char *buf, size_t n) {
         return INVALID_PERMISSIONS;
     }
 
+    repair_default_fops(entry);
     if (entry->inode->inode.metadata.fops != NULL && entry->inode->inode.metadata.fops->write != NULL) {
         return entry->inode->inode.metadata.fops->write(entry, buf, n);
     }

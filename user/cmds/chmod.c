@@ -4,7 +4,7 @@
 
 int main(int argc, char **argv) {
     if (argc < 3) {
-        printf("chmod: usage: chmod <mode> <file>\n");
+        print_errno("chmod", "usage: chmod <mode> <file>", -EINVAL);
         return -EINVAL;
     }
 
@@ -21,5 +21,9 @@ int main(int argc, char **argv) {
         new_perms = argv[1] + 1;
     }
 
-    return fs_chmod(argv[2], new_perms, flag);
+    int err = fs_chmod(argv[2], new_perms, flag);
+    if (err < 0) {
+        print_errno("chmod", argv[2], err);
+    }
+    return err;
 }
