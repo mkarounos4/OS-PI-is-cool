@@ -88,7 +88,7 @@ static uint32_t max_u32(uint32_t a, uint32_t b) {
     return a > b ? a : b;
 }
 
-static int mailbox_framebuffer_init(gui_framebuffer_t *fb) {
+static int __attribute__((unused)) mailbox_framebuffer_init(gui_framebuffer_t *fb) {
     if (fb == 0) {
         return 0;
     }
@@ -331,16 +331,11 @@ void gui_init_smoke_test(void) {
 
     printf("drawing smaller square\n");
 
-    gui_framebuffer_t *fb2 = &active_fb;
-    uint16_t color = gui_framebuffer_encode_color(0x0, 0xff, 0xff);
-    uint8_t *row = (uint8_t *)fb2->addr;
-
+    const gui_framebuffer_t *fb2 = &active_fb;
     for (uint32_t y = fb2->height / 4; y < fb2->height / 4 * 3; y++) {
-        uint16_t *pixel = (uint16_t *)row;
         for (uint32_t x = fb2->width / 4; x < fb2->width / 4 * 3; x++) {
-            pixel[x] = color;
+            gui_framebuffer_put_pixel(x, y, 0x0, 0xff, 0xff);
         }
-        row += fb2->pitch;
     }
     
 #endif

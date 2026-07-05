@@ -61,12 +61,15 @@ static void pipe_free(struct pipe_st *pipe) {
 int pipe(int pipefd[2]) {
     pcb_t *pcb = get_curr_process();
     if (pcb == NULL) {
-        return -1;
+        return (int)SYS_ESRCH;
+    }
+    if (pipefd == NULL) {
+        return (int)SYS_EFAULT;
     }
 
     struct pipe_st *pipe = kmalloc(sizeof(struct pipe_st));
     if (pipe == NULL) {
-        return -1;
+        return (int)SYS_ENOMEM;
     }
     
     pipe->num_readers = 1;
@@ -82,19 +85,23 @@ int pipe(int pipefd[2]) {
     err_t err = add_new_file_inode(&ino_id, PIPE_TYPE, 0x7, &pipe_ops);
     if (err) {
         pipe_free(pipe);
-        return err;
+        return (int)fs_err_to_sys_errno(err);
     }
 
     int read_fd = oft_open_file(O_RDONLY, NULL, ino_id, 0);
     if (read_fd < 0) {
         pipe_free(pipe);
-        return read_fd;
+        return (int)fs_err_to_sys_errno(read_fd);
     }
 
     int write_fd = oft_open_file(O_WRONLY, NULL, ino_id, 0);
     if (write_fd < 0) {
+        struct oft_entry *read_entry;
+        if (get_oft_entry_by_fd(read_fd, &read_entry) == SUCCESS) {
+            k_close(read_entry);
+        }
         pipe_free(pipe);
-        return write_fd;
+        return (int)fs_err_to_sys_errno(write_fd);
     }
 
     pipefd[0] = install_process_fd(pcb, read_fd);
@@ -103,16 +110,32 @@ int pipe(int pipefd[2]) {
     attributes_t metadata;
     err = get_inode_metadata(ino_id, &metadata);
     if (err) {
+        struct oft_entry *read_entry;
+        struct oft_entry *write_entry;
+        if (get_oft_entry_by_fd(read_fd, &read_entry) == SUCCESS) {
+            k_close(read_entry);
+        }
+        if (get_oft_entry_by_fd(write_fd, &write_entry) == SUCCESS) {
+            k_close(write_entry);
+        }
         pipe_free(pipe);
-        return err;
+        return (int)fs_err_to_sys_errno(err);
     }
 
     metadata.i_pipe = pipe;
 
     err = set_inode_metadata(ino_id, &metadata);
     if (err) {
+        struct oft_entry *read_entry;
+        struct oft_entry *write_entry;
+        if (get_oft_entry_by_fd(read_fd, &read_entry) == SUCCESS) {
+            k_close(read_entry);
+        }
+        if (get_oft_entry_by_fd(write_fd, &write_entry) == SUCCESS) {
+            k_close(write_entry);
+        }
         pipe_free(pipe);
-        return err;
+        return (int)fs_err_to_sys_errno(err);
     }
 
     return 0;
@@ -143,7 +166,7 @@ void pipe_wake_up_writers(struct pipe_st *pipe) {
 int pipe_open(struct oft_entry *entry) {
     struct pipe_st *pipe = entry->inode->inode.metadata.i_pipe;
     if (pipe == NULL) {
-        return -1;
+        return (int)SYS_EINVAL;
     }
 
     if (entry->mode & O_RDONLY) {
@@ -158,7 +181,7 @@ int pipe_open(struct oft_entry *entry) {
 int pipe_close(struct oft_entry *entry) {
     struct pipe_st *pipe = entry->inode->inode.metadata.i_pipe;
     if (pipe == NULL) {
-        return -1;
+        return (int)SYS_EINVAL;
     }
 
     if (entry->mode & O_RDONLY) {
@@ -170,7 +193,7 @@ int pipe_close(struct oft_entry *entry) {
             char next_char = 0x04;
             int wrote = produce_ring_buffer(&pipe->buffer, &next_char);
             if (!wrote) {
-                return -1;
+                return (int)SYS_EAGAIN;
             }
             pipe_wake_up_readers(pipe);
         }
@@ -189,7 +212,7 @@ int pipe_read(struct oft_entry *entry, char *buffer, size_t count) {
 
     pcb_t *curr_pcb = get_curr_process();
     if (curr_pcb == NULL) {
-        return -1;
+        return (int)SYS_ESRCH;
     }
 
     ssize_t num_read = 0;
@@ -224,7 +247,7 @@ int pipe_write(struct oft_entry *entry, const char *buffer, size_t count) {
 
     pcb_t *curr_pcb = get_curr_process();
     if (curr_pcb == NULL) {
-        return -1;
+        return (int)SYS_ESRCH;
     }
 
     ssize_t num_read = 0;

@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 
+#include "errno.h"
 #include "traps/traps.h"
 #include "devices/tty.h"
 
@@ -50,9 +51,5 @@ enum syscall_type {
     S_PS = 42,
     S_EXEC = 43,
 };
-
-#define SYS_ENOSYS (-38L)
-#define SYS_EFAULT (-14L)
-#define SYS_EINVAL (-22L)
 
 struct trap_frame *syscall_dispatch(struct trap_frame *frame);

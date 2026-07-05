@@ -1,10 +1,11 @@
 #include "lib/fs_syscall.h"
+#include "lib/errno.h"
 #include "lib/stdio.h"
 
 int main(int argc, char **argv) {
     if (argc < 3) {
         printf("chmod: usage: chmod <mode> <file>\n");
-        return -1;
+        return -EINVAL;
     }
 
     int flag = 0;

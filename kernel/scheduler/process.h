@@ -6,6 +6,7 @@
 #include "traps/traps.h"
 #include "fs/kapi.h"
 #include "fs/cmds.h"
+#include "errno.h"
 
 #ifndef PID_T_DEFINED
 #define PID_T_DEFINED
@@ -19,7 +20,7 @@ typedef int32_t pid_t;
 #define WUNTRACED 2
 #define WCONTINUED 4
 
-#define ECHILD -2
+#define ECHILD SYS_ECHILD
 
 #define WAIT_EXITED 1
 #define WAIT_SIGNALED 2

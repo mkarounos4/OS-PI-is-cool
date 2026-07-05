@@ -1,4 +1,5 @@
 #include "lib/fs_syscall.h"
+#include "lib/errno.h"
 #include "lib/stdio.h"
 
 #define CP_BUF_SIZE 1024
@@ -8,7 +9,7 @@ static int write_all(int fd, const char *buf, int n) {
     while (written < n) {
         int chunk = write(fd, buf + written, n - written);
         if (chunk <= 0) {
-            return chunk < 0 ? chunk : -1;
+            return chunk < 0 ? chunk : -EIO;
         }
         written += chunk;
     }
@@ -37,7 +38,7 @@ static int copy_fd(int in_fd, int out_fd) {
 int main(int argc, char **argv) {
     if (argc < 3) {
         printf("cp: usage: cp <src> <dest>\n");
-        return -1;
+        return -EINVAL;
     }
 
     int src_fd = open(argv[1], O_RDONLY);

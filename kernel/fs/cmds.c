@@ -9,7 +9,7 @@
 int open(const char *fname, int mode) {
     pcb_t *pcb = get_curr_process();
     if (pcb == NULL) {
-        return -1;
+        return PID_NOT_FOUND;
     }
 
     int fd = k_open(fname, mode);
@@ -37,7 +37,7 @@ int open(const char *fname, int mode) {
 int close(int fd) {
     pcb_t *pcb = get_curr_process();
     if (pcb == NULL) {
-        return -1;
+        return PID_NOT_FOUND;
     }
 
     if (fd < 0 || (size_t)fd >= vec_len(&pcb->file_descriptors)) {
@@ -67,7 +67,7 @@ int close(int fd) {
 int read(int fd, char *buf, int n) {
     pcb_t *pcb = get_curr_process();
     if (pcb == NULL) {
-        return -1;
+        return PID_NOT_FOUND;
     }
 
     if (fd < 0 || (size_t)fd >= vec_len(&pcb->file_descriptors)) {
@@ -91,7 +91,7 @@ int read(int fd, char *buf, int n) {
 int write(int fd, char *buf, int n) {
     pcb_t *pcb = get_curr_process();
     if (pcb == NULL) {
-        return -1;
+        return PID_NOT_FOUND;
     }
 
     if (fd < 0 || (size_t)fd >= vec_len(&pcb->file_descriptors)) {
@@ -115,7 +115,7 @@ int write(int fd, char *buf, int n) {
 int lseek(int fd, int offset, int whence) {
     pcb_t *pcb = get_curr_process();
     if (pcb == NULL) {
-        return -1;
+        return PID_NOT_FOUND;
     }
 
     if (fd < 0 || (size_t)fd >= vec_len(&pcb->file_descriptors)) {

@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "errno.h"
+
 typedef int32_t pid_t;
 typedef void *ptr_t;
 
@@ -11,7 +13,7 @@ typedef void *ptr_t;
 #define WUNTRACED 2
 #define WCONTINUED 4
 
-#define ECHILD -2
+#define ECHILD_NEG (-ECHILD)
 
 #define BLOCK_UNTIL_NEW_CHILD 1
 
@@ -149,7 +151,7 @@ static inline int mount() {
 }
 
 static inline int unmount() {
-    return -1;
+    return -ENOSYS;
 }
 
 static inline int pipe(int pipefd[2]) {

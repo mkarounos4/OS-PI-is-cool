@@ -1,4 +1,5 @@
 #include "lib/fs_syscall.h"
+#include "lib/errno.h"
 #include "lib/stdio.h"
 #include "lib/string.h"
 
@@ -9,7 +10,7 @@ static int write_all(int fd, const char *buf, int n) {
     while (written < n) {
         int chunk = write(fd, buf + written, n - written);
         if (chunk <= 0) {
-            return chunk < 0 ? chunk : -1;
+            return chunk < 0 ? chunk : -EIO;
         }
         written += chunk;
     }
@@ -57,7 +58,7 @@ int main(int argc, char **argv) {
         }
         if (i + 1 >= argc || argv[i + 1] == NULL) {
             printf("cat: missing output file\n");
-            return -1;
+            return -EINVAL;
         }
 
         output_file = argv[i + 1];
@@ -83,7 +84,7 @@ int main(int argc, char **argv) {
             continue;
         }
         if (output_file != NULL && strcmp(argv[i], output_file) == 0) {
-            err = -1;
+            err = -EINVAL;
             break;
         }
 

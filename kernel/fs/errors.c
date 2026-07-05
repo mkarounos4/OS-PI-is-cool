@@ -1,5 +1,52 @@
 #include "errors.h"
 
+#include "errno.h"
+
+long fs_err_to_sys_errno(long error) {
+    if (error >= 0) {
+        return error;
+    }
+
+    switch (error) {
+    case FILE_WRITE_ERROR:
+    case FILE_READ_ERROR:
+    case FILE_OPEN_ERROR:
+        return SYS_EIO;
+    case FILE_SEEK_ERROR:
+        return SYS_ESPIPE;
+    case FS_ALREADY_MOUNTED:
+    case F_ONLY_ONE_WRITER:
+        return SYS_EBUSY;
+    case FS_NOT_MOUNTED:
+    case FS_INVALID:
+        return SYS_ENODEV;
+    case NO_FREE_BLOCKS:
+    case FAT_NO_SPACE_REMAINING:
+        return SYS_ENOSPC;
+    case INODE_FULL:
+    case FILE_NOT_CREATED:
+        return SYS_ENFILE;
+    case INVALID_ARGS:
+    case ILLEGAL_BLOCK_NO:
+        return SYS_EINVAL;
+    case OFT_FD_DOES_NOT_EXIST:
+        return SYS_EBADF;
+    case FILE_NOT_FOUND:
+    case END_DIR_NOT_FOUND:
+        return SYS_ENOENT;
+    case INVALID_PERMISSIONS:
+        return SYS_EACCES;
+    case INVALID_FILE_NAME:
+        return SYS_ENAMETOOLONG;
+    case PID_NOT_FOUND:
+        return SYS_ESRCH;
+    case CAT_SAME_INPUT_OUTPUT:
+        return SYS_EINVAL;
+    default:
+        return SYS_EIO;
+    }
+}
+
 void print_error(err_t error) {
     switch(error) {
         case FILE_WRITE_ERROR:

@@ -23,12 +23,12 @@ void *init_process_entry(void *args) {
     if (pid == 0) {
         char *argv[] = {"/bin/shell", NULL};
         exec("/bin/shell", argv);
-        exit(-1);
+        exit(-EIO);
     }
 
     while (1) {
         int ret = waitpid(-1, NULL, 0);
-        if (ret == ECHILD) {
+        if (ret == -ECHILD) {
             block_until_event(BLOCK_UNTIL_NEW_CHILD);
         }
     }

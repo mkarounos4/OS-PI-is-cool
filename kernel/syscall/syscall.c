@@ -10,6 +10,7 @@
 #include "memory/page_table/page_table.h"
 #include "fs/cmds.h"
 #include "fs/kapi.h"
+#include "fs/errors.h"
 #include "pipe/pipe.h"
 
 #define SYS_WRITE_CONSOLE_MAX 1024u
@@ -19,7 +20,7 @@
 static long s_getpid() {
     pcb_t *curr_proc = get_curr_process();
     if (curr_proc == NULL) {
-        return -1;
+        return SYS_ESRCH;
     }
     return (long) curr_proc->pid;
 }
@@ -70,7 +71,7 @@ static long s_spawn(void* (*func)(void*), void *argv) {
     }
     pcb_t *new_pcb = get_pcb_by_pid(new_proc);
     if (new_pcb == NULL) {
-        return -1;
+        return SYS_ESRCH;
     }
     add_task_to_scheduler(new_pcb);
 
@@ -81,7 +82,7 @@ static struct trap_frame *s_block_until_event(uint32_t event,
                                               struct trap_frame *frame) {
     pcb_t *curr_proc = get_curr_process();
     if (curr_proc == NULL) {
-        frame->regs[0] = (uint64_t)-1;
+        frame->regs[0] = (uint64_t)SYS_ESRCH;
         return frame;
     }
 
@@ -162,59 +163,60 @@ struct trap_frame *syscall_dispatch(struct trap_frame *frame) {
     case S_BLOCK_UNTIL_EVENT:
         return s_block_until_event((uint32_t) frame->regs[0], frame);
     case S_FS_TOUCH:
-        ret = touch((char **)(uintptr_t)frame->regs[0]);
+        ret = fs_err_to_sys_errno(touch((char **)(uintptr_t)frame->regs[0]));
         break;
     case S_FS_MV:
-        ret = mv((char *)(uintptr_t)frame->regs[0],
-                 (char *)(uintptr_t)frame->regs[1]);
+        ret = fs_err_to_sys_errno(mv((char *)(uintptr_t)frame->regs[0],
+                                   (char *)(uintptr_t)frame->regs[1]));
         break;
     case S_FS_RM:
-        ret = rm((char **)(uintptr_t)frame->regs[0]);
+        ret = fs_err_to_sys_errno(rm((char **)(uintptr_t)frame->regs[0]));
         break;
     case S_FS_CAT:
-        ret = cat((char **)(uintptr_t)frame->regs[0],
-                  (char *)(uintptr_t)frame->regs[1],
-                  (int)frame->regs[2]);
+        ret = fs_err_to_sys_errno(cat((char **)(uintptr_t)frame->regs[0],
+                                    (char *)(uintptr_t)frame->regs[1],
+                                    (int)frame->regs[2]));
         break;
     case S_FS_CP:
-        ret = cp((char *)(uintptr_t)frame->regs[0],
-                 (char *)(uintptr_t)frame->regs[1],
-                 (int)frame->regs[2]);
+        ret = fs_err_to_sys_errno(cp((char *)(uintptr_t)frame->regs[0],
+                                   (char *)(uintptr_t)frame->regs[1],
+                                   (int)frame->regs[2]));
         break;
     case S_FS_CHMOD:
-        ret = fs_chmod((char *)(uintptr_t)frame->regs[0],
-                       (char *)(uintptr_t)frame->regs[1],
-                       (int)frame->regs[2]);
+        ret = fs_err_to_sys_errno(fs_chmod((char *)(uintptr_t)frame->regs[0],
+                                         (char *)(uintptr_t)frame->regs[1],
+                                         (int)frame->regs[2]));
         break;
     case S_FS_LS:
-        ret = ls((char *)(uintptr_t)frame->regs[0]);
+        ret = fs_err_to_sys_errno(ls((char *)(uintptr_t)frame->regs[0]));
         break;
     case S_FS_MKDIR:
-        ret = fs_mkdir((char **)(uintptr_t)frame->regs[0]);
+        ret = fs_err_to_sys_errno(fs_mkdir((char **)(uintptr_t)frame->regs[0]));
         break;
     case S_FS_CD:
-        ret = cd((char *)(uintptr_t)frame->regs[0]);
+        ret = fs_err_to_sys_errno(cd((char *)(uintptr_t)frame->regs[0]));
         break;
     case S_FS_OPEN:
-        ret = open((const char *)(uintptr_t)frame->regs[0], (int)frame->regs[1]);
+        ret = fs_err_to_sys_errno(open((const char *)(uintptr_t)frame->regs[0],
+                                     (int)frame->regs[1]));
         break;
     case S_FS_CLOSE:
-        ret = close((int)frame->regs[0]);
+        ret = fs_err_to_sys_errno(close((int)frame->regs[0]));
         break;
     case S_FS_LSEEK:
-        ret = lseek((int)frame->regs[0],
-                    (int)frame->regs[1],
-                    (int)frame->regs[2]);
+        ret = fs_err_to_sys_errno(lseek((int)frame->regs[0],
+                                      (int)frame->regs[1],
+                                      (int)frame->regs[2]));
         break;
     case S_FS_READ:
-        ret = read((int)frame->regs[0],
-                   (char *)(uintptr_t)frame->regs[1],
-                   (int)frame->regs[2]);
+        ret = fs_err_to_sys_errno(read((int)frame->regs[0],
+                                     (char *)(uintptr_t)frame->regs[1],
+                                     (int)frame->regs[2]));
         break;
     case S_FS_WRITE:
-        ret = write((int)frame->regs[0],
-                    (char *)(uintptr_t)frame->regs[1],
-                    (int)frame->regs[2]);
+        ret = fs_err_to_sys_errno(write((int)frame->regs[0],
+                                      (char *)(uintptr_t)frame->regs[1],
+                                      (int)frame->regs[2]));
         break;
     case S_SIGPROCMASK:
         ret = sigprocmask((int)frame->regs[0],
@@ -269,6 +271,7 @@ struct trap_frame *syscall_dispatch(struct trap_frame *frame) {
         if (ret == 0) {
             return next_frame;
         }
+        ret = fs_err_to_sys_errno(ret);
         break;
     }
     default:
