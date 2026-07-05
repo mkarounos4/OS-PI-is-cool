@@ -19,6 +19,7 @@
 #include "fs/cmds.h"
 #include "fs/kapi.h"
 #include "fan/fan.h"
+#include "gui/gui.h"
 
 #define FS_DEFAULT_INODE_TABLE_BLOCKS 8
 #define FS_DEFAULT_BLOCK_SIZE_CONFIG 1
@@ -27,6 +28,7 @@
 void kernel_main(void) {
     uart_init();
     printf("\nAArch64 bare-metal kernel entered\n");
+    gui_init_smoke_test();
     fan_init();
 
     exceptions_init();
