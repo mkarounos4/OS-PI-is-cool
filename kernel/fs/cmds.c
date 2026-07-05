@@ -440,7 +440,10 @@ err_t ls(char *dir_path) {
     if (!get_is_mounted()) {
         return FS_NOT_MOUNTED;
     }
-    err_t res = k_ls(dir_path, 1);
+
+    pcb_t *pcb = get_curr_process();
+    int k_fd = (int)(uintptr_t)vec_get(&pcb->file_descriptors, 1);
+    err_t res = k_ls(dir_path, k_fd);
     return res;
 }
 
@@ -466,4 +469,15 @@ err_t exec(char *path) {
 
     err_t err = k_exec_process(pcb->pid, path, argv);
     return err;
+}
+
+err_t ps(void) {
+    // Return if not mounted
+    if (!get_is_mounted()) {
+        return FS_NOT_MOUNTED;
+    }
+
+    pcb_t *pcb = get_curr_process();
+    int k_fd = (int)(uintptr_t)vec_get(&pcb->file_descriptors, 1);
+    return print_processes(k_fd);
 }

@@ -184,7 +184,10 @@ void tty_send_input(int minor, const char *buffer, size_t count) {
             tty_write(NULL, "^Z", 2);
             to_write = 0;
         } else if (*buffer == 0x7F) {
-            remove_back_ring_buffer(&tty_state.devices[minor]->rx);
+            bool wrote = remove_back_ring_buffer(&tty_state.devices[minor]->rx);
+            if (!wrote) {
+                return;
+            }
             tty_write(NULL, "\b \b", 3);
             to_write = 0;
         } else if (*buffer != 0x04){

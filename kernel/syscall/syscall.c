@@ -259,7 +259,7 @@ struct trap_frame *syscall_dispatch(struct trap_frame *frame) {
         ret = pipe((int*)frame->regs[0]);
         break;
     case S_PS:
-        ret = print_processes();
+        ret = ps();
         break;
     case S_EXEC:
     {

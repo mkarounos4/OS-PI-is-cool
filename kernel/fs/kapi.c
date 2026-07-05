@@ -6,6 +6,7 @@
 #include "elf_loader.h"
 #include "memory/page_table/page_table.h"
 #include "scheduler/scheduler.h"
+#include "pipe/pipe.h"
 
 int default_read(struct oft_entry *entry, char *buf, size_t n);
 int default_write(struct oft_entry *entry, const char *buf, size_t n);
@@ -229,7 +230,7 @@ int k_write(struct oft_entry *entry, const char *buf, size_t n) {
         return INVALID_PERMISSIONS;
     }
 
-    if (entry->inode->inode.metadata.fops != NULL) {
+    if (entry->inode->inode.metadata.fops != NULL && entry->inode->inode.metadata.fops->write != NULL) {
         return entry->inode->inode.metadata.fops->write(entry, buf, n);
     }
     return 0;

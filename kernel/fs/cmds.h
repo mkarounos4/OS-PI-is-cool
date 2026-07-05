@@ -130,3 +130,6 @@ err_t cd(char *path);
  * @return SUCCESS on successful parse/load dispatch, or a negative err_t.
  */
 err_t exec(char *path);
+
+
+err_t ps(void);

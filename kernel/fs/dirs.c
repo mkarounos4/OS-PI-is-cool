@@ -240,8 +240,6 @@ void format_chmod_str(int perm, char res[4]) {
 }
 
 err_t list_dirents(ino_id_t ino_id, int out_fd) {
-    (void) out_fd;
-
     struct fs_dirent *dir = kmalloc(get_bytes_per_block());
     block_no_t curr_block_no = get_first_block(ino_id);
     int index = 0;
@@ -268,7 +266,7 @@ err_t list_dirents(ino_id_t ino_id, int out_fd) {
             char perm_str[4];
             format_chmod_str(metadata.perm, perm_str);
             int size = dir[i].ino_id == 0 ? 0 : get_file_size_by_id(dir[i].ino_id);
-            printf("%u %s %u tick=%u %s\n",
+            fprintf(out_fd, "%u %s %u tick=%u %s\n",
                    dir[i].ino_id,
                    perm_str,
                    size,

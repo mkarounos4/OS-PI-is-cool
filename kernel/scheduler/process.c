@@ -240,8 +240,8 @@ static const char *process_state_char(enum process_state state) {
     return "?";
 }
 
-int print_processes(void) {
-    int err = fprintf(1, "PID PPID PRI STAT CMD\n");
+int print_processes(int fd) {
+    int err = fprintf(fd, "PID PPID PRI STAT CMD\n");
     if (err < 0) {
         return err;
     }
@@ -252,7 +252,7 @@ int print_processes(void) {
             continue;
         }
 
-        err = fprintf(1, "%d %d %d %s %s\n",
+        err = fprintf(fd, "%d %d %d %s %s\n",
                       pcb->pid,
                       pcb->ppid,
                       pcb->priority,

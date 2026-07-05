@@ -94,6 +94,6 @@ void send_unblock_event(pid_t pid, uint32_t event);
 pid_t getpgid();
 int setpgrp(pid_t pid, pid_t pgid);
 int dup2(int oldfd, int newfd);
-int print_processes(void);
+int print_processes(int fd);
 int set_process_name(const char *name);
 int set_process_name_for_pid(pid_t pid, const char *name);
