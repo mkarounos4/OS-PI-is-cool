@@ -1,24 +1,23 @@
 #include "gui.h"
 #include "tty_gui.h"
 #include "ascii_font.h"
-#include "uart.h"
 
 int MAX_ROWS;
 int MAX_COLS;
 static int cursor_row;
 static int cursor_col;
-#define MAIN_COLOR gui_framebuffer_encode_color(0xFF, 0, 0xFF)
-#define BG_COLOR gui_framebuffer_encode_color(0, 0, 0)
+#define MAIN_COLOR (uint32_t) gui_framebuffer_encode_color(0xFF, 0, 0xFF)
+#define BG_COLOR (uint32_t) gui_framebuffer_encode_color(0x18, 0, 0x32)
 #define CHAR_HEIGHT 16
 #define CHAR_WIDTH 8
 #define WIDTH_BUFFER 0
 #define HEIGHT_BUFFER 0
 
-static int row_to_px(int row) {
+static uint32_t row_to_px(int row) {
     return HEIGHT_BUFFER + row * (CHAR_HEIGHT + HEIGHT_BUFFER);
 }
 
-static int col_to_px(int col) {
+static uint32_t col_to_px(int col) {
     return WIDTH_BUFFER + col * (CHAR_WIDTH + WIDTH_BUFFER);
 }
 
@@ -58,12 +57,12 @@ void init_tty_gui(void) {
     cursor_row = 0;
     cursor_col = 0;
 
-    gui_framebuffer_clear(0, 0, 0);
+    gui_framebuffer_clear(0x18, 0, 0x32);
 }
 
 void toggle_cursor(void) {
-    for (int i = row_to_px(cursor_row); i < row_to_px(cursor_row) + 16; i++) {
-        for (int j = col_to_px(cursor_col); j < col_to_px(cursor_col) + 8; j++) {
+    for (uint32_t i = row_to_px(cursor_row); i < row_to_px(cursor_row) + 16; i++) {
+        for (uint32_t j = col_to_px(cursor_col); j < col_to_px(cursor_col) + 8; j++) {
             uint32_t curr_color;
             int success = gui_framebuffer_get_pixel(j, i, &curr_color);
             if (!success) {

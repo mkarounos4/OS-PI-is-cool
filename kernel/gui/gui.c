@@ -9,7 +9,11 @@
 #define GUI_FB_SMOKE_GREEN 0x00u
 #define GUI_FB_SMOKE_BLUE 0xffu
 
+#ifdef PLATFORM_QEMU
+#define PIXEL_ORDER_BGR 1u
+#else
 #define PIXEL_ORDER_BGR 0u
+#endif
 
 static gui_framebuffer_t active_fb;
 static int active_fb_ready;
@@ -174,8 +178,4 @@ void gui_init_smoke_test(void) {
             gui_framebuffer_put_pixel(x, y, 0x0, 0xff, 0xff);
         }
     }
-}
-
-void gui_write_char(const char c) {
-    
 }
