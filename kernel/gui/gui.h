@@ -22,3 +22,6 @@ int gui_framebuffer_put_pixel(uint32_t x, uint32_t y, uint8_t red,
 uint32_t *gui_framebuffer_pixels32(void);
 
 void gui_init_smoke_test(void);
+
+int gui_framebuffer_put_pixel_encoded(uint32_t x, uint32_t y, uint32_t color);
+int gui_framebuffer_get_pixel(uint32_t x, uint32_t y, uint32_t *color);

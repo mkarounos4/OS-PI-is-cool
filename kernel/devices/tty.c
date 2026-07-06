@@ -1,4 +1,5 @@
 #include "tty.h"
+#include "gui/tty_gui.h"
 
 #define TTY_MAJOR 0
 
@@ -149,7 +150,7 @@ int tty_write(struct oft_entry *entry, const char *buffer, size_t count) {
 
     ssize_t num_written = 0;
     while(num_written < count) {
-        uart_putc(*buffer);
+        tty_gui_write_char(*buffer);
         buffer++;
         num_written++;
     }

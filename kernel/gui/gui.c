@@ -98,8 +98,7 @@ int gui_framebuffer_clear(uint8_t red, uint8_t green, uint8_t blue) {
     return 1;
 }
 
-int gui_framebuffer_put_pixel(uint32_t x, uint32_t y, uint8_t red,
-                              uint8_t green, uint8_t blue) {
+int gui_framebuffer_put_pixel_encoded(uint32_t x, uint32_t y, uint32_t color) {
     if (!active_fb_ready && !gui_framebuffer_init()) {
         return 0;
     }
@@ -108,13 +107,31 @@ int gui_framebuffer_put_pixel(uint32_t x, uint32_t y, uint8_t red,
     }
 
     uint8_t *row = (uint8_t *)active_fb.addr + ((uint64_t)y * active_fb.pitch);
-    uint32_t color = gui_framebuffer_encode_color(red, green, blue);
     if (active_fb.depth == 16) {
         ((uint16_t *)row)[x] = (uint16_t)color;
     } else {
         ((uint32_t *)row)[x] = color;
     }
 
+    return 1;
+}
+
+int gui_framebuffer_put_pixel(uint32_t x, uint32_t y, uint8_t red,
+                              uint8_t green, uint8_t blue) {
+    uint32_t color = gui_framebuffer_encode_color(red, green, blue);
+    return gui_framebuffer_put_pixel_encoded(x, y, color);
+}
+
+int gui_framebuffer_get_pixel(uint32_t x, uint32_t y, uint32_t *color) {
+    if (!active_fb_ready && !gui_framebuffer_init()) {
+        return 0;
+    }
+    if (x >= active_fb.width || y >= active_fb.height) {
+        return 0;
+    }
+
+    uint8_t *row = (uint8_t *)active_fb.addr + ((uint64_t)y * active_fb.pitch);
+    *color = row[x];
     return 1;
 }
 
@@ -157,4 +174,8 @@ void gui_init_smoke_test(void) {
             gui_framebuffer_put_pixel(x, y, 0x0, 0xff, 0xff);
         }
     }
+}
+
+void gui_write_char(const char c) {
+    
 }

@@ -1,5 +1,6 @@
 #include <stdint.h>
 
+#include "gui/tty_gui.h"
 #include "irq/irq.h"
 #include "scheduler/scheduler.h"
 #include "timer/timer.h"
@@ -28,7 +29,8 @@
 void kernel_main(void) {
     uart_init();
     printf("\nAArch64 bare-metal kernel entered\n");
-    gui_init_smoke_test();
+    gui_framebuffer_init();
+    init_tty_gui();
     fan_init();
 
     exceptions_init();
