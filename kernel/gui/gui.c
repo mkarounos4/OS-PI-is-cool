@@ -135,7 +135,12 @@ int gui_framebuffer_get_pixel(uint32_t x, uint32_t y, uint32_t *color) {
     }
 
     uint8_t *row = (uint8_t *)active_fb.addr + ((uint64_t)y * active_fb.pitch);
-    *color = row[x];
+    if (active_fb.depth == 16) {
+        *color = (uint32_t)(((uint16_t *)row)[x] & 0xFFFFFFFF);
+    } else {
+        *color = ((uint32_t*)row)[x];
+    }
+
     return 1;
 }
 

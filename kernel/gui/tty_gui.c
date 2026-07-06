@@ -26,7 +26,7 @@ static void scroll_down_row(void) {
     gui_framebuffer_t fb;
     int success = gui_framebuffer_get(&fb);
     if (!success) return;
-    for (uint32_t i = CHAR_HEIGHT + HEIGHT_BUFFER; i < fb.height; i++) {
+    for (uint32_t i = CHAR_HEIGHT; i < fb.height; i++) {
         for (uint32_t j = 0; j < fb.width; j++) {
             uint32_t col;
             success = gui_framebuffer_get_pixel(j, i, &col);
@@ -39,7 +39,7 @@ static void scroll_down_row(void) {
     // Clear last layer
     for (uint32_t i = 0; i < CHAR_HEIGHT + HEIGHT_BUFFER; i++) {
         for (uint32_t j = 0; j < fb.width; j++) {
-            success = gui_framebuffer_put_pixel_encoded(j, fb.height - i, BG_COLOR);
+            success = gui_framebuffer_put_pixel_encoded(j, fb.height - i - 1, BG_COLOR);
             if (!success) return;
         }
     }
