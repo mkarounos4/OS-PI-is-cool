@@ -21,7 +21,7 @@ void prepare_child_process(struct parsed_command *parsed_cmd);
 void start_fg_job(job *newJob);
 void execute_commands(struct parsed_command *parsed_cmd, char *cmd);
 void exec_shell_command(char **argv);
-int handle_job_builtins(struct parsed_command *parsed_cmd);
+int handle_builtins(struct parsed_command *parsed_cmd);
 char *get_input(int *nextAddNewLine);
 void print_status_updates();
 
@@ -125,8 +125,7 @@ void prompt() {
 		print_status_updates();
 
         // Write prompt
-        const char *prompt_text= "$ ";
-        write(1, prompt_text, strlen(prompt_text));
+        printf("$ ");
      
 		// Read shell input
         int nextAddNewLine;
@@ -306,7 +305,7 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
     }
 
 	// Handle jobs, bg, and fg if applicable
-    if (parsed_cmd->num_commands == 1 && handle_job_builtins(parsed_cmd) == 1) {
+    if (parsed_cmd->num_commands == 1 && handle_builtins(parsed_cmd) == 1) {
         free(parsed_cmd);
         return;
     }
@@ -541,7 +540,7 @@ void start_fg_job(job *newJob) {
     tcsetpgrp(STDIN_FILENO, shell_pgid);
 }
 
-int handle_job_builtins(struct parsed_command *parsed_cmd) {
+int handle_builtins(struct parsed_command *parsed_cmd) {
 	// For all jobs, print relevant information
     if (strcmp(parsed_cmd->commands[0][0], "jobs") == 0) {
         for (size_t i = 0; i < vec_len(&background_jobs); i++) {
@@ -603,6 +602,26 @@ int handle_job_builtins(struct parsed_command *parsed_cmd) {
         vec_remove_job_by_id(&stopped_background_jobs, job_to_continue->id);
         start_fg_job(job_to_continue);
 
+        return 1;
+    }
+
+    if (strcmp(parsed_cmd->commands[0][0], "cd") == 0) {
+        if (parsed_cmd->commands[0][1] == NULL) {
+            print_errno("cd", "usage: cd <dir>", -EINVAL);
+            return 1;
+        }
+
+        int err = cd(parsed_cmd->commands[0][1]);
+        if (err < 0) {
+            print_errno("cd", parsed_cmd->commands[0][1], err);
+        }
+        return 1;
+    }
+
+    if (strcmp(parsed_cmd->commands[0][0], "pwd") == 0) {
+        char buf[256];
+        getcwd(buf, sizeof(buf));
+        printf("%s\n", buf);
         return 1;
     }
 

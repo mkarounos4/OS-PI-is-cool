@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include <stddef.h>
@@ -67,6 +66,7 @@ enum syscall_type {
     S_PIPE = 41,
     S_PS = 42,
     S_EXEC = 43,
+    S_GETCWD = 44,
 };
 
 long write_console(const char *s, uint64_t len);

@@ -93,3 +93,7 @@ static inline err_t fs_mkdir(char **file_paths) {
 static inline err_t cd(char *path) {
     return (err_t)sys_call1(S_FS_CD, (long)(uintptr_t)path);
 }
+
+static inline char *getcwd(char *path, size_t size) {
+    return (char*)sys_call2(S_GETCWD, (long)path, (long)size);
+}

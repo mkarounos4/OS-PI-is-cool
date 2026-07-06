@@ -50,6 +50,7 @@ enum syscall_type {
     S_PIPE = 41,
     S_PS = 42,
     S_EXEC = 43,
+    S_GETCWD = 44,
 };
 
 struct trap_frame *syscall_dispatch(struct trap_frame *frame);

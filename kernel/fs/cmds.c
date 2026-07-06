@@ -2,6 +2,7 @@
 
 #include "cmds.h"
 #include "disk.h"
+#include "inode_cache.h"
 #include "kapi.h"
 #include "oft.h"
 #include "scheduler/scheduler.h"
@@ -480,4 +481,8 @@ err_t ps(void) {
     pcb_t *pcb = get_curr_process();
     int k_fd = (int)(uintptr_t)vec_get(&pcb->file_descriptors, 1);
     return print_processes(k_fd);
+}
+
+err_t getcwd(char* path, size_t size) {
+    return 0;
 }

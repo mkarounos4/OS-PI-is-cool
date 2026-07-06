@@ -314,9 +314,11 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     pcb_t *parent_proc = get_pcb_by_pid(ppid);
     if (parent_proc == NULL) {
         new_proc->pgid = new_proc->pid;
+        new_proc->cwd = ROOT_INO;
     } else {
         new_proc->pgid = parent_proc->pgid; 
         vec_push_back(&parent_proc->children, (ptr_t)(uintptr_t)new_proc->pid); 
+        new_proc->cwd = parent_proc->cwd;
     }
 
     // Setup children array

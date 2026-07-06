@@ -68,6 +68,8 @@ typedef struct pcb_st {
     struct sigaction sigactions[32];
 
     int priority;
+
+    ino_id_t cwd;
 } pcb_t;
 
 typedef struct pgrp_st {
