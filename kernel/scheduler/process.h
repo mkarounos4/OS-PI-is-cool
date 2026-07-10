@@ -39,6 +39,21 @@ enum process_state {
     PROC_ZOMBIE_STATE,
 };
 
+#define MAX_THREADS_PER_PROCESS 16
+
+typedef struct thread_st {
+    tid_t tid;
+    enum thread_state state;
+    struct cpu_context ctx;
+    uint8_t *kernel_stack;
+    uint64_t *user_stack_va;
+    void *return_value;
+    uint8_t is_joinable;
+    Vec waiting_on_this;
+} thread_t;
+
+// In pcb_t, add:
+
 typedef struct pcb_st {
     pid_t pid; 
     pid_t ppid; // Parent pid
@@ -53,8 +68,10 @@ typedef struct pcb_st {
     void *(*entry_func)(void*);
     void *args;
 
-    // Thread parameters (implementation simplified to one thread per process)
-    struct cpu_context ctx;
+    // Thread parameters
+    thread_t threads[MAX_THREADS_PER_PROCESS];
+    int thread_count;
+    tid_t next_tid;
 
     uint8_t wait_stop_pending;
     uint8_t wait_cont_pending;
