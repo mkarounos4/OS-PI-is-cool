@@ -131,7 +131,8 @@ $(USER_BINS_ASM): $(USER_CMD_ELFS)
 		name=$$(basename $$elf .elf); \
 		sym=$$(printf '%s' "$$name" | tr -c 'A-Za-z0-9_' '_'); \
 		printf '.global __user_bin_%s_start\n.global __user_bin_%s_end\n' "$$sym" "$$sym" >> $@; \
-		printf '__user_bin_%s_start:\n.incbin "%s"\n__user_bin_%s_end:\n.balign 8\n' "$$sym" "$$(realpath $$elf)" "$$sym" >> $@; \
+		elf_abs=$$(cd $$(dirname $$elf) && pwd)/$$(basename $$elf); \
+		printf '__user_bin_%s_start:\n.incbin "%s"\n__user_bin_%s_end:\n.balign 8\n' "$$sym" "$$elf" "$$sym" >> $@; \
 	done
 
 $(USER_BINS_C): $(USER_CMD_ELFS)
