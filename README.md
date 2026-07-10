@@ -1,6 +1,58 @@
 # OS-PI-is-cool
 
-### Project tree
+## Project summary
+
+## Feature Overview
+Below is a list of features. Note that each one links to an individual design doc with more information about said feature. You can find all of these in docs/.
+
+Architecture/Hardware:
+- Bare-metal AArch64 for Raspberry Pi 5 and QEMU emulator Raspberry Pi 3B
+- EL1 kernel / EL0 userspace
+- Hardware level interrupt and exception handling, system calls, timer preemption
+- UART input/output
+- PIO SD Card writing for proper FS persistsence
+
+Processes:
+- Multi-priority Round Robin preemptive scheduler
+- fork() with Copy-On-Write
+- exec() with ELF loading
+- Process groups
+- Signal handling with POSIX-style signal API
+- Orphan and zombie handling
+- Waitpid
+
+Memory:
+- Virtual memory
+- Lazy stack and heap page allocation
+- Demand paging for lazy allocationo of instruction memory
+- Mmap
+- Page-fault handling
+- User/kernel and per-process isolation
+- Copy-on-write fork
+- Memory Allocation
+
+Filesystem:
+- ext2-style Inode based filesystem
+- Directories/subdirectories
+- Symlinks
+- Open-file table
+- Virtual Filesystem
+- Character device drivers
+- Least Recently Used Block Cache and Inode Cache
+- Permission handling
+
+Devices:
+- UART input (w/ interrupts) and output
+- TTY Terminal
+- Pipes
+- GUI framebuffer terminal
+
+Shell:
+- Proper shell implementation
+- Userspace commands such as cat, sleep, grep, kill, ls, etc.
+- Job control
+
+## Project tree
 
 ```text
 .
@@ -51,3 +103,5 @@
 │       └── cmds.c/h                -- High-level filesystem commands called by syscalls
 └── docs                       -- Markdown documentation
 ```
+
+## 
