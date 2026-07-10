@@ -275,8 +275,16 @@ struct trap_frame *syscall_dispatch(struct trap_frame *frame) {
         break;
     }
     case S_GETCWD:
-        return getcwd((char*)frame->regs[0], (size_t)frame->regs[1]);
-    break;
+        ret = fs_err_to_sys_errno(getcwd((char *)(uintptr_t)frame->regs[0],
+                                         (size_t)frame->regs[1]));
+        break;
+    case S_SLEEP:
+        ret = SYS_ENOSYS;
+        break;
+    case S_STAT:
+        ret = fs_err_to_sys_errno(k_stat((const char *)(uintptr_t)frame->regs[0],
+                                         (struct fs_stat_st *)(uintptr_t)frame->regs[1]));
+        break;
     default:
         ret = SYS_ENOSYS;
         break;

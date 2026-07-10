@@ -108,11 +108,20 @@ void backtrack_cursor(void) {
     toggle_cursor();
 }
 
+static void clear_screen(void) {
+    cursor_row = 0;
+    cursor_col = 0;
+    gui_framebuffer_clear(0x18, 0, 0x32);
+    toggle_cursor();
+}
+
 void tty_gui_write_char(const char c) {
     if (c == '\n') {
         cursor_advance_row();
     } else if (c == '\b') {
         backtrack_cursor();
+    } else if (c == '\f') {
+        clear_screen();
     } else {
         toggle_cursor();
         uint8_t *char_format = get_ascii_char_font(c);

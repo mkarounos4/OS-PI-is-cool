@@ -27,6 +27,18 @@ typedef __SIZE_TYPE__ ssize_t;
 #define STDOUT_FILENO STDOUT
 #define STDERR_FILENO STDERR
 
+struct fs_stat_st {
+    uint32_t ino_id;
+    uint16_t links_count;
+    uint8_t type;
+    uint8_t perm;
+    uint32_t size;
+    uint32_t blocks;
+    uint64_t mtime;
+    uint16_t rdev_major;
+    uint16_t rdev_minor;
+};
+
 static inline int open(const char *fname, int mode) {
     return (int)sys_call2(S_FS_OPEN, (long)(uintptr_t)fname, mode);
 }
@@ -95,5 +107,12 @@ static inline err_t cd(char *path) {
 }
 
 static inline char *getcwd(char *path, size_t size) {
-    return (char*)sys_call2(S_GETCWD, (long)path, (long)size);
+    long err = sys_call2(S_GETCWD, (long)(uintptr_t)path, (long)size);
+    return err < 0 ? (char *)(uintptr_t)err : path;
+}
+
+static inline int stat(const char *path, struct fs_stat_st *stat) {
+    return (int)sys_call2(S_STAT,
+                          (long)(uintptr_t)path,
+                          (long)(uintptr_t)stat);
 }

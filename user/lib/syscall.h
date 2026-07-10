@@ -67,6 +67,8 @@ enum syscall_type {
     S_PS = 42,
     S_EXEC = 43,
     S_GETCWD = 44,
+    S_SLEEP = 45,
+    S_STAT = 46,
 };
 
 long write_console(const char *s, uint64_t len);

@@ -5,3 +5,5 @@
 *.map
 *.sym
 build/
+.codegraph/
+.mcp.json

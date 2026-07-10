@@ -7,6 +7,7 @@
 #include "memory/page_table/page_table.h"
 #include "scheduler/scheduler.h"
 #include "pipe/pipe.h"
+#include "string.h"
 
 int default_read(struct oft_entry *entry, char *buf, size_t n);
 int default_write(struct oft_entry *entry, const char *buf, size_t n);
@@ -546,6 +547,62 @@ int k_check_if_exists(const char *f_name) {
 
     struct fs_dirent dir;
     return !get_dirent_by_path(f_name, &dir, 0, NULL, NULL);
+}
+
+static int k_resolve_path_any(const char *path, struct fs_dirent *dirent) {
+    if (path == NULL || dirent == NULL || path[0] == '\0') {
+        return INVALID_ARGS;
+    }
+
+    if (strcmp(path, "/") == 0) {
+        dirent->ino_id = ROOT_INO;
+        strcpy(dirent->name, "/");
+        return SUCCESS;
+    }
+
+    err_t err = get_dirent_by_path(path, dirent, 0, NULL, NULL);
+    if (err == SUCCESS) {
+        return SUCCESS;
+    }
+
+    err = get_dirent_by_path(path, dirent, 1, NULL, NULL);
+    if (err == SUCCESS) {
+        return SUCCESS;
+    }
+
+    return FILE_NOT_FOUND;
+}
+
+int k_stat(const char *path, struct fs_stat_st *stat) {
+    if (!get_is_mounted()) {
+        return FS_NOT_MOUNTED;
+    }
+    if (stat == NULL) {
+        return INVALID_ARGS;
+    }
+
+    struct fs_dirent dirent;
+    err_t err = k_resolve_path_any(path, &dirent);
+    if (err != SUCCESS) {
+        return err;
+    }
+
+    attributes_t metadata;
+    err = get_inode_metadata(dirent.ino_id, &metadata);
+    if (err != SUCCESS) {
+        return err;
+    }
+
+    stat->ino_id = dirent.ino_id;
+    stat->links_count = metadata.i_links_count;
+    stat->type = metadata.type;
+    stat->perm = metadata.perm;
+    stat->size = metadata.i_size;
+    stat->blocks = metadata.i_blocks;
+    stat->mtime = metadata.mtime;
+    stat->rdev_major = metadata.i_rdev.major;
+    stat->rdev_minor = metadata.i_rdev.minor;
+    return SUCCESS;
 }
 
 int k_make_directory(char *f_path) {

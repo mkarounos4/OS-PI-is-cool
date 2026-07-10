@@ -133,3 +133,4 @@ err_t exec(char *path);
 
 
 err_t ps(void);
+err_t getcwd(char* path, size_t size);

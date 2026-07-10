@@ -24,6 +24,7 @@ void exec_shell_command(char **argv);
 int handle_builtins(struct parsed_command *parsed_cmd);
 char *get_input(int *nextAddNewLine);
 void print_status_updates();
+void print_prompt();
 
 int main(int argc, char **argv) {
     (void)argc;
@@ -116,6 +117,32 @@ void close_pipe(int *pipe){
     close(pipe[1]);
 }
 
+static const char *cwd_basename(const char *cwd) {
+    const char *last = cwd;
+
+    if (cwd[0] == '/' && cwd[1] == '\0') {
+        return cwd;
+    }
+
+    for (size_t i = 0; cwd[i] != '\0'; i++) {
+        if (cwd[i] == '/' && cwd[i + 1] != '\0') {
+            last = cwd + i + 1;
+        }
+    }
+
+    return last;
+}
+
+void print_prompt() {
+    char cwd[256];
+
+    if (getcwd(cwd, sizeof(cwd)) == cwd) {
+        printf("%s $ ", cwd_basename(cwd));
+    } else {
+        printf("$ ");
+    }
+}
+
 void prompt() {
     while (1) {
         // Wait on children processes
@@ -125,7 +152,7 @@ void prompt() {
 		print_status_updates();
 
         // Write prompt
-        printf("$ ");
+        print_prompt();
      
 		// Read shell input
         int nextAddNewLine;
@@ -211,6 +238,21 @@ char *get_input(int *nextAddNewLine) {
 
         // Add terminating null
         buffer[num_read] = '\0';
+
+        for (int i = 0; i < num_read; i++) {
+            if (buffer[i] == '\f') {
+                buffer[i] = '\0';
+                write(1, "\f", 1);
+                print_prompt();
+                write(1, cmd, strlen(cmd));
+                buffer = cmd + strlen(cmd);
+                num_read = 0;
+                break;
+            }
+        }
+        if (num_read == 0) {
+            continue;
+        }
 
         // Handle partially full buffer
         if (num_read < BUF_SIZE) {
@@ -622,6 +664,11 @@ int handle_builtins(struct parsed_command *parsed_cmd) {
         char buf[256];
         getcwd(buf, sizeof(buf));
         printf("%s\n", buf);
+        return 1;
+    }
+
+    if (strcmp(parsed_cmd->commands[0][0], "clear") == 0) {
+        write(1, "\f", 1);
         return 1;
     }
 
