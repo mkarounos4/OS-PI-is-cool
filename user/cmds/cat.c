@@ -1,4 +1,5 @@
 #include "lib/fs_syscall.h"
+#include "lib/errno.h"
 #include "lib/stdio.h"
 #include "lib/string.h"
 
@@ -9,7 +10,7 @@ static int write_all(int fd, const char *buf, int n) {
     while (written < n) {
         int chunk = write(fd, buf + written, n - written);
         if (chunk <= 0) {
-            return chunk < 0 ? chunk : -1;
+            return chunk < 0 ? chunk : -EIO;
         }
         written += chunk;
     }
@@ -56,8 +57,8 @@ int main(int argc, char **argv) {
             continue;
         }
         if (i + 1 >= argc || argv[i + 1] == NULL) {
-            printf("cat: missing output file\n");
-            return -1;
+            print_errno("cat", "missing output file", -EINVAL);
+            return -EINVAL;
         }
 
         output_file = argv[i + 1];
@@ -72,6 +73,7 @@ int main(int argc, char **argv) {
     if (output_file != NULL) {
         out_fd = open(output_file, output_flags);
         if (out_fd < 0) {
+            print_errno("cat", output_file, out_fd);
             return out_fd;
         }
     }
@@ -83,7 +85,8 @@ int main(int argc, char **argv) {
             continue;
         }
         if (output_file != NULL && strcmp(argv[i], output_file) == 0) {
-            err = -1;
+            err = -EINVAL;
+            print_errno("cat", "input and output are the same file", err);
             break;
         }
 
@@ -91,6 +94,7 @@ int main(int argc, char **argv) {
         int in_fd = open(argv[i], O_RDONLY);
         if (in_fd < 0) {
             err = in_fd;
+            print_errno("cat", argv[i], err);
             break;
         }
 
@@ -113,6 +117,10 @@ int main(int argc, char **argv) {
         if (err == 0 && close_err < 0) {
             err = close_err;
         }
+    }
+
+    if (err < 0) {
+        print_errno("cat", "failed", err);
     }
 
     return err;

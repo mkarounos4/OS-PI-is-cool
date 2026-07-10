@@ -2,6 +2,7 @@
 #include "lib/signals.h"
 #include "lib/tests.h"
 #include "lib/stdio.h"
+#include "lib/errno.h"
 
 void *tests(void *args) {
     (void)args;
@@ -22,13 +23,14 @@ void *init_process_entry(void *args) {
     setpgid(pid, pid);
     if (pid == 0) {
         char *argv[] = {"/bin/shell", NULL};
-        exec("/bin/shell", argv);
-        exit(-1);
+        int err = exec("/bin/shell", argv);
+        print_errno("init", "exec /bin/shell", err);
+        exit(err < 0 ? err : -EIO);
     }
 
     while (1) {
         int ret = waitpid(-1, NULL, 0);
-        if (ret == ECHILD) {
+        if (ret == -ECHILD) {
             block_until_event(BLOCK_UNTIL_NEW_CHILD);
         }
     }

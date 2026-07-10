@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include "scheduler/scheduler.h"
 #include "scheduler/process.h"
+#include "errno.h"
 
 #define USER_SIG_DFL ((void (*)(int))0)
 #define USER_SIG_IGN ((void (*)(int))1)
@@ -71,12 +72,16 @@ void initialize_signals() {
 }
 
 int s_kill(pid_t pid, int signal) {
+    if (signal < 0 || signal >= 32) {
+        return (int)SYS_EINVAL;
+    }
+
     if (pid < 0) {
         pgrp_t *pgrp = get_pgrp_by_pgid(-pid);
         int sent = 0;
 
         if (pgrp == NULL) {
-            return -1;
+            return (int)SYS_ESRCH;
         }
 
         for (size_t i = 0; i < vec_len(&pgrp->pids); i++) {
@@ -86,12 +91,12 @@ int s_kill(pid_t pid, int signal) {
             }
         }
 
-        return sent ? 0 : -1;
+        return sent ? 0 : (int)SYS_ESRCH;
     }
 
     pcb_t *pcb = get_pcb_by_pid(pid);
     if (pcb == NULL) {
-        return -1;
+        return (int)SYS_ESRCH;
     }
     if (pcb == get_curr_process() && !(pcb->mask & (1 << signal))) {
         pcb->sigactions[signal].sa_handler(signal);
@@ -119,7 +124,7 @@ int s_kill(pid_t pid, int signal) {
 long send_sigchld(pid_t child) {
     pcb_t *child_pcb = get_pcb_by_pid(child);
     if (child_pcb == NULL) {
-        return -1;
+        return SYS_ESRCH;
     }
 
     if (child_pcb->state == PROC_STOPPED_STATE) {
@@ -131,7 +136,7 @@ long send_sigchld(pid_t child) {
     pid_t parent_pid = child_pcb->ppid;
     pcb_t* parent_pcb = get_pcb_by_pid(parent_pid);
     if (parent_pcb == NULL) {
-        return -1;
+        return SYS_ESRCH;
     }
 
     if (parent_pcb->waiting_for_pid == -1 ||
@@ -152,12 +157,12 @@ long send_sigchld(pid_t child) {
 
 int sigprocmask(int how, const signalset_t *set, signalset_t *oldset) {
     if (set == NULL) {
-        return -2;
+        return (int)SYS_EFAULT;
     }
 
     pcb_t *pcb = get_curr_process();
     if (pcb == NULL) {
-        return -1;
+        return (int)SYS_ESRCH;
     }
 
     if (oldset != NULL) {
@@ -171,7 +176,7 @@ int sigprocmask(int how, const signalset_t *set, signalset_t *oldset) {
     } else if (how == SIG_SET) {
         pcb->mask = *set;
     } else {
-        return -2;
+        return (int)SYS_EINVAL;
     }
 
     return 0;
@@ -179,7 +184,7 @@ int sigprocmask(int how, const signalset_t *set, signalset_t *oldset) {
 
 int sigemptyset(signalset_t *set) {
     if (set == NULL) {
-        return -1;
+        return (int)SYS_EFAULT;
     }
 
     *set = 0;
@@ -188,7 +193,10 @@ int sigemptyset(signalset_t *set) {
 
 int sigaddset(signalset_t *set, int signum) {
     if (set == NULL) {
-        return -1;
+        return (int)SYS_EFAULT;
+    }
+    if (signum < 0 || signum >= 32) {
+        return (int)SYS_EINVAL;
     }
 
     *set |= (1 << signum);
@@ -197,7 +205,7 @@ int sigaddset(signalset_t *set, int signum) {
 
 int sigfillset(signalset_t *set) {
     if (set == NULL) {
-        return -1;
+        return (int)SYS_EFAULT;
     }
 
     *set = 0xFFFFFFFF;
@@ -207,10 +215,10 @@ int sigfillset(signalset_t *set) {
 int sigsuspend(const signalset_t *mask) {
     pcb_t *pcb = get_curr_process();
     if (mask == NULL) {
-        return -2;
+        return (int)SYS_EFAULT;
     }
     if (pcb == NULL) {
-        return -1;
+        return (int)SYS_ESRCH;
     }
 
     signalset_t old_set = 0;
@@ -219,21 +227,21 @@ int sigsuspend(const signalset_t *mask) {
     block_process(pcb);
     sigprocmask(SIG_SETMASK, &old_set, NULL);
 
-    return -1;
+    return (int)SYS_EINTR;
 }
 
 int sigaction(int signum, struct sigaction *sa, struct sigaction *old) {
     pcb_t *pcb = get_curr_process();
     if (pcb == NULL) {
-        return -1;
+        return (int)SYS_ESRCH;
     }
 
     if (signum < 0 || signum >= 32) {
-        return -1;
+        return (int)SYS_EINVAL;
     }
 
     if (sa == NULL) {
-        return -1;
+        return (int)SYS_EFAULT;
     }
 
     if (old != NULL) {
@@ -243,7 +251,7 @@ int sigaction(int signum, struct sigaction *sa, struct sigaction *old) {
     if ((signum == SIGKILL || signum == SIGSTOP) &&
         sa->sa_handler != USER_SIG_DFL &&
         sa->sa_handler != SIG_DFL) {
-        return -1;
+        return (int)SYS_EINVAL;
     }
 
     pcb->sigactions[signum] = *sa;

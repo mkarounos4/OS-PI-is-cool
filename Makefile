@@ -52,11 +52,13 @@ USER_LDFLAGS = -nostdlib -nostartfiles -nodefaultlibs -static -no-pie \
 ifeq ($(PLATFORM),rpi)
     CFLAGS += -DPLATFORM_RPI -DPLATFORM_RPI5 -mcpu=cortex-a76
     UART_SRC = kernel/uart/uart_rpi.c
+    GUI_SRC = kernel/gui/gui_rpi.c
     LINKER = linker_rpi.ld
     TARGET = kernel8.img
 else ifeq ($(PLATFORM),qemu)
     CFLAGS += -DPLATFORM_QEMU -mcpu=cortex-a53
     UART_SRC = kernel/uart/uart_qemu.c
+    GUI_SRC = kernel/gui/gui_qemu.c
     LINKER = linker_rpi.ld
     TARGET = kernel8.img
 else
@@ -71,7 +73,7 @@ USER_SHELL_SRCS := $(shell find $(USER_CMD_DIR)/shell -type f -name '*.c' | sort
 USER_CMD_NAMES := $(patsubst $(USER_CMD_DIR)/%.c,%,$(USER_CMD_SRCS))
 USER_CMD_ELFS := $(addprefix $(USER_BUILD_DIR)/bin/,$(addsuffix .elf,$(USER_CMD_NAMES)))
 
-C_SRCS := $(filter-out kernel/uart/uart_rpi.c kernel/uart/uart_qemu.c,$(ALL_C_SRCS)) $(UART_SRC)
+C_SRCS := $(filter-out kernel/uart/uart_rpi.c kernel/uart/uart_qemu.c kernel/gui/gui_rpi.c kernel/gui/gui_qemu.c,$(ALL_C_SRCS)) $(UART_SRC) $(GUI_SRC)
 
 OBJS := $(patsubst $(KERNEL_DIR)/%.c,$(BUILD_DIR)/%.o,$(C_SRCS))
 OBJS += $(patsubst $(KERNEL_DIR)/%.S,$(BUILD_DIR)/%.S.o,$(ASM_SRCS))
@@ -176,7 +178,7 @@ qemu:
 	qemu-system-aarch64 \
 	    -M raspi3b \
 	    -cpu cortex-a53 \
-	    -display none \
+	    -display gtk \
 	    -serial mon:stdio \
 	    -kernel kernel8.img \
 	    -drive file=$(QEMU_SD_IMG),if=sd,format=raw

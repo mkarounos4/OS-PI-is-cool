@@ -19,6 +19,18 @@
 #define O_WRONLY 2
 #define O_RDWR 3
 
+struct fs_stat_st {
+    uint32_t ino_id;
+    uint16_t links_count;
+    uint8_t type;
+    uint8_t perm;
+    uint32_t size;
+    uint32_t blocks;
+    uint64_t mtime;
+    uint16_t rdev_major;
+    uint16_t rdev_minor;
+};
+
 /**
  * @brief Open a file by path, create an open-file-table entry, and
  * return a kernel file descriptor. Creates the file on disk if the
@@ -157,6 +169,8 @@ int k_change_directory(char *f_path);
  * @return true if executable, false otherwise.
  */
 bool k_check_if_executable(char *f_name);
+
+int k_stat(const char *path, struct fs_stat_st *stat);
 
 /**
  * @brief Parse a user ELF image from path and dispatch each loadable

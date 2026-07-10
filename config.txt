@@ -4,6 +4,12 @@ kernel=kernel_2712.img
 kernel_address=0x80000
 disable_commandline_tags=1
 
+# Keep the firmware framebuffer deterministic for the early GUI smoke test.
+framebuffer_width=1920
+framebuffer_height=1080
+framebuffer_depth=32
+framebuffer_ignore_alpha=1
+
 # Enable the RP1 PL011 on GPIO14/GPIO15 and print firmware UART logs too.
 enable_rp1_uart=1
 enable_uart=1

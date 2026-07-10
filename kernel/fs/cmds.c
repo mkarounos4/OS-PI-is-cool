@@ -2,6 +2,8 @@
 
 #include "cmds.h"
 #include "disk.h"
+#include "dirs.h"
+#include "inode_cache.h"
 #include "kapi.h"
 #include "oft.h"
 #include "scheduler/scheduler.h"
@@ -9,7 +11,7 @@
 int open(const char *fname, int mode) {
     pcb_t *pcb = get_curr_process();
     if (pcb == NULL) {
-        return -1;
+        return PID_NOT_FOUND;
     }
 
     int fd = k_open(fname, mode);
@@ -37,7 +39,7 @@ int open(const char *fname, int mode) {
 int close(int fd) {
     pcb_t *pcb = get_curr_process();
     if (pcb == NULL) {
-        return -1;
+        return PID_NOT_FOUND;
     }
 
     if (fd < 0 || (size_t)fd >= vec_len(&pcb->file_descriptors)) {
@@ -67,7 +69,7 @@ int close(int fd) {
 int read(int fd, char *buf, int n) {
     pcb_t *pcb = get_curr_process();
     if (pcb == NULL) {
-        return -1;
+        return PID_NOT_FOUND;
     }
 
     if (fd < 0 || (size_t)fd >= vec_len(&pcb->file_descriptors)) {
@@ -91,7 +93,7 @@ int read(int fd, char *buf, int n) {
 int write(int fd, char *buf, int n) {
     pcb_t *pcb = get_curr_process();
     if (pcb == NULL) {
-        return -1;
+        return PID_NOT_FOUND;
     }
 
     if (fd < 0 || (size_t)fd >= vec_len(&pcb->file_descriptors)) {
@@ -115,7 +117,7 @@ int write(int fd, char *buf, int n) {
 int lseek(int fd, int offset, int whence) {
     pcb_t *pcb = get_curr_process();
     if (pcb == NULL) {
-        return -1;
+        return PID_NOT_FOUND;
     }
 
     if (fd < 0 || (size_t)fd >= vec_len(&pcb->file_descriptors)) {
@@ -440,7 +442,10 @@ err_t ls(char *dir_path) {
     if (!get_is_mounted()) {
         return FS_NOT_MOUNTED;
     }
-    err_t res = k_ls(dir_path, 1);
+
+    pcb_t *pcb = get_curr_process();
+    int k_fd = (int)(uintptr_t)vec_get(&pcb->file_descriptors, 1);
+    err_t res = k_ls(dir_path, k_fd);
     return res;
 }
 
@@ -466,4 +471,128 @@ err_t exec(char *path) {
 
     err_t err = k_exec_process(pcb->pid, path, argv);
     return err;
+}
+
+err_t ps(void) {
+    // Return if not mounted
+    if (!get_is_mounted()) {
+        return FS_NOT_MOUNTED;
+    }
+
+    pcb_t *pcb = get_curr_process();
+    int k_fd = (int)(uintptr_t)vec_get(&pcb->file_descriptors, 1);
+    return print_processes(k_fd);
+}
+
+static err_t find_child_name_in_dir(ino_id_t parent, ino_id_t child,
+                                    char name[32]) {
+    struct fs_dirent *dir = kmalloc(get_bytes_per_block());
+    if (dir == NULL) {
+        return NO_FREE_BLOCKS;
+    }
+
+    block_no_t curr_block_no = get_first_block(parent);
+    int index = 0;
+    while (curr_block_no != 0) {
+        int err = read_block(dir, curr_block_no);
+        if (err != SUCCESS) {
+            kfree(dir);
+            return err;
+        }
+
+        int entries = get_bytes_per_block() / (int)sizeof(struct fs_dirent);
+        for (int i = 0; i < entries; i++) {
+            if (!strcmp(dir[i].name, "\0")) {
+                kfree(dir);
+                return FILE_NOT_FOUND;
+            }
+            if (dir[i].ino_id == child &&
+                strcmp(dir[i].name, ".") != 0 &&
+                strcmp(dir[i].name, "..") != 0) {
+                strcpy(name, dir[i].name);
+                kfree(dir);
+                return SUCCESS;
+            }
+        }
+
+        curr_block_no = get_ith_block_of_file_by_id(parent, ++index);
+    }
+
+    kfree(dir);
+    return FILE_NOT_FOUND;
+}
+
+err_t getcwd(char* path, size_t size) {
+    if (!get_is_mounted()) {
+        return FS_NOT_MOUNTED;
+    }
+    if (path == NULL || size == 0) {
+        return INVALID_ARGS;
+    }
+
+    pcb_t *pcb = get_curr_process();
+    if (pcb == NULL) {
+        return PID_NOT_FOUND;
+    }
+
+    ino_id_t curr = pcb->cwd;
+    if (curr == ROOT_INO) {
+        if (size < 2) {
+            return INVALID_ARGS;
+        }
+        path[0] = '/';
+        path[1] = '\0';
+        return SUCCESS;
+    }
+
+    char components[32][32];
+    int component_count = 0;
+    while (curr != ROOT_INO) {
+        if (component_count >= 32) {
+            return INVALID_ARGS;
+        }
+
+        struct fs_dirent parent_dirent;
+        err_t err = get_dirent_by_f_name("..", 1, &parent_dirent, curr);
+        if (err != SUCCESS) {
+            return err;
+        }
+
+        err = find_child_name_in_dir(parent_dirent.ino_id, curr,
+                                     components[component_count]);
+        if (err != SUCCESS) {
+            return err;
+        }
+
+        curr = parent_dirent.ino_id;
+        component_count++;
+    }
+
+    size_t required = 1;
+    for (int i = component_count - 1; i >= 0; i--) {
+        required += strlen(components[i]) + 1;
+    }
+    if (required + 1 > size) {
+        return INVALID_ARGS;
+    }
+
+    size_t pos = 0;
+    path[pos++] = '/';
+    for (int i = component_count - 1; i >= 0; i--) {
+        size_t len = strlen(components[i]);
+        for (size_t j = 0; j < len; j++) {
+            path[pos++] = components[i][j];
+        }
+        if (i != 0) {
+            path[pos++] = '/';
+        }
+    }
+    path[pos] = '\0';
+
+    return SUCCESS;
+}
+
+err_t sleep(long ms) {
+    (void)ms;
+    return INVALID_ARGS;
 }

@@ -1,8 +1,9 @@
-
 #pragma once
 
 #include <stddef.h>
 #include <stdint.h>
+
+#include "errno.h"
 
 typedef int32_t pid_t;
 typedef void *ptr_t;
@@ -11,7 +12,7 @@ typedef void *ptr_t;
 #define WUNTRACED 2
 #define WCONTINUED 4
 
-#define ECHILD -2
+#define ECHILD_NEG (-ECHILD)
 
 #define BLOCK_UNTIL_NEW_CHILD 1
 
@@ -65,6 +66,9 @@ enum syscall_type {
     S_PIPE = 41,
     S_PS = 42,
     S_EXEC = 43,
+    S_GETCWD = 44,
+    S_SLEEP = 45,
+    S_STAT = 46,
 };
 
 long write_console(const char *s, uint64_t len);
@@ -149,7 +153,7 @@ static inline int mount() {
 }
 
 static inline int unmount() {
-    return -1;
+    return -ENOSYS;
 }
 
 static inline int pipe(int pipefd[2]) {

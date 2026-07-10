@@ -155,7 +155,7 @@ static int has_wait_child(Vec *children, pid_t wait_pid) {
 long s_waitpid_impl(pid_t pid, int *status, int32_t flags) {
     pcb_t *curr_pcb = get_curr_process();
     if (curr_pcb == NULL) {
-        return -1;
+        return SYS_ESRCH;
     }
 
     pcb_t *done_child;
@@ -180,7 +180,7 @@ long s_waitpid_impl(pid_t pid, int *status, int32_t flags) {
     } else {
         done_child = get_pcb_by_pid(pid);
         if (done_child == NULL || done_child->ppid != curr_pcb->pid) {
-            return -1;
+            return SYS_ECHILD;
         }
 
         if (!can_wait_on_child(done_child, flags)) {
@@ -240,8 +240,8 @@ static const char *process_state_char(enum process_state state) {
     return "?";
 }
 
-int print_processes(void) {
-    int err = fprintf(1, "PID PPID PRI STAT CMD\n");
+int print_processes(int fd) {
+    int err = fprintf(fd, "PID PPID PRI STAT CMD\n");
     if (err < 0) {
         return err;
     }
@@ -252,7 +252,7 @@ int print_processes(void) {
             continue;
         }
 
-        err = fprintf(1, "%d %d %d %s %s\n",
+        err = fprintf(fd, "%d %d %d %s %s\n",
                       pcb->pid,
                       pcb->ppid,
                       pcb->priority,
@@ -282,7 +282,7 @@ static void process_copy_name(pcb_t *pcb, const char *name) {
 int set_process_name(const char *name) {
     pcb_t *pcb = get_curr_process();
     if (pcb == NULL) {
-        return -1;
+        return (int)SYS_ESRCH;
     }
 
     process_copy_name(pcb, name);
@@ -292,7 +292,7 @@ int set_process_name(const char *name) {
 int set_process_name_for_pid(pid_t pid, const char *name) {
     pcb_t *pcb = get_pcb_by_pid(pid);
     if (pcb == NULL) {
-        return -1;
+        return (int)SYS_ESRCH;
     }
 
     process_copy_name(pcb, name);
@@ -303,7 +303,7 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     pcb_t *new_proc = get_next_unused_pcb();
     if (new_proc == NULL) {
         uart_puts("ERROR: no unused processes left");
-        return -1;
+        return (pid_t)SYS_EAGAIN;
     }
 
     // TODO: replace when VM added with better heap allocation
@@ -314,9 +314,11 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     pcb_t *parent_proc = get_pcb_by_pid(ppid);
     if (parent_proc == NULL) {
         new_proc->pgid = new_proc->pid;
+        new_proc->cwd = ROOT_INO;
     } else {
         new_proc->pgid = parent_proc->pgid; 
         vec_push_back(&parent_proc->children, (ptr_t)(uintptr_t)new_proc->pid); 
+        new_proc->cwd = parent_proc->cwd;
     }
 
     // Setup children array
@@ -344,7 +346,7 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     uint64_t *user_l0 = initialize_user_page_table();
     if (user_l0 == NULL) {
         uart_puts("ERROR: failed to initialize user page table");
-        return -1;
+        return (pid_t)SYS_ENOMEM;
     }
 
     uint64_t kernel_stack_page_va = PROC_KERNEL_STACK_TOP - PAGE_SIZE;
@@ -352,7 +354,7 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
                                                      kernel_stack_page_va);
     if (kernel_stack_page == NULL) {
         uart_puts("ERROR: failed to seed process kernel stack");
-        return -1;
+        return (pid_t)SYS_ENOMEM;
     }
 
     uint64_t frame_va = PROC_KERNEL_STACK_TOP - sizeof(struct trap_frame);
@@ -395,7 +397,7 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
 
     if (add_to_pgrp(new_proc->pid) != 0) {
         uart_puts("ERROR: failed to add process to process group");
-        return -1;
+        return (pid_t)SYS_EAGAIN;
     }
 
     return new_proc->pid;
@@ -560,8 +562,12 @@ void cpy_address_space(pcb_t *src, pcb_t *dst) {
 pid_t fork(struct trap_frame *frame) {
     // create child process off of parent
     pcb_t *parent = get_curr_process();
+    if (parent == NULL) {
+        return (pid_t)SYS_ESRCH;
+    }
+
     pid_t child_pid = proc_create(parent->entry_func, parent->args, parent->pid);
-    if (child_pid < 0) return -1;
+    if (child_pid < 0) return (pid_t)SYS_EAGAIN;
     pcb_t *child = get_pcb_by_pid(child_pid); 
 
     cpy_address_space(parent, child);
@@ -571,7 +577,7 @@ pid_t fork(struct trap_frame *frame) {
     uint64_t frame_offset = frame_va - kernel_stack_page_va;
     if (frame_offset >= PAGE_SIZE) {
         proc_destroy(child);
-        return -1;
+        return (pid_t)SYS_EINVAL;
     }
 
     void *child_kernel_stack_page =
@@ -579,7 +585,7 @@ pid_t fork(struct trap_frame *frame) {
                            kernel_stack_page_va);
     if (child_kernel_stack_page == NULL) {
         proc_destroy(child);
-        return -1;
+        return (pid_t)SYS_EFAULT;
     }
 
     struct trap_frame *child_frame =
@@ -671,7 +677,16 @@ void send_unblock_event(pid_t pid, uint32_t event) {
 int dup2(int oldfd, int newfd) {
     pcb_t *pcb = get_curr_process();
     if (pcb == NULL) {
-        return -1;
+        return (int)SYS_ESRCH;
+    }
+
+    if (oldfd < 0 || newfd < 0 ||
+        (size_t)oldfd >= vec_len(&pcb->file_descriptors)) {
+        return (int)SYS_EBADF;
+    }
+
+    if ((int)(uintptr_t)vec_get(&pcb->file_descriptors, oldfd) < 0) {
+        return (int)SYS_EBADF;
     }
 
     close(newfd);
@@ -690,7 +705,7 @@ int setpgrp(pid_t pid, pid_t pgid) {
     }
 
     if (pcb == NULL) {
-        return -1;
+        return (int)SYS_ESRCH;
     }
 
     if (pgid == 0) {
@@ -707,7 +722,7 @@ int setpgrp(pid_t pid, pid_t pgid) {
     if (add_to_pgrp(pcb->pid) != 0) {
         pcb->pgid = old_pgid;
         add_to_pgrp(pcb->pid);
-        return -1;
+        return (int)SYS_EAGAIN;
     }
     return 0;
 }
@@ -715,7 +730,7 @@ int setpgrp(pid_t pid, pid_t pgid) {
 pid_t getpgid() {
     pcb_t *pcb = get_curr_process();
     if (pcb == NULL) {
-        return -1;
+        return (pid_t)SYS_ESRCH;
     }
 
     return pcb->pgid;

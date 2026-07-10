@@ -3,8 +3,9 @@
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "kapi.h"
+#include "oft.h"
 
-int write(int fd, char *buf, int n);
 
 struct format_out {
     char *buf;
@@ -163,7 +164,12 @@ int fprintf(int fd, const char *fmt, ...) {
         len = (int)sizeof(buf) - 1;
     }
 
-    int written = write(fd, buf, len);
+    struct oft_entry *entry;
+    err_t err = get_oft_entry_by_fd(fd, &entry);
+    if (err) {
+        return err;
+    }
+    int written = k_write(entry, buf, len);
     if (written < 0) {
         return written;
     }

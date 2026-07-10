@@ -1,4 +1,5 @@
 #include "tty.h"
+#include "gui/tty_gui.h"
 
 #define TTY_MAJOR 0
 
@@ -119,7 +120,7 @@ int tty_read(struct oft_entry *entry, char *buffer, size_t count) {
         buffer++;
         num_read++;
 
-        if (char_void == '\n') {
+        if (char_void == '\n' || char_void == 0x0C) {
             return num_read;
         }
 
@@ -149,7 +150,7 @@ int tty_write(struct oft_entry *entry, const char *buffer, size_t count) {
 
     ssize_t num_written = 0;
     while(num_written < count) {
-        uart_putc(*buffer);
+        tty_gui_write_char(*buffer);
         buffer++;
         num_written++;
     }
@@ -176,17 +177,22 @@ void tty_send_input(int minor, const char *buffer, size_t count) {
     while (count > 0) {
         char to_write = *buffer;
         if (*buffer == 0x03) {
-            s_kill(SIGINT, -tty_state.devices[minor]->fg_pgid);
+            s_kill(-tty_state.devices[minor]->fg_pgid, SIGINT);
             tty_write(NULL, "^C", 2);
             to_write = 0x04;
         } else if (*buffer == 0x1A) {
-            s_kill(SIGTSTP, -tty_state.devices[minor]->fg_pgid);
+            s_kill(-tty_state.devices[minor]->fg_pgid, SIGTSTP);
             tty_write(NULL, "^Z", 2);
             to_write = 0;
         } else if (*buffer == 0x7F) {
-            remove_back_ring_buffer(&tty_state.devices[minor]->rx);
+            bool wrote = remove_back_ring_buffer(&tty_state.devices[minor]->rx);
+            if (!wrote) {
+                return;
+            }
             tty_write(NULL, "\b \b", 3);
             to_write = 0;
+        } else if (*buffer == 0x0C) {
+            to_write = 0x0C;
         } else if (*buffer != 0x04){
             tty_write(NULL, buffer, 1);
         }
@@ -198,7 +204,7 @@ void tty_send_input(int minor, const char *buffer, size_t count) {
             }
         }
 
-        if (*buffer == 0x04 || *buffer == '\n') {
+        if (to_write == 0x04 || to_write == 0x0C || *buffer == '\n') {
             wake_up_readers(minor);
         }
 

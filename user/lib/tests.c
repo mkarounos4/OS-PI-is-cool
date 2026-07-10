@@ -100,7 +100,7 @@ static void *process_1(void *args) {
 
     while (1) {
         pid_t cleaned = waitpid(-1, NULL, WUNTRACED);
-        if (cleaned == ECHILD) {
+        if (cleaned == -ECHILD) {
             break;
         }
         putstr("[P1] GOT UPDATE FROM: ");

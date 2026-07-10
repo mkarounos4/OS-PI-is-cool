@@ -21,9 +21,10 @@ void prepare_child_process(struct parsed_command *parsed_cmd);
 void start_fg_job(job *newJob);
 void execute_commands(struct parsed_command *parsed_cmd, char *cmd);
 void exec_shell_command(char **argv);
-int handle_job_builtins(struct parsed_command *parsed_cmd);
+int handle_builtins(struct parsed_command *parsed_cmd);
 char *get_input(int *nextAddNewLine);
 void print_status_updates();
+void print_prompt();
 
 int main(int argc, char **argv) {
     (void)argc;
@@ -116,6 +117,32 @@ void close_pipe(int *pipe){
     close(pipe[1]);
 }
 
+static const char *cwd_basename(const char *cwd) {
+    const char *last = cwd;
+
+    if (cwd[0] == '/' && cwd[1] == '\0') {
+        return cwd;
+    }
+
+    for (size_t i = 0; cwd[i] != '\0'; i++) {
+        if (cwd[i] == '/' && cwd[i + 1] != '\0') {
+            last = cwd + i + 1;
+        }
+    }
+
+    return last;
+}
+
+void print_prompt() {
+    char cwd[256];
+
+    if (getcwd(cwd, sizeof(cwd)) == cwd) {
+        printf("%s $ ", cwd_basename(cwd));
+    } else {
+        printf("$ ");
+    }
+}
+
 void prompt() {
     while (1) {
         // Wait on children processes
@@ -125,8 +152,7 @@ void prompt() {
 		print_status_updates();
 
         // Write prompt
-        const char *prompt_text= "$ ";
-        write(1, prompt_text, strlen(prompt_text));
+        print_prompt();
      
 		// Read shell input
         int nextAddNewLine;
@@ -212,6 +238,21 @@ char *get_input(int *nextAddNewLine) {
 
         // Add terminating null
         buffer[num_read] = '\0';
+
+        for (int i = 0; i < num_read; i++) {
+            if (buffer[i] == '\f') {
+                buffer[i] = '\0';
+                write(1, "\f", 1);
+                print_prompt();
+                write(1, cmd, strlen(cmd));
+                buffer = cmd + strlen(cmd);
+                num_read = 0;
+                break;
+            }
+        }
+        if (num_read == 0) {
+            continue;
+        }
 
         // Handle partially full buffer
         if (num_read < BUF_SIZE) {
@@ -306,7 +347,7 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
     }
 
 	// Handle jobs, bg, and fg if applicable
-    if (parsed_cmd->num_commands == 1 && handle_job_builtins(parsed_cmd) == 1) {
+    if (parsed_cmd->num_commands == 1 && handle_builtins(parsed_cmd) == 1) {
         free(parsed_cmd);
         return;
     }
@@ -541,7 +582,7 @@ void start_fg_job(job *newJob) {
     tcsetpgrp(STDIN_FILENO, shell_pgid);
 }
 
-int handle_job_builtins(struct parsed_command *parsed_cmd) {
+int handle_builtins(struct parsed_command *parsed_cmd) {
 	// For all jobs, print relevant information
     if (strcmp(parsed_cmd->commands[0][0], "jobs") == 0) {
         for (size_t i = 0; i < vec_len(&background_jobs); i++) {
@@ -603,6 +644,31 @@ int handle_job_builtins(struct parsed_command *parsed_cmd) {
         vec_remove_job_by_id(&stopped_background_jobs, job_to_continue->id);
         start_fg_job(job_to_continue);
 
+        return 1;
+    }
+
+    if (strcmp(parsed_cmd->commands[0][0], "cd") == 0) {
+        if (parsed_cmd->commands[0][1] == NULL) {
+            print_errno("cd", "usage: cd <dir>", -EINVAL);
+            return 1;
+        }
+
+        int err = cd(parsed_cmd->commands[0][1]);
+        if (err < 0) {
+            print_errno("cd", parsed_cmd->commands[0][1], err);
+        }
+        return 1;
+    }
+
+    if (strcmp(parsed_cmd->commands[0][0], "pwd") == 0) {
+        char buf[256];
+        getcwd(buf, sizeof(buf));
+        printf("%s\n", buf);
+        return 1;
+    }
+
+    if (strcmp(parsed_cmd->commands[0][0], "clear") == 0) {
+        write(1, "\f", 1);
         return 1;
     }
 

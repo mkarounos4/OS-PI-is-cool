@@ -6,6 +6,7 @@
 #include "inodes.h"
 #include "fs/caches/inode_cache.h"
 #include "kapi.h"
+#include "scheduler.h"
 #include "user_bins.h"
 
 #define FS_MOUNT_BLOCK_BUFFER_SIZE 4096
@@ -13,7 +14,6 @@
 static int is_mounted = 0;
 static int bytes_per_block = 0;
 static int num_table_blocks = 0;
-static ino_id_t curr_dir = 1;
 static uint64_t fs_base_block = 0;
 static uint64_t fs_block_count = 0;
 static uint32_t total_fs_blocks = 0;
@@ -86,7 +86,6 @@ static err_t seed_user_bins(void) {
 
 static err_t seed_user_bins_for_mkfs(void) {
     is_mounted = 1;
-    curr_dir = ROOT_INO;
 
     err_t err = initialize_oft();
     if (err == SUCCESS) {
@@ -95,7 +94,6 @@ static err_t seed_user_bins_for_mkfs(void) {
 
     err_t cleanup_err = empty_oft();
     is_mounted = 0;
-    curr_dir = ROOT_INO;
 
     err_t inode_err = unmount_inode();
     err_t cache_err = lru_cache_empty();
@@ -520,7 +518,6 @@ err_t mkfs(int inode_table_blocks, int block_size_config) {
         return INVALID_ARGS;
     }
 
-    curr_dir = 1;
     err = lru_cache_empty();
     if (err != SUCCESS) {
         return err;
@@ -605,13 +602,7 @@ err_t mount(void) {
         return err_code;
     }
 
-    curr_dir = superblock->root_inode_id;
     is_mounted = 1;
-    if (get_inode_from_cache(curr_dir) == NULL) {
-        is_mounted = 0;
-        unmount_inode();
-        return FILE_READ_ERROR;
-    }
     err_code = initialize_oft();
     if (err_code != SUCCESS) {
         is_mounted = 0;
@@ -643,7 +634,6 @@ err_t unmount() {
     }
 
     is_mounted = 0;
-    curr_dir = ROOT_INO;
 
     return SUCCESS;
 }
@@ -952,11 +942,9 @@ int get_is_mounted() {
 }
 
 ino_id_t get_curr_dir() {
-    return curr_dir;
+    return get_curr_process()->cwd;
 }
 
 void set_curr_dir(ino_id_t id) {
-    remove_ref_from_cache(curr_dir);
-    curr_dir = id;
-    get_inode_from_cache(id);
+    get_curr_process()->cwd = id;
 }

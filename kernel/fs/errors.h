@@ -27,3 +27,4 @@
 typedef int err_t;
 
 void print_error(err_t error);
+long fs_err_to_sys_errno(long error);

@@ -1,5 +1,6 @@
 #include <stdint.h>
 
+#include "gui/tty_gui.h"
 #include "irq/irq.h"
 #include "scheduler/scheduler.h"
 #include "timer/timer.h"
@@ -19,6 +20,7 @@
 #include "fs/cmds.h"
 #include "fs/kapi.h"
 #include "fan/fan.h"
+#include "gui/gui.h"
 
 #define FS_DEFAULT_INODE_TABLE_BLOCKS 8
 #define FS_DEFAULT_BLOCK_SIZE_CONFIG 1
@@ -27,6 +29,8 @@
 void kernel_main(void) {
     uart_init();
     printf("\nAArch64 bare-metal kernel entered\n");
+    gui_framebuffer_init();
+    init_tty_gui();
     fan_init();
 
     exceptions_init();

@@ -6,6 +6,8 @@
 #include "elf_loader.h"
 #include "memory/page_table/page_table.h"
 #include "scheduler/scheduler.h"
+#include "pipe/pipe.h"
+#include "string.h"
 
 int default_read(struct oft_entry *entry, char *buf, size_t n);
 int default_write(struct oft_entry *entry, const char *buf, size_t n);
@@ -19,6 +21,17 @@ static struct file_operations default_ops = (struct file_operations) {
 
 struct file_operations *get_default_fops() {
     return &default_ops;
+}
+
+static void repair_default_fops(struct oft_entry *entry) {
+    if (entry == NULL || entry->inode == NULL) {
+        return;
+    }
+
+    uint8_t type = entry->inode->inode.metadata.type;
+    if (type == DIRECTORY_TYPE || type == FILE_TYPE || type == SYMLINK_TYPE) {
+        entry->inode->inode.metadata.fops = get_default_fops();
+    }
 }
 
 int k_open(const char *fname, int mode) {
@@ -83,6 +96,7 @@ int k_open(const char *fname, int mode) {
         return err;
     }
 
+    repair_default_fops(entry);
     if (entry->inode->inode.metadata.fops != NULL &&
         entry->inode->inode.metadata.fops->open != NULL) {
         err = entry->inode->inode.metadata.fops->open(entry);
@@ -100,6 +114,7 @@ int k_close(struct oft_entry *entry) {
         return FS_NOT_MOUNTED;
     }
 
+    repair_default_fops(entry);
     if (entry->inode->inode.metadata.fops != NULL &&
         entry->inode->inode.metadata.fops->close != NULL) {
         err_t err = entry->inode->inode.metadata.fops->close(entry);
@@ -121,6 +136,7 @@ int k_read(struct oft_entry *entry, char *buf, size_t n) {
         return INVALID_PERMISSIONS;
     }
 
+    repair_default_fops(entry);
     if (entry->inode->inode.metadata.fops != NULL) {
         return entry->inode->inode.metadata.fops->read(entry, buf, n);
     }
@@ -210,6 +226,7 @@ int k_file_add_reference(int fd) {
         return err;
     }
 
+    repair_default_fops(entry);
     if (entry->inode->inode.metadata.fops != NULL &&
         entry->inode->inode.metadata.fops->open != NULL) {
         return entry->inode->inode.metadata.fops->open(entry);
@@ -229,7 +246,8 @@ int k_write(struct oft_entry *entry, const char *buf, size_t n) {
         return INVALID_PERMISSIONS;
     }
 
-    if (entry->inode->inode.metadata.fops != NULL) {
+    repair_default_fops(entry);
+    if (entry->inode->inode.metadata.fops != NULL && entry->inode->inode.metadata.fops->write != NULL) {
         return entry->inode->inode.metadata.fops->write(entry, buf, n);
     }
     return 0;
@@ -529,6 +547,62 @@ int k_check_if_exists(const char *f_name) {
 
     struct fs_dirent dir;
     return !get_dirent_by_path(f_name, &dir, 0, NULL, NULL);
+}
+
+static int k_resolve_path_any(const char *path, struct fs_dirent *dirent) {
+    if (path == NULL || dirent == NULL || path[0] == '\0') {
+        return INVALID_ARGS;
+    }
+
+    if (strcmp(path, "/") == 0) {
+        dirent->ino_id = ROOT_INO;
+        strcpy(dirent->name, "/");
+        return SUCCESS;
+    }
+
+    err_t err = get_dirent_by_path(path, dirent, 0, NULL, NULL);
+    if (err == SUCCESS) {
+        return SUCCESS;
+    }
+
+    err = get_dirent_by_path(path, dirent, 1, NULL, NULL);
+    if (err == SUCCESS) {
+        return SUCCESS;
+    }
+
+    return FILE_NOT_FOUND;
+}
+
+int k_stat(const char *path, struct fs_stat_st *stat) {
+    if (!get_is_mounted()) {
+        return FS_NOT_MOUNTED;
+    }
+    if (stat == NULL) {
+        return INVALID_ARGS;
+    }
+
+    struct fs_dirent dirent;
+    err_t err = k_resolve_path_any(path, &dirent);
+    if (err != SUCCESS) {
+        return err;
+    }
+
+    attributes_t metadata;
+    err = get_inode_metadata(dirent.ino_id, &metadata);
+    if (err != SUCCESS) {
+        return err;
+    }
+
+    stat->ino_id = dirent.ino_id;
+    stat->links_count = metadata.i_links_count;
+    stat->type = metadata.type;
+    stat->perm = metadata.perm;
+    stat->size = metadata.i_size;
+    stat->blocks = metadata.i_blocks;
+    stat->mtime = metadata.mtime;
+    stat->rdev_major = metadata.i_rdev.major;
+    stat->rdev_minor = metadata.i_rdev.minor;
+    return SUCCESS;
 }
 
 int k_make_directory(char *f_path) {
