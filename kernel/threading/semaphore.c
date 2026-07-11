@@ -1,0 +1,110 @@
+#include "threading/thread.h"
+#include "scheduler/scheduler.h"
+#include "data-structs/vec.h"
+
+static void wake_thread(tid_t tid)
+{
+    thread_t *current = get_curr_thread();
+    if (current == NULL)
+    {
+        return;
+    }
+
+    thread_t *thread = thread_get_by_tid(current->pcb, tid);
+    if (thread == NULL) 
+    {
+        return;
+    }
+
+    if (thread->state == THREAD_BLOCKED)
+    {
+        thread->state = THREAD_READY;
+        add_thread_to_scheduler(thread, current->pcb);
+    }
+}
+
+int sem_init(semaphore_t *sem, int initial_value)
+{
+    if (sem == NULL || initial_value < 0)
+    {
+        return -1;
+    }
+
+    sem->count = initial_value;
+    sem->waiting_threads = vec_new(2, NULL);
+
+    return 0;
+}
+
+int sem_wait(semaphore_t *sem)
+{
+    if (sem == NULL) 
+    {
+        return -1;
+    }
+
+    sem->count--;
+
+    if (sem->count >= 0) 
+    {
+        return 0;
+    }
+
+    thread_t *current = get_curr_thread();
+    if (current == NULL)
+    {
+        return -1;
+    }
+
+    vec_push_back(&sem->waiting_threads, (ptr_t *)current->tid);
+
+    current->state = THREAD_BLOCKED;
+
+    schedule_yield();
+
+    return 0;
+}
+
+int sem_post(semaphore_t *sem)
+{
+    if (sem == NULL)
+    {
+        return -1;
+    }
+
+    sem->count++;
+
+    if (sem->count <= 0)
+    {
+        if (vec_len(&sem->waiting_threads) > 0)
+        {
+            ptr_t tid;
+
+            vec_get(&sem->waiting_threads, 0, &tid);
+            vec_remove(&sem->waiting_threads, 0);
+
+            wake_thread((tid_t)tid);
+        }
+    }
+
+    return 0;
+}
+
+int sem_destroy(semaphore_t *sem) 
+{
+    if (sem == NULL) 
+    {
+        return -1;
+    }
+
+    if (vec_len(&sem->waiting_threads) != 0) 
+    {
+        return -1;
+    }
+
+    vec_free(&sem->waiting_threads);
+
+    sem->count = 0;
+
+    return 0;
+}

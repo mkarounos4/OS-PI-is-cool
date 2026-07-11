@@ -10,13 +10,15 @@ typedef int32_t tid_t;
 #define MAX_THREADS_PER_PROCESS 16
 #define THREAD_STACK_SIZE 4096u
 
+typedef struct pcb_st pcb_t;
+
 // thread states
 enum thread_state {
     THREAD_UNUSED,
     THREAD_READY,
     THREAD_RUNNING,
-    THREAD_BLOCKED,
-    THREAD_TERMINATED
+    THREAD_STOPPED,
+    THREAD_ZOMBIE
 };
 
 // thread control block
@@ -24,6 +26,7 @@ typedef struct thread_st {
     tid_t tid;
     enum thread_state state;
     struct cpu_context ctx;
+    struct pcb_st *pcb;
     uint8_t *kernel_stack;
     uint64_t *user_stack_va;
     void *return_value;
@@ -31,7 +34,6 @@ typedef struct thread_st {
     Vec waiting_on_this;
 } thread_t;
 
-typedef struct pcb_st pcb_t;
 tid_t thread_create(pcb_t *parent_pcb, void *(*start_routine)(void*), void *arg);
 void thread_exit(void *retval) __attribute__((noreturn));
 int thread_join(tid_t tid, void **retval);

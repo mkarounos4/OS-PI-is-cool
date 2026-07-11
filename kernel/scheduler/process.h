@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 
+#include "threading/thread.h"
 #include "data-structs/vec.h"
 #include "traps/traps.h"
 #include "fs/kapi.h"
@@ -41,19 +42,6 @@ enum process_state {
 
 #define MAX_THREADS_PER_PROCESS 16
 
-typedef struct thread_st {
-    tid_t tid;
-    enum thread_state state;
-    struct cpu_context ctx;
-    uint8_t *kernel_stack;
-    uint64_t *user_stack_va;
-    void *return_value;
-    uint8_t is_joinable;
-    Vec waiting_on_this;
-} thread_t;
-
-// In pcb_t, add:
-
 typedef struct pcb_st {
     pid_t pid; 
     pid_t ppid; // Parent pid
@@ -67,6 +55,8 @@ typedef struct pcb_st {
     uint32_t blocked_until;
     void *(*entry_func)(void*);
     void *args;
+
+    struct cpu_context ctx;
 
     // Thread parameters
     thread_t threads[MAX_THREADS_PER_PROCESS];
