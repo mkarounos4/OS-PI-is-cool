@@ -6,15 +6,6 @@
 #define THREAD_STACK_SIZE 4096u
 #define THREAD_COUNT      4u
 
-// thread states
-enum thread_state {
-    THREAD_UNUSED,
-    THREAD_READY,
-    THREAD_RUNNING,
-    THREAD_STOPPED,
-    THREAD_ZOMBIE
-};
-
 // Initializes scheduler state and the initial two kernel threads.
 void scheduler_init(void);
 
@@ -22,6 +13,10 @@ void scheduler_init(void);
 void scheduler_start(void) __attribute__((noreturn));
 
 void add_task_to_scheduler(pcb_t *pcb);
+
+/* Threading */
+void add_thread_to_scheduler(thread_t *thread, pcb_t *pcb);
+thread_t *get_next_thread(void);
 
 pcb_t *get_curr_process();
 

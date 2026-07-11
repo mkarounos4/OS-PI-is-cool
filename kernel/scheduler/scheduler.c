@@ -17,6 +17,10 @@
 static pcb_t *curr_proc;
 static uint64_t curr_tick;
 
+static thread_t *curr_thread;
+// priority queues for threads
+static Vec thread_ready_queues[3];
+
 static struct cpu_context boot_ctx;
 static struct cpu_context idle_ctx;
 static volatile int ready_to_schedule = 0;
@@ -142,71 +146,60 @@ static void __attribute__((unused)) scheduler_print_tick(unsigned int tid1, unsi
 // Timer interrupt handler which performs actual scheduling
 void scheduler_tick(void *ctx) {
     (void)ctx;
-
-    struct cpu_context *old_ctx;
-    struct cpu_context *new_ctx;
-
-    // Get previous ctx
-    if (curr_proc != NULL) {
-        old_ctx = &curr_proc->ctx;
-    } else {
-        // if idle task, ignore ctx
-        old_ctx = &idle_ctx;
-    }
-
-    if (curr_proc != NULL) {
-        if (curr_proc->state == PROC_RUNNING_STATE) {
-            curr_proc->state = PROC_READY_STATE;
-            add_task_to_scheduler(curr_proc);
-        }
-    }
-
-    // idle if no tasks
-    curr_proc = get_next_task();
-    // Load new proc heap to malloc
-    if (curr_proc == NULL) {
-        new_ctx = &idle_ctx;
-    } else {
-        new_ctx = &curr_proc->ctx;
-
-        // Update new thread data
-        curr_proc->state = PROC_RUNNING_STATE;
-    }
-
-    // If next thread exists, run it
-    // scheduler_print_tick(old_pid, new_pid);
     
-    // Setup next scheduler interrupt
-    timer_schedule_interrupt_ms(SCHEDULER_QUANTUM_MS, set_ready_to_schedule, 0);
-
-    // context switch to next process
-    context_switch(old_ctx, new_ctx);
-
-    // Handle queue'd signals
-    if (curr_proc != NULL) {
-        if ((curr_proc->pending_signals & (1 << SIGKILL)) &&
-            curr_proc->sigactions[SIGKILL].sa_handler == SIG_DFL) {
-            curr_proc->pending_signals &= ~(1 << SIGKILL);
-            terminate_process(curr_proc);
-        } else if ((curr_proc->pending_signals & (1 << SIGSTOP)) &&
-                   curr_proc->sigactions[SIGSTOP].sa_handler == SIG_DFL) {
-            curr_proc->pending_signals &= ~(1 << SIGSTOP);
-            stop_process(curr_proc);
-        }
-
-        int curr = 0;
-        while (curr_proc->pending_signals >> curr) {
-            if ((curr_proc->pending_signals & (1 << curr)) && !(curr_proc->mask & (1 << curr))) {
-                curr_proc->pending_signals &= ~(1 << curr);
-                curr_proc->sigactions[curr].sa_handler(curr);
-            }
-            curr++;
+    // Save current thread context
+    if (curr_thread != NULL) {
+        if (curr_thread->state == THREAD_RUNNING) {
+            curr_thread->state = THREAD_READY;
+            add_thread_to_scheduler(curr_thread, curr_thread->pcb);
         }
     }
+
+    // Get next thread from any process
+    thread_t *next_thread = get_next_thread();
+
+    if (next_thread == NULL) {
+        // Run idle
+        context_switch(curr_thread ? &curr_thread->ctx : &idle_ctx, &idle_ctx);
+        return;
+    }
+
+    struct cpu_context *old_ctx = curr_thread ? &curr_thread->ctx : &idle_ctx;
+    curr_thread = next_thread;
+    next_thread->state = THREAD_RUNNING;
+
+    timer_schedule_interrupt_ms(SCHEDULER_QUANTUM_MS, set_ready_to_schedule, 0);
+    context_switch(old_ctx, &next_thread->ctx);
 }
 
 pcb_t *get_curr_process() {
     return curr_proc;
+}
+
+void add_thread_to_scheduler(thread_t *thread, pcb_t *pcb) {
+    if (thread == NULL) {
+        return;
+    }
+    vec_insert(&thread_ready_queues[pcb->priority], 0, (ptr_t*)thread);
+}
+
+thread_t *get_next_thread(void) {
+    for (int i = 0; i < 3; i++) {
+        if (!vec_is_empty(&thread_ready_queues[curr_pri])) {
+            ptr_t to_return;
+            vec_pop_back(&thread_ready_queues[curr_pri], &to_return);
+            thread_t *thread = (thread_t*)to_return;
+
+            if (thread->state != THREAD_READY) {
+                return get_next_thread();
+            }
+
+            // Update priority counter
+            return thread;
+        }
+        curr_pri = (curr_pri + 1) % 3;
+    }
+    return NULL;
 }
 
 void schedule_yield() {
