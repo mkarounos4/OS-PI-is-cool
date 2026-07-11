@@ -16,7 +16,7 @@ void add_task_to_scheduler(pcb_t *pcb);
 
 /* Threading */
 void add_thread_to_scheduler(thread_t *thread, pcb_t *pcb);
-thread_t *get_next_thread();
+thread_t *get_next_thread(void);
 
 pcb_t *get_curr_process();
 

@@ -164,11 +164,6 @@ void scheduler_tick(void *ctx) {
         return;
     }
 
-    // If switching to thread in different process, update MMU
-    if (curr_thread == NULL || curr_thread->pcb != next_thread->pcb) {
-        mmu_switch_address_space(next_thread->pcb->ctx.ttbr0_el1);
-    }
-
     struct cpu_context *old_ctx = curr_thread ? &curr_thread->ctx : &idle_ctx;
     curr_thread = next_thread;
     next_thread->state = THREAD_RUNNING;
@@ -192,11 +187,11 @@ void add_thread_to_scheduler(thread_t *thread, pcb_t *pcb) {
     vec_insert(&thread_ready_queues[pcb->priority], 0, (ptr_t*)thread);
 }
 
-static thread_t *get_next_thread(void) {
+thread_t *get_next_thread(void) {
     for (int i = 0; i < 3; i++) {
-        if (!vec_is_empty(&thread_ready_queues[curr_priority])) {
+        if (!vec_is_empty(&thread_ready_queues[curr_pri])) {
             ptr_t to_return;
-            vec_pop_back(&thread_ready_queues[curr_priority], &to_return);
+            vec_pop_back(&thread_ready_queues[curr_pri], &to_return);
             thread_t *thread = (thread_t*)to_return;
 
             if (thread->state != THREAD_READY) {
@@ -206,7 +201,7 @@ static thread_t *get_next_thread(void) {
             // Update priority counter
             return thread;
         }
-        curr_priority = (curr_priority + 1) % 3;
+        curr_pri = (curr_pri + 1) % 3;
     }
     return NULL;
 }
