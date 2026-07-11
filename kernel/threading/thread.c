@@ -74,7 +74,7 @@ void thread_exit(void *retval) {
     }
  
     thread->return_value = retval;
-    thread->state = THREAD_TERMINATED;
+    thread->state = THREAD_ZOMBIE;
  
     // wake up any waiting threads
     for (size_t i = 0; i < vec_len(&thread->waiting_on_this); i++) {
@@ -101,7 +101,7 @@ int thread_join(tid_t tid, void **retval) {
     }
  
     // thread already terminated -> get return value immediately
-    if (target->state == THREAD_TERMINATED) {
+    if (target->state == THREAD_ZOMBIE) {
         if (retval != NULL) {
             *retval = target->return_value;
         }
@@ -110,7 +110,7 @@ int thread_join(tid_t tid, void **retval) {
  
     // add current thread to target's waiting list
     vec_push_back(&target->waiting_on_this, (ptr_t*)current->tid);
-    current->state = THREAD_BLOCKED;
+    current->state = THREAD_STOPPED;
     schedule_yield();
  
     // get the return value on wake

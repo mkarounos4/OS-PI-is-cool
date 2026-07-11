@@ -1,3 +1,5 @@
+#pragma once
+
 #include <stdint.h>
 #include "traps/traps.h"
 #include "data-structs/vec.h"

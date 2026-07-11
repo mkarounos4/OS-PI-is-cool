@@ -16,7 +16,7 @@ static void wake_thread(tid_t tid)
         return;
     }
 
-    if (thread->state == THREAD_BLOCKED)
+    if (thread->state == THREAD_STOPPED)
     {
         thread->state = THREAD_READY;
         add_thread_to_scheduler(thread, current->pcb);
@@ -58,7 +58,7 @@ int cond_wait(condition_variable_t *cond, mutex_t *mutex)
 
     mutex_unlock(mutex);
 
-    current->state = THREAD_BLOCKED;
+    current->state = THREAD_STOPPED;
 
     schedule_yield();
 
@@ -80,9 +80,8 @@ int cond_signal(condition_variable_t *cond)
         return 0;
     }
 
-    ptr_t tid;
-    vec_get(&cond->waiting_threads, 0, &tid);
-    vec_remove(&cond->waiting_threads, 0);
+    ptr_t tid = vec_get(&cond->waiting_threads, 0);
+    vec_erase(&cond->waiting_threads, 0);
 
     wake_thread((tid_t)tid);
 
@@ -98,10 +97,8 @@ int cond_broadcast(condition_variable_t *cond)
 
     while (vec_len(&cond->waiting_threads) > 0)
     {
-        ptr_t tid;
-
-        vec_get(&cond->waiting_threads, 0, &tid);
-        vec_remove(&cond->waiting_threads, 0);
+        ptr_t tid = vec_get(&cond->waiting_threads, 0);
+        vec_erase(&cond->waiting_threads, 0);
 
         wake_thread((tid_t)tid);
     }
@@ -121,7 +118,7 @@ int cond_destroy(condition_variable_t *cond)
         return -1;
     }
 
-    vec_free(&cond->waiting_threads);
+    vec_clear(&cond->waiting_threads);
 
     cond->lock = NULL;
 

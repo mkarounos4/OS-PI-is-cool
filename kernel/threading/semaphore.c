@@ -16,7 +16,7 @@ static void wake_thread(tid_t tid)
         return;
     }
 
-    if (thread->state == THREAD_BLOCKED)
+    if (thread->state == THREAD_STOPPED)
     {
         thread->state = THREAD_READY;
         add_thread_to_scheduler(thread, current->pcb);
@@ -58,7 +58,7 @@ int sem_wait(semaphore_t *sem)
 
     vec_push_back(&sem->waiting_threads, (ptr_t *)current->tid);
 
-    current->state = THREAD_BLOCKED;
+    current->state = THREAD_STOPPED;
 
     schedule_yield();
 
@@ -78,10 +78,8 @@ int sem_post(semaphore_t *sem)
     {
         if (vec_len(&sem->waiting_threads) > 0)
         {
-            ptr_t tid;
-
-            vec_get(&sem->waiting_threads, 0, &tid);
-            vec_remove(&sem->waiting_threads, 0);
+            ptr_t tid = vec_get(&sem->waiting_threads, 0);
+            vec_erase(&sem->waiting_threads, 0);
 
             wake_thread((tid_t)tid);
         }
@@ -102,7 +100,7 @@ int sem_destroy(semaphore_t *sem)
         return -1;
     }
 
-    vec_free(&sem->waiting_threads);
+    vec_clear(&sem->waiting_threads);
 
     sem->count = 0;
 

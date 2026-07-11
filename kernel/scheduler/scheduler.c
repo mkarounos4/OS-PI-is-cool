@@ -176,10 +176,6 @@ pcb_t *get_curr_process() {
     return curr_proc;
 }
 
-thread_t *get_curr_thread(void) {
-    return curr_thread;
-}
-
 void add_thread_to_scheduler(thread_t *thread, pcb_t *pcb) {
     if (thread == NULL) {
         return;
