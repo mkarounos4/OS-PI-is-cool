@@ -53,13 +53,13 @@ ifeq ($(PLATFORM),rpi)
     CFLAGS += -DPLATFORM_RPI -DPLATFORM_RPI5 -mcpu=cortex-a76
     UART_SRC = kernel/uart/uart_rpi.c
     GUI_SRC = kernel/gui/gui_rpi.c
-    LINKER = linker_rpi.ld
+    LINKER = linker.ld
     TARGET = kernel8.img
 else ifeq ($(PLATFORM),qemu)
     CFLAGS += -DPLATFORM_QEMU -mcpu=cortex-a53
     UART_SRC = kernel/uart/uart_qemu.c
     GUI_SRC = kernel/gui/gui_qemu.c
-    LINKER = linker_rpi.ld
+    LINKER = linker.ld
     TARGET = kernel8.img
 else
     $(error Unknown PLATFORM '$(PLATFORM)'. Use 'rpi' or 'qemu')
