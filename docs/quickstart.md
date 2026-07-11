@@ -45,9 +45,9 @@ NOTE: If you already have the official RPI OS installed on this SD card, you may
 ### Step 1: Download QEMU
 
 ### Step 2: Make the project
-1. Clone this repo with `git clone <url i dont wanna copy it rn>`
+1. Clone this repo with `git clone git@github.com:mkarounos4/OS-PI-is-cool.git` (SSH)
 2. Run `make qemu` from the directory root
-3. 
+3. Once the terminal is started, keyboard input will be sent to qemu display
 
 # Rebuilding the project
 If you ever remove the kernel img files or want to make changes and rebuild the project, you will need to adhere to the following steps.
