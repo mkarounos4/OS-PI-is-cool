@@ -88,19 +88,24 @@ Shell:
 │   ├── scheduler                 -- Scheduler and process implementation
 │   ├── gui                       -- Graphical terminal GUI implementation
 │   ├── syscall                   -- System-call dispatch and general helpers
-│   └── fs                        -- Filesystem implementation (ext2 mock)
-│       ├── types.h
-│       ├── caches                  -- Cache implementations
-│       │   ├── inode_cache.c/h         -- Inode-cache implementation
-│       │   └── lru_cache.c/h           -- Least-recently-used block-cache implementation
-│       ├── dirs.c/h                -- Directory and directory-entry implementation
-│       ├── oft.c/h                 -- Open-file table implementation and helpers
-│       ├── elf_loader.c/h          -- ELF-loading helpers for userspace exec
-│       ├── inodes.c/h              -- Low-level inode implementation
-│       ├── kapi.c/h                -- Filesystem kernel API implementations and helpers
-│       ├── errors.c/h              -- Filesystem error-handling types
-│       ├── disk.c/h                -- Disk wrappers around lower-level inode functions
-│       └── cmds.c/h                -- High-level filesystem commands called by syscalls
+│   ├── fs                        -- Filesystem implementation (ext2 mock)
+│   |   ├── types.h
+│   |   ├── caches                  -- Cache implementations
+│   |   │   ├── inode_cache.c/h         -- Inode-cache implementation
+│   |   │   └── lru_cache.c/h           -- Least-recently-used block-cache implementation
+│   |   ├── dirs.c/h                -- Directory and directory-entry implementation
+│   |   ├── oft.c/h                 -- Open-file table implementation and helpers
+│   |   ├── elf_loader.c/h          -- ELF-loading helpers for userspace exec
+│   |   ├── inodes.c/h              -- Low-level inode implementation
+│   |   ├── kapi.c/h                -- Filesystem kernel API implementations and helpers
+│   |   ├── errors.c/h              -- Filesystem error-handling types
+│   |   ├── disk.c/h                -- Disk wrappers around lower-level inode functions
+│   |   └── cmds.c/h                -- High-level filesystem commands called by syscalls
+|   └── threading
+|   |   ├── thread.c/h              -- Thread objects and helpers
+|   |   ├── cond_var.c              -- Condition variable implementation
+|   |   ├── mutex.c                 -- Mutex implementation
+|   |   └── semaphore.c             -- Semaphore implementation
 └── docs                       -- Markdown documentation
 ```
 
