@@ -115,6 +115,13 @@ static void clear_screen(void) {
     toggle_cursor();
 }
 
+static void write_tab(void) {
+    int target_col = ((cursor_col / 8) + 1) * 8;
+    do {
+        tty_gui_write_char(' ');
+    } while (cursor_col != 0 && cursor_col < target_col);
+}
+
 void tty_gui_write_char(const char c) {
     if (c == '\n') {
         cursor_advance_row();
@@ -122,6 +129,8 @@ void tty_gui_write_char(const char c) {
         backtrack_cursor();
     } else if (c == '\f') {
         clear_screen();
+    } else if (c == '\t') {
+        write_tab();
     } else {
         toggle_cursor();
         uint8_t *char_format = get_ascii_char_font(c);
@@ -133,4 +142,20 @@ void tty_gui_write_char(const char c) {
         advance_cursor();
         toggle_cursor();
     }
+}
+
+int tty_gui_get_rows(void) {
+    return MAX_ROWS;
+}
+
+int tty_gui_get_cols(void) {
+    return MAX_COLS;
+}
+
+int tty_gui_get_cursor_row(void) {
+    return cursor_row;
+}
+
+int tty_gui_get_cursor_col(void) {
+    return cursor_col;
 }

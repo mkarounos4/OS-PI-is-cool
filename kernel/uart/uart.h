@@ -2,6 +2,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdarg.h>
 
 #define UART_KERNEL_VA_BASE UINT64_C(0xffff000000000000)
 
@@ -37,5 +38,6 @@ void uart_raw_putc(const char c);
 void uart_raw_puts(const char *s);
 
 void printf(const char *fmt, ...);
+int vsnprintf(char *buf, size_t size, const char *fmt, va_list args);
 int snprintf(char *buf, size_t size, const char *fmt, ...);
 int fprintf(int fd, const char *fmt, ...);

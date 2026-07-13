@@ -42,6 +42,11 @@ struct fs_dirent {
     /** @brief Padding reserved for future fields; keep struct size stable. */
     uint8_t reserved[26];
 };
+typedef struct fs_dirent fs_dirent;
+
+struct dir_st {
+    uint32_t offset;
+};
 
 /**
  * @brief Look up a dirent by name within the given directory and
@@ -74,6 +79,10 @@ err_t get_dirent_by_f_name(const char* f_name, uint8_t file_type, struct fs_dire
  * not exist, or a negative error code on failure.
  */
 err_t get_dirent_by_path(const char* f_path, struct fs_dirent* dirent, int file_type, ino_id_t *parent_dir, char **actual_name);
+
+err_t opendir(ino_id_t ino);
+err_t closedir(ino_id_t ino);
+err_t readdir(ino_id_t ino, fs_dirent *out);
 
 /**
  * @brief Write a formatted listing of the dirents in the directory

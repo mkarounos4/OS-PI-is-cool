@@ -186,3 +186,4 @@ int k_exec(const char *path, char *const argv[], struct trap_frame *frame,
 int k_exec_process(int pid, const char *path, char *const argv[]);
 
 struct file_operations *get_default_fops();
+struct file_operations *get_default_dir_fops();

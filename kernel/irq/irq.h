@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stddef.h>
 
 #include "traps/traps.h"
 
@@ -29,3 +30,4 @@ unsigned irq_get_depth(void);
 
 // Reads GIC identity registers
 void irq_get_controller_info(uint32_t *typer, uint32_t *iidr);
+int irq_format_proc(char *buf, size_t size);

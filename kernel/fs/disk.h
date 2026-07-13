@@ -10,6 +10,7 @@
 #define SYMLINK_TYPE 2
 #define CHAR_DRIVER_TYPE 3
 #define PIPE_TYPE 4
+#define PROC_TYPE 5
 
 #include "oft.h"
 #include "fs/caches/lru_cache.h"

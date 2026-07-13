@@ -1,5 +1,6 @@
 #include "dirs.h"
 #include "devices.h"
+#include "procfs.h"
 
 err_t add_dirent(const char* name, ino_id_t ino_id, ino_id_t curr_dir) {
     struct fs_dirent *dir = kmalloc(get_bytes_per_block());
@@ -101,7 +102,9 @@ err_t add_dirent_by_path(char *f_path, int file_type, int perm) {
     }
 
     block_no_t block;
-    err_t err = add_new_file_with_id(&block, file_type, perm, get_default_fops());
+    struct file_operations *fops = file_type == DIRECTORY_TYPE ?
+        get_default_dir_fops() : get_default_fops();
+    err_t err = add_new_file_with_id(&block, file_type, perm, fops);
     if (err) {
         kfree(f_path_mut_root);
         return err;
@@ -193,8 +196,13 @@ err_t get_dirent_by_path(const char* f_path, struct fs_dirent* dirent, int is_di
     return SUCCESS;
 }
 
-err_t get_dirent_by_f_name(const char* f_name, uint8_t is_dir_type, struct fs_dirent* dirent, int curr_dir) {
+int dir_lookup(const char* f_name, uint8_t is_dir_type,
+               struct fs_dirent* dirent, int curr_dir) {
     struct fs_dirent *dir = kmalloc(get_bytes_per_block());
+    if (dir == NULL) {
+        return NO_FREE_BLOCKS;
+    }
+
     block_no_t curr_block_no = get_first_block(curr_dir);
     int index = 0;
     while (curr_block_no != 0) {
@@ -229,7 +237,33 @@ err_t get_dirent_by_f_name(const char* f_name, uint8_t is_dir_type, struct fs_di
         } 
         curr_block_no = get_ith_block_of_file_by_id(curr_dir, ++index);
     }
+    kfree(dir);
     return FILE_NOT_FOUND;
+}
+
+err_t get_dirent_by_f_name(const char* f_name, uint8_t is_dir_type, struct fs_dirent* dirent, int curr_dir) {
+    attributes_t metadata;
+    err_t err = get_inode_metadata(curr_dir, &metadata);
+    if (err != SUCCESS) {
+        return err;
+    }
+    if (metadata.type != DIRECTORY_TYPE) {
+        return INVALID_ARGS;
+    }
+
+    if (metadata.fops == NULL) {
+        metadata.fops = get_default_dir_fops();
+        err = set_inode_metadata(curr_dir, &metadata);
+        if (err != SUCCESS) {
+            return err;
+        }
+    }
+
+    if (metadata.fops->lookup == NULL) {
+        return INVALID_ARGS;
+    }
+
+    return metadata.fops->lookup(f_name, is_dir_type, dirent, curr_dir);
 }
 
 void format_chmod_str(int perm, char res[4]) {
@@ -239,44 +273,234 @@ void format_chmod_str(int perm, char res[4]) {
     res[3] = '\0';
 }
 
-err_t list_dirents(ino_id_t ino_id, int out_fd) {
-    struct fs_dirent *dir = kmalloc(get_bytes_per_block());
-    block_no_t curr_block_no = get_first_block(ino_id);
-    int index = 0;
+err_t opendir(ino_id_t ino) {
+    attributes_t metadata;
+    err_t err = get_inode_metadata(ino, &metadata);
+    if (err != SUCCESS) {
+        return err;
+    }
+    if (metadata.type != DIRECTORY_TYPE) {
+        return INVALID_ARGS;
+    }
 
-    while (curr_block_no != 0) {
-        int err = read_block(dir, curr_block_no);
-        if (err != 0) {
-            kfree(dir);
+    if (metadata.i_dir == NULL) {
+        metadata.i_dir = kmalloc(sizeof(struct dir_st));
+        if (metadata.i_dir == NULL) {
+            return NO_FREE_BLOCKS;
+        }
+    }
+
+    metadata.i_dir->offset = 0;
+    return set_inode_metadata(ino, &metadata);
+}
+
+int dir_open(struct oft_entry *entry) {
+    if (entry == NULL) {
+        return INVALID_ARGS;
+    }
+
+    return opendir(entry->ino_id);
+}
+
+err_t closedir(ino_id_t ino) {
+    attributes_t metadata;
+    err_t err = get_inode_metadata(ino, &metadata);
+    if (err != SUCCESS) {
+        return err;
+    }
+
+    if (metadata.i_dir != NULL) {
+        kfree(metadata.i_dir);
+        metadata.i_dir = NULL;
+    }
+
+    return set_inode_metadata(ino, &metadata);
+}
+
+int dir_close(struct oft_entry *entry) {
+    if (entry == NULL) {
+        return INVALID_ARGS;
+    }
+
+    return closedir(entry->ino_id);
+}
+
+err_t readdir(ino_id_t ino, fs_dirent *out) {
+    if (out == NULL) {
+        return INVALID_ARGS;
+    }
+
+    attributes_t metadata;
+    err_t err = get_inode_metadata(ino, &metadata);
+    if (err != SUCCESS) {
+        return err;
+    }
+    if (metadata.type != DIRECTORY_TYPE) {
+        return INVALID_ARGS;
+    }
+    if (metadata.i_dir == NULL) {
+        err = opendir(ino);
+        if (err != SUCCESS) {
+            return err;
+        }
+        err = get_inode_metadata(ino, &metadata);
+        if (err != SUCCESS) {
+            return err;
+        }
+    }
+
+    int entries_per_block = get_bytes_per_block() / (int)sizeof(struct fs_dirent);
+    if (entries_per_block <= 0) {
+        return INVALID_ARGS;
+    }
+
+    uint32_t offset = metadata.i_dir->offset;
+    unsigned int block_index = offset / (uint32_t)entries_per_block;
+    int entry_index = (int)(offset % (uint32_t)entries_per_block);
+    block_no_t block_no = get_ith_block_of_file_by_id(ino, block_index);
+    if (block_no == 0) {
+        return FILE_NOT_FOUND;
+    }
+
+    struct fs_dirent *dir = kmalloc(get_bytes_per_block());
+    if (dir == NULL) {
+        return NO_FREE_BLOCKS;
+    }
+
+    err = read_block(dir, block_no);
+    if (err != SUCCESS) {
+        kfree(dir);
+        return err;
+    }
+
+    if (!strcmp(dir[entry_index].name, "\0")) {
+        kfree(dir);
+        return FILE_NOT_FOUND;
+    }
+
+    *out = dir[entry_index];
+    kfree(dir);
+
+    metadata.i_dir->offset++;
+    return set_inode_metadata(ino, &metadata);
+}
+
+int dir_readdir(struct oft_entry *dir, struct fs_dirent *out) {
+    if (dir == NULL) {
+        return INVALID_ARGS;
+    }
+
+    return readdir(dir->ino_id, out);
+}
+
+err_t list_dirents(ino_id_t ino_id, int out_fd) {
+    struct cached_inode_st *inode;
+    int procfs_inode = procfs_is_virtual_inode(ino_id);
+    if (procfs_inode) {
+        err_t err = procfs_alloc_cached_inode(ino_id, &inode);
+        if (err != SUCCESS) {
+            return err;
+        }
+    } else {
+        inode = get_inode_from_cache(ino_id);
+        if (inode == NULL) {
+            return FILE_READ_ERROR;
+        }
+    }
+
+    if (inode->inode.metadata.type != DIRECTORY_TYPE) {
+        if (procfs_inode) {
+            procfs_free_cached_inode(inode);
+        } else {
+            remove_ref_from_cache(ino_id);
+        }
+        return INVALID_ARGS;
+    }
+
+    if (inode->inode.metadata.fops == NULL) {
+        inode->inode.metadata.fops = get_default_dir_fops();
+        inode->dirty = 1;
+    }
+
+    struct file_operations *fops = inode->inode.metadata.fops;
+    if (fops == NULL || fops->open == NULL || fops->close == NULL ||
+        fops->readdir == NULL) {
+        if (procfs_inode) {
+            procfs_free_cached_inode(inode);
+        } else {
+            remove_ref_from_cache(ino_id);
+        }
+        return INVALID_ARGS;
+    }
+
+    struct oft_entry dir_entry = {
+        .mode = O_RDONLY,
+        .cursor = 0,
+        .ref_count = 1,
+        .ino_id = ino_id,
+        .inode = inode,
+    };
+
+    err_t err = fops->open(&dir_entry);
+    if (err != SUCCESS) {
+        if (procfs_inode) {
+            procfs_free_cached_inode(inode);
+        } else {
+            remove_ref_from_cache(ino_id);
+        }
+        return err;
+    }
+
+    fs_dirent dirent;
+    while ((err = fops->readdir(&dir_entry, &dirent)) == SUCCESS) {
+        attributes_t metadata;
+        if (procfs_is_virtual_inode(dirent.ino_id)) {
+            err = procfs_get_metadata(dirent.ino_id, &metadata);
+        } else {
+            err = get_inode_metadata(dirent.ino_id, &metadata);
+        }
+        if (err != SUCCESS) {
+            fops->close(&dir_entry);
+            if (procfs_inode) {
+                procfs_free_cached_inode(inode);
+            } else {
+                remove_ref_from_cache(ino_id);
+            }
             return err;
         }
 
-        int i = 0;
-        while (i < (int) (get_bytes_per_block() / sizeof(struct fs_dirent))) {
-            if (!strcmp(dir[i].name, "\0")) {
-                kfree(dir);
-                return SUCCESS;
+        char perm_str[4];
+        format_chmod_str(metadata.perm, perm_str);
+        int size = dirent.ino_id == 0 || procfs_is_virtual_inode(dirent.ino_id)
+                   ? (int)metadata.i_size
+                   : get_file_size_by_id(dirent.ino_id);
+        err = fprintf(out_fd, "%u %s %u tick=%u %s\n",
+                      dirent.ino_id,
+                      perm_str,
+                      size,
+                      (unsigned int)metadata.mtime,
+                      dirent.name);
+        if (err < 0) {
+            fops->close(&dir_entry);
+            if (procfs_inode) {
+                procfs_free_cached_inode(inode);
+            } else {
+                remove_ref_from_cache(ino_id);
             }
-            attributes_t metadata;
-            err = get_inode_metadata(dir[i].ino_id, &metadata);
-            if (err != SUCCESS) {
-                kfree(dir);
-                return err;
-            }
-            char perm_str[4];
-            format_chmod_str(metadata.perm, perm_str);
-            int size = dir[i].ino_id == 0 ? 0 : get_file_size_by_id(dir[i].ino_id);
-            fprintf(out_fd, "%u %s %u tick=%u %s\n",
-                   dir[i].ino_id,
-                   perm_str,
-                   size,
-                   (unsigned int)metadata.mtime,
-                   dir[i].name);
-            i++;
-        } 
-        curr_block_no = get_ith_block_of_file_by_id(ino_id, ++index);
+            return err;
+        }
     }
-    return SUCCESS;
+
+    err_t close_err = fops->close(&dir_entry);
+    if (procfs_inode) {
+        procfs_free_cached_inode(inode);
+    } else {
+        remove_ref_from_cache(ino_id);
+    }
+    if (err != FILE_NOT_FOUND) {
+        return err;
+    }
+    return close_err;
 }
 
 err_t remove_dirent_by_f_name_and_type(const char* f_name, uint8_t is_dir_type, ino_id_t parent_dir) {

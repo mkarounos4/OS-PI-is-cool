@@ -6,6 +6,9 @@
 static struct node_st *head = NULL;
 static struct node_st *tail = NULL;
 static int size = 0;
+static uint32_t cache_hits = 0;
+static uint32_t cache_misses = 0;
+static uint32_t cache_evictions = 0;
 
 // Linked list static helper functions
 static void lru_cache_remove_node(struct node_st *node);
@@ -80,9 +83,11 @@ err_t lru_cache_add_to_front(struct node_st **ret_node, block_no_t block_num) {
     struct node_st *to_add = lru_cache_get_block(block_num);
 
     if (to_add != NULL) {
+        cache_hits++;
         // If so, remove it from current position
         lru_cache_remove_node(to_add);
     } else {
+        cache_misses++;
         // If not, read in block data and create new Linked List node
         to_add = kmalloc(sizeof(struct node_st));
         *to_add = (struct node_st) {
@@ -147,6 +152,7 @@ static err_t lru_cache_remove_back() {
     // Remove node from Linked List
     struct node_st *to_remove = tail;
     lru_cache_remove_node(to_remove);
+    cache_evictions++;
 
     // Write data if dirty
     if (to_remove->dirty) {
@@ -169,8 +175,10 @@ err_t lru_cache_update_data(void *data, block_no_t block_num) {
     struct node_st *to_update = lru_cache_get_block(block_num);
 
     if (to_update != NULL) {
+        cache_hits++;
         lru_cache_remove_node(to_update);
     } else {
+        cache_misses++;
         to_update = kmalloc(sizeof(struct node_st));
         if (to_update == NULL) {
             return FILE_WRITE_ERROR;
@@ -232,4 +240,26 @@ err_t lru_cache_empty() {
     }
 
     return SUCCESS;
+}
+
+void lru_cache_get_stats(struct lru_cache_stats *stats) {
+    if (stats == NULL) {
+        return;
+    }
+
+    uint32_t dirty = 0;
+    struct node_st *curr = head;
+    while (curr != NULL) {
+        if (curr->dirty) {
+            dirty++;
+        }
+        curr = curr->next_node;
+    }
+
+    stats->capacity_blocks = MAX_SIZE;
+    stats->used_blocks = (uint32_t)size;
+    stats->hits = cache_hits;
+    stats->misses = cache_misses;
+    stats->evictions = cache_evictions;
+    stats->dirty_blocks = dirty;
 }

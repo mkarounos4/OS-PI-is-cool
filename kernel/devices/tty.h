@@ -37,3 +37,4 @@ int tty_drivers_init(void);
 int tty_create();
 int tcsetpgrp(int fd, pid_t pgid);
 int tty_write(struct oft_entry *entry, const char *buffer, size_t count);
+int tty_format_proc(char *buf, size_t size);

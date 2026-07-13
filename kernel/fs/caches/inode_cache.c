@@ -7,15 +7,20 @@ static int remove_cache_inode(struct cache_ll_node_st *node);
 // Static data structure variables
 static struct cache_ll_node_st *head = NULL;
 static struct cache_ll_node_st *tail = NULL;
+static uint32_t inode_cache_hits = 0;
+static uint32_t inode_cache_misses = 0;
+static uint32_t inode_cache_evictions = 0;
 
 struct cached_inode_st *get_inode_from_cache(ino_id_t id) {
     // Returns inode if already in cache and updates refs by 1
     struct cache_ll_node_st *node = NULL;
     int found = find_inode_in_cache(id, &node);
     if (found) {
+        inode_cache_hits++;
         node->num_refs++;
         return &node->cache_node;
     }
+    inode_cache_misses++;
 
     // If not in cache yet, create it
     node = kmalloc(sizeof(struct cache_ll_node_st));
@@ -90,6 +95,8 @@ err_t empty_inode_cache() {
 }
 
 static int remove_cache_inode(struct cache_ll_node_st *node) {
+    inode_cache_evictions++;
+
     // Updates prev element/head
     if (node == head) {
         head = node->next;
@@ -130,4 +137,28 @@ static int find_inode_in_cache(ino_id_t id, struct cache_ll_node_st **node) {
     }
 
     return 0;
+}
+
+void inode_cache_get_stats(struct inode_cache_stats *stats) {
+    if (stats == NULL) {
+        return;
+    }
+
+    uint32_t used = 0;
+    uint32_t dirty = 0;
+    struct cache_ll_node_st *curr = head;
+    while (curr != NULL) {
+        used++;
+        if (curr->cache_node.dirty) {
+            dirty++;
+        }
+        curr = curr->next;
+    }
+
+    stats->capacity = 0;
+    stats->used = used;
+    stats->hits = inode_cache_hits;
+    stats->misses = inode_cache_misses;
+    stats->evictions = inode_cache_evictions;
+    stats->dirty = dirty;
 }

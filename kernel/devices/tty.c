@@ -1,5 +1,6 @@
 #include "tty.h"
 #include "gui/tty_gui.h"
+#include "uart/uart.h"
 
 #define TTY_MAJOR 0
 
@@ -156,6 +157,49 @@ int tty_write(struct oft_entry *entry, const char *buffer, size_t count) {
     }
 
     return num_written;
+}
+
+int tty_format_proc(char *buf, size_t size) {
+    if (buf == NULL || size == 0) {
+        return INVALID_ARGS;
+    }
+
+    int len = snprintf(buf, size, "ttys: %u\n", tty_state.num_ttys);
+    for (uint16_t minor = 0; minor < tty_state.num_ttys; minor++) {
+        struct tty_device *tty = tty_state.devices[minor];
+        if (tty == NULL) {
+            continue;
+        }
+
+        size_t used = len < (int)size ? (size_t)len : size - 1;
+        int ret = snprintf(buf + used, size - used,
+                           "name: %s\n"
+                           "foreground_pgid: %d\n"
+                           "input_backend: uart\n"
+                           "output_backend: framebuffer\n"
+                           "rows: %d\n"
+                           "cols: %d\n"
+                           "cursor: %d,%d\n"
+                           "input_buffer: %d\n"
+                           "output_buffer: %d\n"
+                           "refcount: %d\n"
+                           "canonical_mode: yes\n",
+                           tty->name,
+                           tty->fg_pgid,
+                           tty_gui_get_rows(),
+                           tty_gui_get_cols(),
+                           tty_gui_get_cursor_row(),
+                           tty_gui_get_cursor_col(),
+                           tty->rx.size,
+                           tty->tx.size,
+                           tty->refcount);
+        if (ret < 0) {
+            return ret;
+        }
+        len += ret;
+    }
+
+    return len;
 }
 
 void wake_up_readers(int minor) {

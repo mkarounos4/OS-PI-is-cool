@@ -146,6 +146,7 @@ static uint8_t is_in_range(uint64_t va, uint64_t start, uint64_t size) {
 }
 
 static void invalidate_all_stage1_tlbs(void) {
+    page_table_note_tlb_flush();
     asm volatile(
         "dsb ishst\n"
         "tlbi vmalle1is\n"
@@ -277,11 +278,15 @@ void handle_data_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t esr) {
             }
 
             table_base_addr = kernel_direct_map_va(curr_proc->ctx.ttbr0_el1);
-            if (is_in_range(far, USER_HEAP_START, USER_HEAP_SIZE) ||
-                is_in_range(far, USER_STACK_TOP - USER_STACK_SIZE,
-                            USER_STACK_SIZE)) {
+            int heap_fault = is_in_range(far, USER_HEAP_START, USER_HEAP_SIZE);
+            int stack_fault = is_in_range(far, USER_STACK_TOP - USER_STACK_SIZE,
+                                          USER_STACK_SIZE);
+            if (heap_fault || stack_fault) {
                 mapped = pt_walk_user_page((uint64_t *)(uintptr_t)table_base_addr,
                                            far);
+                if (mapped) {
+                    page_table_note_anon_fault(heap_fault, stack_fault);
+                }
             } else if (!from_lower_el &&
                        is_in_range(far,
                                    PROC_KERNEL_STACK_TOP - PROC_KERNEL_STACK_SIZE,
@@ -384,10 +389,12 @@ void handle_data_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t esr) {
         uint64_t pa = pte_val & PTE_ADDR_MASK;
 
         if (!pte_test_cow_flag(pa, PTE_FLAG_COW)) {
+            page_table_note_invalid_fault();
             fatal_exception("Data Abort COW: write to non-COW read-only page"); 
             return;
         }
 
+        page_table_note_cow_fault();
         uint16_t refcnt = get_pte_refcount_pa(pa);
         if (refcnt > 1) { // multiple page owners
             // allocate new page and copy
@@ -403,6 +410,7 @@ void handle_data_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t esr) {
                 fatal_exception("Data Abort COW: failed to copy physical page");
                 return;
             }
+            page_table_note_cow_copy();
 
             // decrement refcount for shared page
             dec_pte_refcount_pa(pa);

@@ -3,6 +3,7 @@
 #include "disk/block.h"
 #include "timer/timer.h"
 #include "devices/devices.h"
+#include "procfs.h"
 
 #define MKFS_FILL_CHUNK_BLOCKS 32u
 
@@ -356,6 +357,9 @@ err_t get_inode_metadata(ino_id_t id, attributes_t *metadata) {
     if (metadata == NULL || id == 0) {
         return INVALID_ARGS;
     }
+    if (procfs_is_virtual_inode(id)) {
+        return procfs_get_metadata(id, metadata);
+    }
 
     struct cached_inode_st *node;
     err_t err = get_inode(&node, id);
@@ -416,6 +420,11 @@ err_t set_inode_metadata(ino_id_t id, attributes_t *metadata) {
 }
 
 err_t write_inode(struct inode_st *node, ino_id_t id) {
+    if (procfs_is_virtual_inode(id)) {
+        (void)node;
+        return SUCCESS;
+    }
+
     block_no_t block_with_inode =
         (id - 1) / INODES_PER_BLOCK + get_inode_table_start();
 

@@ -3,6 +3,7 @@
 #include <stddef.h>
 
 #include "memory/page_table/page_table.h"
+#include "uart/uart.h"
 
 #define GIC_MAX_INTIDS 1020u
 #define ARM_GENERIC_TIMER_INTID 30u
@@ -14,6 +15,7 @@ struct irq_slot {
 };
 
 static struct irq_slot irq_table[GIC_MAX_INTIDS];
+static uint32_t irq_counts[GIC_MAX_INTIDS];
 static unsigned irq_depth;
 
 static inline void mmio_write32(uint64_t address, uint32_t value) {
@@ -261,6 +263,7 @@ struct trap_frame *irq_handle_exception(struct trap_frame *frame) {
     if (intid == IRQ_SPURIOUS_INTID || intid >= GIC_MAX_INTIDS) {
         return frame;
     }
+    irq_counts[intid]++;
 
     irq_depth++;
 
@@ -305,4 +308,43 @@ void irq_get_controller_info(uint32_t *typer, uint32_t *iidr) {
         *iidr = gicd_read(GICD_IIDR);
     }
 #endif
+}
+
+static const char *irq_name(unsigned intid) {
+    if (intid == ARM_GENERIC_TIMER_INTID) {
+        return "timer";
+    }
+#if defined(PLATFORM_QEMU)
+    if (intid == BCM2835_UART0_INTID) {
+        return "uart";
+    }
+#else
+    if (intid == 185u) {
+        return "uart";
+    }
+#endif
+    return "irq";
+}
+
+int irq_format_proc(char *buf, size_t size) {
+    if (buf == NULL || size == 0) {
+        return -1;
+    }
+
+    int len = snprintf(buf, size, "IRQ COUNT NAME\n");
+    for (unsigned intid = 0; intid < GIC_MAX_INTIDS; intid++) {
+        if (irq_counts[intid] == 0) {
+            continue;
+        }
+
+        size_t used = len < (int)size ? (size_t)len : size - 1;
+        int ret = snprintf(buf + used, size - used, "%u %u %s\n",
+                           intid, irq_counts[intid], irq_name(intid));
+        if (ret < 0) {
+            return ret;
+        }
+        len += ret;
+    }
+
+    return len;
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stddef.h>
 
 #include "fs/types.h"
 
@@ -68,8 +69,16 @@ int load_memory_segment(uint64_t *table, ino_id_t ino_id,
                         uint64_t file_offset, uint64_t file_size,
                         uint64_t va, uint64_t pa, uint64_t mem_size,
                         uint32_t flags);
+int page_table_format_segments(uint64_t *table, char *buf, size_t size);
+int page_table_format_meminfo(char *buf, size_t size);
+int page_table_format_vmstat(char *buf, size_t size);
 int load_segment_page_for_fault(uint64_t *table, uint64_t fault_va,
                                 int instruction_fault);
+void page_table_note_anon_fault(int heap_fault, int stack_fault);
+void page_table_note_invalid_fault(void);
+void page_table_note_cow_fault(void);
+void page_table_note_cow_copy(void);
+void page_table_note_tlb_flush(void);
 
 /* COW helpers */
 int pte_is_user(uint64_t pte);
