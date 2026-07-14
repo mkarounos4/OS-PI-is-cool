@@ -13,6 +13,9 @@ struct file_operations {
     int (*close)(struct oft_entry *entry);
     int (*read)(struct oft_entry *entry, char *buffer, size_t count);
     int (*write)(struct oft_entry *entry, const char *buffer, size_t count);
+    int (*lookup)(const char* f_name, uint8_t is_dir_type, struct fs_dirent* dirent, int curr_dir);
+    int (*readdir)(struct oft_entry *dir, struct fs_dirent *out);
+    int (*getattr)(int curr_dir, const char *name);
 };
 
 #ifndef DEV_T_TYPE

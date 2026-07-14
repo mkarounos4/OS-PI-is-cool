@@ -75,6 +75,7 @@ long write_console(const char *s, uint64_t len);
 long putc(char c);
 long get_ticks(void);
 long delay(uint64_t ms);
+long sleep(uint64_t ms);
 long exit(int code);
 long getpid(void);
 long spawn(void *(*func)(void *), void *arg);

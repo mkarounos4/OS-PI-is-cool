@@ -15,18 +15,23 @@ void *tests(void *args) {
     return NULL;
 }
 
-void *init_process_entry(void *args) {
-    (void)args;
-
+static void spawn_shell_for_tty(const char *tty_arg) {
     pid_t pid = fork();
 
     setpgid(pid, pid);
     if (pid == 0) {
-        char *argv[] = {"/bin/shell", NULL};
+        char *argv[] = {"/bin/shell", (char *)tty_arg, NULL};
         int err = exec("/bin/shell", argv);
         print_errno("init", "exec /bin/shell", err);
         exit(err < 0 ? err : -EIO);
     }
+}
+
+void *init_process_entry(void *args) {
+    (void)args;
+
+    spawn_shell_for_tty("0");
+    spawn_shell_for_tty("1");
 
     while (1) {
         int ret = waitpid(-1, NULL, 0);

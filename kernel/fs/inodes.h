@@ -13,6 +13,8 @@ struct dev_st {
 };
 #endif
 
+struct dir_st;
+struct proc_st;
 
 // Attributes for inodes
 typedef struct attributes_t_struct {
@@ -26,6 +28,8 @@ typedef struct attributes_t_struct {
     struct file_operations *fops;
     union {
         struct pipe_st *i_pipe;
+        struct dir_st *i_dir;
+        struct proc_st *i_proc;
     };
 } attributes_t;
 

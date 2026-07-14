@@ -7,20 +7,43 @@
 #include "memory/page_table/page_table.h"
 #include "scheduler/scheduler.h"
 #include "pipe/pipe.h"
+#include "procfs.h"
 #include "string.h"
 
 int default_read(struct oft_entry *entry, char *buf, size_t n);
 int default_write(struct oft_entry *entry, const char *buf, size_t n);
+int dir_open(struct oft_entry *entry);
+int dir_close(struct oft_entry *entry);
+int dir_lookup(const char* f_name, uint8_t is_dir_type,
+               struct fs_dirent* dirent, int curr_dir);
+int dir_readdir(struct oft_entry *dir, struct fs_dirent *out);
 
 static struct file_operations default_ops = (struct file_operations) {
     .open = NULL,
     .close = NULL,
     .read = default_read,
     .write = default_write,
+    .lookup = NULL,
+    .readdir = NULL,
+    .getattr = NULL,
+};
+
+static struct file_operations default_dir_ops = (struct file_operations) {
+    .open = dir_open,
+    .close = dir_close,
+    .read = NULL,
+    .write = NULL,
+    .lookup = dir_lookup,
+    .readdir = dir_readdir,
+    .getattr = NULL,
 };
 
 struct file_operations *get_default_fops() {
     return &default_ops;
+}
+
+struct file_operations *get_default_dir_fops() {
+    return &default_dir_ops;
 }
 
 static void repair_default_fops(struct oft_entry *entry) {
@@ -28,8 +51,14 @@ static void repair_default_fops(struct oft_entry *entry) {
         return;
     }
 
+    if (entry->inode->inode.metadata.fops != NULL) {
+        return;
+    }
+
     uint8_t type = entry->inode->inode.metadata.type;
-    if (type == DIRECTORY_TYPE || type == FILE_TYPE || type == SYMLINK_TYPE) {
+    if (type == DIRECTORY_TYPE) {
+        entry->inode->inode.metadata.fops = get_default_dir_fops();
+    } else if (type == FILE_TYPE || type == SYMLINK_TYPE) {
         entry->inode->inode.metadata.fops = get_default_fops();
     }
 }
@@ -71,7 +100,7 @@ int k_open(const char *fname, int mode) {
             return INVALID_PERMISSIONS;
         }
 
-        if (mode & O_TRUNC) {
+        if ((mode & O_TRUNC) && !procfs_is_virtual_inode(dirent.ino_id)) {
             err_t err = clear_blocks_of_file_by_id(dirent.ino_id);
             if (err) {
                 return err;
@@ -137,7 +166,8 @@ int k_read(struct oft_entry *entry, char *buf, size_t n) {
     }
 
     repair_default_fops(entry);
-    if (entry->inode->inode.metadata.fops != NULL) {
+    if (entry->inode->inode.metadata.fops != NULL &&
+        entry->inode->inode.metadata.fops->read != NULL) {
         return entry->inode->inode.metadata.fops->read(entry, buf, n);
     }
     return 0;

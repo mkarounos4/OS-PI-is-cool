@@ -79,6 +79,24 @@ typedef struct page_table_st {
 } page_table_t;
 
 static HashMap page_table_structs;
+static uint64_t vmstat_page_faults;
+static uint64_t vmstat_instruction_faults;
+static uint64_t vmstat_data_faults;
+static uint64_t vmstat_anon_faults;
+static uint64_t vmstat_file_faults;
+static uint64_t vmstat_cow_faults;
+static uint64_t vmstat_faults_handled;
+static uint64_t vmstat_faults_unmapped;
+static uint64_t vmstat_faults_invalid;
+static uint64_t vmstat_faults_permission;
+static uint64_t vmstat_faults_error;
+static uint64_t vmstat_cow_copies;
+static uint64_t vmstat_cow_shared_pages;
+static uint64_t vmstat_heap_lazy_allocs;
+static uint64_t vmstat_stack_lazy_allocs;
+static uint64_t vmstat_tlb_flushes;
+static uint64_t vmstat_page_allocs;
+static uint64_t vmstat_page_frees;
 
 static void mem_segment_destroy(ptr_t value) {
   kfree(value);
@@ -319,8 +337,17 @@ static int read_segment_page(mem_segment_t *segment, uint64_t page_va,
 
 int load_segment_page_for_fault(uint64_t *table, uint64_t fault_va,
                                 int instruction_fault) {
+  vmstat_page_faults++;
+  if (instruction_fault) {
+    vmstat_instruction_faults++;
+  } else {
+    vmstat_data_faults++;
+  }
+
   page_table_t *page_table = get_page_table_struct(table);
   if (page_table == NULL) {
+    vmstat_faults_unmapped++;
+    vmstat_faults_invalid++;
     return PAGE_FAULT_NOT_HANDLED;
   }
 
@@ -332,31 +359,74 @@ int load_segment_page_for_fault(uint64_t *table, uint64_t fault_va,
     }
 
     if (!segment_allows_fault(segment, instruction_fault)) {
+      vmstat_faults_permission++;
       return PAGE_FAULT_PERMISSION;
     }
 
     uint64_t page_va = fault_va & ~PAGE_MASK;
     void *page = alloc_page();
     if (page == NULL) {
+      vmstat_faults_error++;
       return PAGE_FAULT_ERROR;
     }
 
     int err = read_segment_page(segment, page_va, page);
     if (err != SUCCESS) {
       free_page(page);
+      vmstat_faults_error++;
       return PAGE_FAULT_ERROR;
     }
 
     uint64_t pa = kernel_phys_addr((uint64_t)(uintptr_t)page);
     if (!pt_map_page(table, page_va, pa, user_segment_attrs(segment->flags))) {
       free_page(page);
+      vmstat_faults_error++;
       return PAGE_FAULT_ERROR;
     }
 
+    vmstat_file_faults++;
+    vmstat_faults_handled++;
     return PAGE_FAULT_HANDLED;
   }
 
+  vmstat_faults_unmapped++;
+  vmstat_faults_invalid++;
   return PAGE_FAULT_NOT_HANDLED;
+}
+
+void page_table_note_anon_fault(int heap_fault, int stack_fault) {
+  vmstat_page_faults++;
+  vmstat_data_faults++;
+  vmstat_anon_faults++;
+  vmstat_faults_handled++;
+  if (heap_fault) {
+    vmstat_heap_lazy_allocs++;
+  }
+  if (stack_fault) {
+    vmstat_stack_lazy_allocs++;
+  }
+}
+
+void page_table_note_invalid_fault(void) {
+  vmstat_page_faults++;
+  vmstat_data_faults++;
+  vmstat_faults_unmapped++;
+  vmstat_faults_invalid++;
+}
+
+void page_table_note_cow_fault(void) {
+  vmstat_page_faults++;
+  vmstat_data_faults++;
+  vmstat_cow_faults++;
+  vmstat_faults_handled++;
+}
+
+void page_table_note_cow_copy(void) {
+  vmstat_cow_copies++;
+}
+
+void page_table_note_tlb_flush(void) {
+  vmstat_tlb_flushes++;
 }
 
 void pt_init(struct Page *page_struct_array) { pages = page_struct_array; }
@@ -436,6 +506,7 @@ void *alloc_page(void) {
     }
 
     if (page != NULL) {
+        vmstat_page_allocs++;
         zero_page(page);
 
         if (pages != NULL) {
@@ -453,6 +524,7 @@ void *alloc_page(void) {
 
 void free_page(void *page) {
     if (page == NULL) return;
+    vmstat_page_frees++;
 
     if (pages != NULL) {
         uint64_t pa = kernel_phys_addr((uint64_t)(uintptr_t)page);
@@ -729,7 +801,13 @@ void dec_pte_refcount_pa(uint64_t phys_pa) {
     if (pages[pfn].refcount == 0) {
         fatal_exception("[page_ref_dec_pa] refcount already zero");
     }
+    uint8_t was_shared_cow =
+        (pages[pfn].flags & PTE_FLAG_COW) && pages[pfn].refcount > 1;
     pages[pfn].refcount--;
+    if (was_shared_cow && pages[pfn].refcount <= 1 &&
+        vmstat_cow_shared_pages > 0) {
+        vmstat_cow_shared_pages--;
+    }
     if (pages[pfn].refcount == 0) {
         void *va = (void *)(uintptr_t)kernel_direct_map_va(phys_pa & PA_MASK);
         free_page(va);
@@ -752,7 +830,13 @@ void dec_pte_refcount_va(void *kernel_va) {
     int64_t pfn = kernel_va_to_pfn(kernel_va);
     if (pfn < 0) return;
     if (pages[pfn].refcount == 0) fatal_exception("[dec_pte_refcount_va] negative page refcount");
+    uint8_t was_shared_cow =
+        (pages[pfn].flags & PTE_FLAG_COW) && pages[pfn].refcount > 1;
     pages[pfn].refcount--;
+    if (was_shared_cow && pages[pfn].refcount <= 1 &&
+        vmstat_cow_shared_pages > 0) {
+        vmstat_cow_shared_pages--;
+    }
     if (pages[pfn].refcount == 0) {
         free_page(kernel_va);
     }
@@ -780,13 +864,24 @@ int pte_is_writable(uint64_t pte) {
 void pte_set_cow_flag(uint64_t pa, uint16_t flag) {
     int64_t pfn = phys_pa_to_pfn(pa);
     if (pfn < 0) return;
+    uint8_t was_cow = (pages[pfn].flags & PTE_FLAG_COW) != 0;
     pages[pfn].flags |= flag;
+    if ((flag & PTE_FLAG_COW) && !was_cow && pages[pfn].refcount > 1) {
+        vmstat_cow_shared_pages++;
+    }
 }
 
 void pte_clear_cow_flag(uint64_t pa, uint16_t flag) {
     int64_t pfn = phys_pa_to_pfn(pa);
     if (pfn < 0) return;
+    uint8_t was_shared_cow =
+        (flag & PTE_FLAG_COW) &&
+        (pages[pfn].flags & PTE_FLAG_COW) &&
+        pages[pfn].refcount > 1;
     pages[pfn].flags &= ~flag;
+    if (was_shared_cow && vmstat_cow_shared_pages > 0) {
+        vmstat_cow_shared_pages--;
+    }
 }
 
 uint16_t pte_test_cow_flag(uint64_t pa, uint16_t flag) {
@@ -827,6 +922,7 @@ void pte_clear_cow_and_make_writable(uint64_t *pte_ptr) {
 
 
 void tlb_invalidate_all_user(void) {
+    page_table_note_tlb_flush();
     asm volatile(
         "dsb ish\n"
         "tlbi vmalle1\n"
@@ -868,4 +964,187 @@ int load_memory_segment(uint64_t *table, ino_id_t ino_id,
   vec_push_back(&page_table->segments, segment);
 
   return SUCCESS;
+}
+
+int page_table_format_segments(uint64_t *table, char *buf, size_t size) {
+  if (buf == NULL || size == 0) {
+    return INVALID_ARGS;
+  }
+
+  page_table_t *page_table = get_page_table_struct(table);
+  int len = snprintf(buf, size,
+                     "va_start va_end pa file_off file_size mem_size ino flags\n");
+  if (len < 0) {
+    return FILE_READ_ERROR;
+  }
+
+  if (page_table == NULL) {
+    int ret = snprintf(buf + (len < (int)size ? len : (int)size - 1),
+                       len < (int)size ? size - (size_t)len : 1,
+                       "# no tracked segments\n");
+    if (ret < 0) {
+      return FILE_READ_ERROR;
+    }
+    return len + ret;
+  }
+
+  for (size_t i = 0; i < vec_len(&page_table->segments); i++) {
+    mem_segment_t *segment = vec_get(&page_table->segments, i);
+    if (segment == NULL) {
+      continue;
+    }
+
+    size_t used = len < (int)size ? (size_t)len : size - 1;
+    int ret = snprintf(buf + used, size - used,
+                       "0x%x 0x%x 0x%x 0x%x 0x%x 0x%x %u 0x%x\n",
+                       segment->va,
+                       segment->va + segment->mem_size,
+                       segment->pa,
+                       segment->file_offset,
+                       segment->file_size,
+                       segment->mem_size,
+                       segment->ino_id,
+                       segment->flags);
+    if (ret < 0) {
+      return FILE_READ_ERROR;
+    }
+    len += ret;
+  }
+
+  return len;
+}
+
+static uint32_t page_table_count_free_list_pages(void) {
+  uint32_t count = 0;
+  FreePage *curr = free_list;
+  while (curr != NULL) {
+    count++;
+    curr = curr->next;
+  }
+  return count;
+}
+
+static uint32_t page_table_total_managed_pages(void) {
+  uint64_t start = align_up((uint64_t)(uintptr_t)__kernel_page_pool_start);
+  uint64_t end = (uint64_t)(uintptr_t)__RAM_end;
+  if (end <= start) {
+    return 0;
+  }
+  return (uint32_t)((end - start) / PAGE_SIZE);
+}
+
+static uint32_t page_table_free_managed_pages(void) {
+  page_allocator_init();
+  uint64_t end = (uint64_t)(uintptr_t)__RAM_end;
+  uint32_t never_used = 0;
+  if (end > next_free_page) {
+    never_used = (uint32_t)((end - next_free_page) / PAGE_SIZE);
+  }
+  return never_used + page_table_count_free_list_pages();
+}
+
+static uint32_t page_table_count_cow_shared_pages(void) {
+  return (uint32_t)vmstat_cow_shared_pages;
+}
+
+static uint32_t page_table_count_mmap_regions(void) {
+  page_table_structs_init();
+
+  uint32_t regions = 0;
+  for (size_t bucket = 0; bucket < page_table_structs.bucket_count; bucket++) {
+    hashmap_entry_t *entry = page_table_structs.buckets[bucket];
+    while (entry != NULL) {
+      page_table_t *page_table = (page_table_t *)entry->value;
+      if (page_table != NULL) {
+        regions += (uint32_t)vec_len(&page_table->segments);
+      }
+      entry = entry->next;
+    }
+  }
+  return regions;
+}
+
+int page_table_format_meminfo(char *buf, size_t size) {
+  if (buf == NULL || size == 0) {
+    return INVALID_ARGS;
+  }
+
+  uint32_t total_pages = page_table_total_managed_pages();
+  uint32_t free_pages = page_table_free_managed_pages();
+  uint32_t used_pages = total_pages > free_pages ? total_pages - free_pages : 0;
+
+  return snprintf(buf, size,
+                  "MemTotal: %u kB\n"
+                  "MemFree: %u kB\n"
+                  "KernelHeap: %u kB\n"
+                  "PageSize: %u kB\n"
+                  "\n"
+                  "PagesTotal: %u\n"
+                  "PagesFree: %u\n"
+                  "PagesUsed: %u\n"
+                  "\n"
+                  "AnonPages: %u\n"
+                  "FilePages: %u\n"
+                  "CowPages: %u\n"
+                  "MappedPages: %u\n"
+                  "KernelPages: %u\n"
+                  "PageTables: %u\n"
+                  "\n"
+                  "PageFaults: %u\n"
+                  "CowFaults: %u\n"
+                  "AnonFaults: %u\n"
+                  "FileFaults: %u\n"
+                  "InvalidFaults: %u\n",
+                  total_pages * (uint32_t)(PAGE_SIZE / 1024),
+                  free_pages * (uint32_t)(PAGE_SIZE / 1024),
+                  (uint32_t)(KERNEL_HEAP_SIZE / 1024),
+                  (uint32_t)(PAGE_SIZE / 1024),
+                  total_pages,
+                  free_pages,
+                  used_pages,
+                  (uint32_t)vmstat_anon_faults,
+                  (uint32_t)vmstat_file_faults,
+                  page_table_count_cow_shared_pages(),
+                  page_table_count_mmap_regions(),
+                  0u,
+                  (uint32_t)page_table_structs.size,
+                  (uint32_t)vmstat_page_faults,
+                  (uint32_t)vmstat_cow_faults,
+                  (uint32_t)vmstat_anon_faults,
+                  (uint32_t)vmstat_file_faults,
+                  (uint32_t)vmstat_faults_invalid);
+}
+
+int page_table_format_vmstat(char *buf, size_t size) {
+  if (buf == NULL || size == 0) {
+    return INVALID_ARGS;
+  }
+
+  return snprintf(buf, size,
+                  "pgfault %u\n"
+                  "pgfault_anon %u\n"
+                  "pgfault_file %u\n"
+                  "pgfault_cow %u\n"
+                  "pgfault_invalid %u\n"
+                  "cow_copies %u\n"
+                  "cow_shared_pages %u\n"
+                  "mmap_regions %u\n"
+                  "heap_lazy_allocs %u\n"
+                  "stack_lazy_allocs %u\n"
+                  "tlb_flushes %u\n"
+                  "page_allocs %u\n"
+                  "page_frees %u\n",
+                  (unsigned int)vmstat_page_faults,
+                  (unsigned int)vmstat_anon_faults,
+                  (unsigned int)vmstat_file_faults,
+                  (unsigned int)vmstat_cow_faults,
+                  (unsigned int)vmstat_faults_invalid,
+                  (unsigned int)vmstat_cow_copies,
+                  page_table_count_cow_shared_pages(),
+                  page_table_count_mmap_regions(),
+                  (unsigned int)vmstat_heap_lazy_allocs,
+                  (unsigned int)vmstat_stack_lazy_allocs,
+                  (unsigned int)vmstat_tlb_flushes,
+                  (unsigned int)vmstat_page_allocs,
+                  (unsigned int)vmstat_page_frees);
 }

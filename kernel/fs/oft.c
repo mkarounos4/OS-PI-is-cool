@@ -1,4 +1,5 @@
 #include "oft.h"
+#include "procfs.h"
 
 static Vec open_file_table;
 static int oft_initialized = 0;
@@ -7,7 +8,11 @@ static void entry_deletor(void *entry) {
     if (entry != NULL) {
         struct oft_entry *oentry = (struct oft_entry*) entry;
         if (oentry->ino_id > 0) {
-            remove_ref_from_cache(oentry->ino_id);
+            if (procfs_is_virtual_inode(oentry->ino_id)) {
+                procfs_free_cached_inode(oentry->inode);
+            } else {
+                remove_ref_from_cache(oentry->ino_id);
+            }
         }
         kfree(entry);
     }
@@ -65,6 +70,12 @@ int oft_open_file(int mode, const char *file_name, ino_id_t ino_id, ino_id_t dir
                 kfree(new_entry);
                 return err;
             }
+        }
+    } else if (procfs_is_virtual_inode(ino_id)) {
+        err = procfs_alloc_cached_inode(ino_id, &new_entry->inode);
+        if (err != SUCCESS) {
+            kfree(new_entry);
+            return err;
         }
     } else {
         new_entry->inode = get_inode_from_cache(ino_id);

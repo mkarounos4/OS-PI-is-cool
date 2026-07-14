@@ -16,6 +16,66 @@
 #define SYS_WRITE_CONSOLE_MAX 1024u
 #define SYS_USER_PTR_MIN      UINT64_C(0x1000)
 #define SYS_WRITE_CHUNK       128u
+#define SYSCALL_COUNT         47u
+
+static uint32_t syscall_counts[SYSCALL_COUNT];
+
+static const char *syscall_name(uint64_t syscall_number) {
+    static const char *names[SYSCALL_COUNT] = {
+        [S_WRITE_CONSOLE] = "write_console",
+        [S_PUTC] = "putc",
+        [S_GET_TICKS] = "get_ticks",
+        [S_YIELD] = "yield",
+        [S_EXIT] = "exit",
+        [S_GETPID] = "getpid",
+        [S_CURRENT_EL] = "current_el",
+        [S_DELAY] = "delay",
+        [S_SPAWN] = "spawn",
+        [S_WAITPID] = "waitpid",
+        [S_SBRK] = "sbrk",
+        [S_KILL] = "kill",
+        [S_BLOCK_UNTIL_EVENT] = "block_until_event",
+        [S_FS_TOUCH] = "touch",
+        [S_FS_MV] = "mv",
+        [S_FS_RM] = "rm",
+        [S_FS_CAT] = "cat",
+        [S_FS_CP] = "cp",
+        [S_FS_CHMOD] = "chmod",
+        [S_FS_LS] = "ls",
+        [S_FS_MKDIR] = "mkdir",
+        [S_FS_CD] = "cd",
+        [S_FS_OPEN] = "open",
+        [S_FS_CLOSE] = "close",
+        [S_FS_LSEEK] = "lseek",
+        [S_FS_READ] = "read",
+        [S_FS_WRITE] = "write",
+        [S_SIGPROCMASK] = "sigprocmask",
+        [S_SIGEMPTYSET] = "sigemptyset",
+        [S_SIGADDSET] = "sigaddset",
+        [S_SIGFILLSET] = "sigfillset",
+        [S_SIGSUSPEND] = "sigsuspend",
+        [S_SIGACTION] = "sigaction",
+        [S_FORK] = "fork",
+        [S_DUP2] = "dup2",
+        [S_SETPGID] = "setpgid",
+        [S_GETPGRP] = "getpgrp",
+        [S_TCSETPGRP] = "tcsetpgrp",
+        [S_MOUNT] = "mount",
+        [S_UNMOUNT] = "unmount",
+        [S_PIPE] = "pipe",
+        [S_PS] = "ps",
+        [S_EXEC] = "exec",
+        [S_GETCWD] = "getcwd",
+        [S_SLEEP] = "sleep",
+        [S_STAT] = "stat",
+    };
+
+    if (syscall_number >= SYSCALL_COUNT ||
+        names[syscall_number] == NULL) {
+        return "unknown";
+    }
+    return names[syscall_number];
+}
 
 static long s_getpid() {
     pcb_t *curr_proc = get_curr_process();
@@ -115,6 +175,9 @@ static long s_sbrk_validate(uint64_t old_brk, uint64_t new_brk) {
 
 struct trap_frame *syscall_dispatch(struct trap_frame *frame) {
     uint64_t syscall_number = frame->regs[8];
+    if (syscall_number < SYSCALL_COUNT) {
+        syscall_counts[syscall_number]++;
+    }
     long ret = SYS_ENOSYS;
 
     switch (syscall_number) {
@@ -279,7 +342,7 @@ struct trap_frame *syscall_dispatch(struct trap_frame *frame) {
                                          (size_t)frame->regs[1]));
         break;
     case S_SLEEP:
-        ret = SYS_ENOSYS;
+        ret = timer_sleep_ms(frame->regs[0]);
         break;
     case S_STAT:
         ret = fs_err_to_sys_errno(k_stat((const char *)(uintptr_t)frame->regs[0],
@@ -292,4 +355,27 @@ struct trap_frame *syscall_dispatch(struct trap_frame *frame) {
 
     frame->regs[0] = (uint64_t)ret;
     return frame;
+}
+
+int syscall_format_proc(char *buf, size_t size) {
+    if (buf == NULL || size == 0) {
+        return SYS_EINVAL;
+    }
+
+    int len = snprintf(buf, size, "NR COUNT NAME\n");
+    for (uint32_t nr = 0; nr < SYSCALL_COUNT; nr++) {
+        if (syscall_counts[nr] == 0) {
+            continue;
+        }
+
+        size_t used = len < (int)size ? (size_t)len : size - 1;
+        int ret = snprintf(buf + used, size - used, "%u %u %s\n",
+                           nr, syscall_counts[nr], syscall_name(nr));
+        if (ret < 0) {
+            return ret;
+        }
+        len += ret;
+    }
+
+    return len;
 }

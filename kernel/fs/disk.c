@@ -6,6 +6,7 @@
 #include "inodes.h"
 #include "fs/caches/inode_cache.h"
 #include "kapi.h"
+#include "procfs.h"
 #include "scheduler.h"
 #include "user_bins.h"
 
@@ -606,6 +607,14 @@ err_t mount(void) {
     err_code = initialize_oft();
     if (err_code != SUCCESS) {
         is_mounted = 0;
+        unmount_inode();
+        return err_code;
+    }
+
+    err_code = procfs_init();
+    if (err_code != SUCCESS) {
+        is_mounted = 0;
+        empty_oft();
         unmount_inode();
         return err_code;
     }

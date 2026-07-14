@@ -538,9 +538,6 @@ void uart_rx_interrupt_hook(void) {
         uint32_t data = rpi5_mmio_read32(RPI5_RP1_UART0_BASE + UART_DR);
         if (size < UART_RX_BUFFER_SIZE) {
             unsigned char next = (unsigned char)(data & 0xffu);
-            if (next == 0x0d) {
-                next = '\n';
-            }
             uart_rx_buffer[size++] = next;
         }
     }

@@ -101,11 +101,13 @@ void kernel_main(void) {
     } else {
         printf("[tty] Initialized tty driver.");
     }
-    int tty = tty_create();
-    if (tty < 0) {
-        printf("[tty] ERROR: failed to create tty instance\n");
-    } else {
-        printf("[tty] Created terminal");
+    for (int i = 0; i < 2; i++) {
+        int tty = tty_create();
+        if (tty < 0) {
+            printf("[tty] ERROR: failed to create tty instance\n");
+        } else {
+            printf("[tty] Created terminal");
+        }
     }
 
     scheduler_init();

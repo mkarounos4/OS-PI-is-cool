@@ -23,3 +23,6 @@ uint64_t timer_get_frequency(void);
 
 // Busy-wait delay for given number of milliseconds.
 void timer_delay_ms(uint64_t milliseconds);
+
+// Block the current process until at least the given number of milliseconds pass.
+long timer_sleep_ms(uint64_t milliseconds);

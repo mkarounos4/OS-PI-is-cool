@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stddef.h>
 
 #include "errno.h"
 #include "traps/traps.h"
@@ -56,3 +57,4 @@ enum syscall_type {
 };
 
 struct trap_frame *syscall_dispatch(struct trap_frame *frame);
+int syscall_format_proc(char *buf, size_t size);
