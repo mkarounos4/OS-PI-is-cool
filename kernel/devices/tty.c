@@ -60,6 +60,9 @@ int tty_create() {
     new_tty->tx_wait_queue = vec_new(2, NULL);
 
     new_tty->fg_pgid = 0;
+    new_tty->input_len = 0;
+    new_tty->input_cursor = 0;
+    new_tty->escape_state = 0;
 
     err_t err = devfs_create_char_device(new_tty->device_number);
     if (err) {
@@ -213,42 +216,166 @@ void wake_up_readers(int minor) {
     }
 }
 
+static void tty_move_cursor_left(size_t count) {
+    while (count > 0) {
+        tty_gui_cursor_left();
+        count--;
+    }
+}
+
+static void tty_move_cursor_right(size_t count) {
+    while (count > 0) {
+        tty_gui_cursor_right();
+        count--;
+    }
+}
+
+static void tty_redraw_from_cursor(struct tty_device *tty, size_t cursor) {
+    for (size_t i = cursor; i < tty->input_len; i++) {
+        tty_write(NULL, &tty->input_buffer[i], 1);
+    }
+}
+
+static void tty_insert_input_char(struct tty_device *tty, char ch) {
+    if (tty->input_len + 1 >= TTY_INPUT_BUFFER_SIZE) {
+        return;
+    }
+
+    for (size_t i = tty->input_len; i > tty->input_cursor; i--) {
+        tty->input_buffer[i] = tty->input_buffer[i - 1];
+    }
+
+    tty->input_buffer[tty->input_cursor] = ch;
+    tty->input_len++;
+
+    size_t inserted_at = tty->input_cursor;
+    tty_redraw_from_cursor(tty, inserted_at);
+    tty->input_cursor++;
+    tty_move_cursor_left(tty->input_len - tty->input_cursor);
+}
+
+static void tty_backspace_input(struct tty_device *tty) {
+    if (tty->input_cursor == 0) {
+        return;
+    }
+
+    tty->input_cursor--;
+    for (size_t i = tty->input_cursor; i + 1 < tty->input_len; i++) {
+        tty->input_buffer[i] = tty->input_buffer[i + 1];
+    }
+    tty->input_len--;
+
+    tty_gui_cursor_left();
+    tty_redraw_from_cursor(tty, tty->input_cursor);
+    tty_write(NULL, " ", 1);
+    tty_move_cursor_left(tty->input_len - tty->input_cursor + 1);
+}
+
+static void tty_commit_input_line(int minor, struct tty_device *tty, char terminator) {
+    for (size_t i = 0; i < tty->input_len; i++) {
+        if (!produce_ring_buffer(&tty->rx, &tty->input_buffer[i])) {
+            return;
+        }
+    }
+
+    if (!produce_ring_buffer(&tty->rx, &terminator)) {
+        return;
+    }
+
+    tty->input_len = 0;
+    tty->input_cursor = 0;
+    wake_up_readers(minor);
+}
+
+static void tty_clear_input_line(struct tty_device *tty) {
+    tty->input_len = 0;
+    tty->input_cursor = 0;
+}
+
+static void tty_handle_arrow(struct tty_device *tty, char code) {
+    if (code == 'D' && tty->input_cursor > 0) {
+        tty->input_cursor--;
+        tty_gui_cursor_left();
+    } else if (code == 'C' && tty->input_cursor < tty->input_len) {
+        tty->input_cursor++;
+        tty_move_cursor_right(1);
+    }
+}
+
 void tty_send_input(int minor, const char *buffer, size_t count) {
     if (buffer == NULL || tty_state.num_ttys <= minor) {
         return;
     }
 
+    struct tty_device *tty = tty_state.devices[minor];
+    if (tty == NULL) {
+        return;
+    }
+
     while (count > 0) {
-        char to_write = *buffer;
+        char ch = *buffer;
+
+        if (tty->escape_state == 1) {
+            tty->escape_state = (ch == '[' || ch == 'O') ? 2 : 0;
+            buffer++;
+            count--;
+            continue;
+        }
+
+        if (tty->escape_state == 2) {
+            tty_handle_arrow(tty, ch);
+            tty->escape_state = 0;
+            buffer++;
+            count--;
+            continue;
+        }
+
+        if (ch == 0x1B) {
+            tty->escape_state = 1;
+            buffer++;
+            count--;
+            continue;
+        }
+
+        char to_write = ch;
         if (*buffer == 0x03) {
             s_kill(-tty_state.devices[minor]->fg_pgid, SIGINT);
             tty_write(NULL, "^C", 2);
+            tty_clear_input_line(tty);
             to_write = 0x04;
         } else if (*buffer == 0x1A) {
             s_kill(-tty_state.devices[minor]->fg_pgid, SIGTSTP);
             tty_write(NULL, "^Z", 2);
+            tty_clear_input_line(tty);
             to_write = 0;
         } else if (*buffer == 0x7F) {
-            bool wrote = remove_back_ring_buffer(&tty_state.devices[minor]->rx);
-            if (!wrote) {
-                return;
-            }
-            tty_write(NULL, "\b \b", 3);
+            tty_backspace_input(tty);
             to_write = 0;
         } else if (*buffer == 0x0C) {
-            to_write = 0x0C;
-        } else if (*buffer != 0x04){
+            tty_commit_input_line(minor, tty, 0x0C);
+            to_write = 0;
+        } else if (*buffer == '\n') {
+            tty_move_cursor_right(tty->input_len - tty->input_cursor);
             tty_write(NULL, buffer, 1);
+            tty_commit_input_line(minor, tty, '\n');
+            to_write = 0;
+        } else if (*buffer == 0x04) {
+            if (tty->input_len == 0) {
+                tty_commit_input_line(minor, tty, 0x04);
+            }
+            to_write = 0;
+        } else {
+            tty_insert_input_char(tty, ch);
+            to_write = 0;
         }
 
         if (to_write) {
-            bool wrote_char = produce_ring_buffer(&tty_state.devices[minor]->rx, &to_write);
-            if (!wrote_char) {
+            if (!produce_ring_buffer(&tty_state.devices[minor]->rx, &to_write)) {
                 return;
             }
         }
 
-        if (to_write == 0x04 || to_write == 0x0C || *buffer == '\n') {
+        if (to_write == 0x04 || to_write == 0x0C) {
             wake_up_readers(minor);
         }
 

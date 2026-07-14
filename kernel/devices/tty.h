@@ -9,6 +9,7 @@
 #include "fs/oft.h"
 
 #define MAX_TTY_DEVICES 16
+#define TTY_INPUT_BUFFER_SIZE 4096
 
 struct tty_device {
     uint32_t minor;
@@ -24,6 +25,11 @@ struct tty_device {
     int refcount;
 
     pid_t fg_pgid;
+
+    char input_buffer[TTY_INPUT_BUFFER_SIZE];
+    size_t input_len;
+    size_t input_cursor;
+    uint8_t escape_state;
 };
 
 struct tty_driver_state {

@@ -102,10 +102,37 @@ void advance_cursor(void) {
     }
 }
 
+void tty_gui_cursor_left(void) {
+    if (cursor_row == 0 && cursor_col == 0) {
+        return;
+    }
+
+    toggle_cursor();
+    if (cursor_col == 0) {
+        cursor_row--;
+        cursor_col = MAX_COLS - 1;
+    } else {
+        cursor_col--;
+    }
+    toggle_cursor();
+}
+
+void tty_gui_cursor_right(void) {
+    if (cursor_row == MAX_ROWS - 1 && cursor_col == MAX_COLS - 1) {
+        return;
+    }
+
+    toggle_cursor();
+    cursor_col++;
+    if (cursor_col == MAX_COLS) {
+        cursor_col = 0;
+        cursor_row++;
+    }
+    toggle_cursor();
+}
+
 void backtrack_cursor(void) {
-    toggle_cursor();
-    cursor_col--;
-    toggle_cursor();
+    tty_gui_cursor_left();
 }
 
 static void clear_screen(void) {
