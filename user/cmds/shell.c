@@ -72,19 +72,6 @@ void *shell_init(void *args) {
         return NULL;
     }
 
-    // Setup ctr-C handling
-    struct sigaction sig_a;
-    sigemptyset(&sig_a.sa_mask);
-    sig_a.sa_handler = ctrCHandler;
-    sig_a.sa_flags = 0;
-    sigaction(SIGINT, &sig_a, NULL);
-
-    struct sigaction sig_a_ctr_z;
-    sigemptyset(&sig_a_ctr_z.sa_mask);
-    sig_a_ctr_z.sa_handler = ctrZHandler;
-    sig_a_ctr_z.sa_flags = 0; // SA_RESTART here
-    sigaction(SIGTSTP, &sig_a_ctr_z, NULL);
-
 	// Setup SIGTSP + SIGTTOU blocking
     sigset_t mask;
     sigemptyset(&mask);

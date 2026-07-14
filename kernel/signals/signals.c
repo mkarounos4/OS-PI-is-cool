@@ -99,7 +99,12 @@ int s_kill(pid_t pid, int signal) {
         return (int)SYS_ESRCH;
     }
     if (pcb == get_curr_process() && !(pcb->mask & (1 << signal))) {
-        pcb->sigactions[signal].sa_handler(signal);
+        void (*handler)(int) = pcb->sigactions[signal].sa_handler;
+        if (handler == SIG_DFL || handler == SIG_IGN) {
+            handler(signal);
+        } else {
+            pcb->pending_signals |= (1 << signal);
+        }
         return 0;
     }
 

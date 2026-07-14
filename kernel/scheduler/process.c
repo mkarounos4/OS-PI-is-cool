@@ -349,15 +349,19 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
         return (pid_t)SYS_ENOMEM;
     }
 
-    uint64_t kernel_stack_page_va = PROC_KERNEL_STACK_TOP - PAGE_SIZE;
-    uint8_t *kernel_stack_page = pt_seed_kernel_page(user_l0,
-                                                     kernel_stack_page_va);
-    if (kernel_stack_page == NULL) {
-        uart_puts("ERROR: failed to seed process kernel stack");
-        return (pid_t)SYS_ENOMEM;
+    uint64_t kernel_stack_base = PROC_KERNEL_STACK_TOP - PROC_KERNEL_STACK_SIZE;
+    for (uint64_t va = kernel_stack_base; va < PROC_KERNEL_STACK_TOP;
+         va += PAGE_SIZE) {
+        if (pt_seed_kernel_page(user_l0, va) == NULL) {
+            uart_puts("ERROR: failed to seed process kernel stack");
+            return (pid_t)SYS_ENOMEM;
+        }
     }
 
     uint64_t frame_va = PROC_KERNEL_STACK_TOP - sizeof(struct trap_frame);
+    uint64_t kernel_stack_page_va = frame_va & ~(PAGE_SIZE - 1);
+    uint8_t *kernel_stack_page = pt_get_mapped_page(user_l0,
+                                                    kernel_stack_page_va);
     struct trap_frame *frame = (struct trap_frame *)(uintptr_t)
         (kernel_stack_page + (frame_va - kernel_stack_page_va));
 
@@ -573,9 +577,11 @@ pid_t fork(struct trap_frame *frame) {
     cpy_address_space(parent, child);
 
     uint64_t frame_va = (uint64_t)(uintptr_t)frame;
-    uint64_t kernel_stack_page_va = PROC_KERNEL_STACK_TOP - PAGE_SIZE;
+    uint64_t kernel_stack_base = PROC_KERNEL_STACK_TOP - PROC_KERNEL_STACK_SIZE;
+    uint64_t kernel_stack_page_va = frame_va & ~(PAGE_SIZE - 1);
     uint64_t frame_offset = frame_va - kernel_stack_page_va;
-    if (frame_offset >= PAGE_SIZE) {
+    if (frame_va < kernel_stack_base || frame_va >= PROC_KERNEL_STACK_TOP ||
+        frame_offset >= PAGE_SIZE) {
         proc_destroy(child);
         return (pid_t)SYS_EINVAL;
     }
@@ -638,6 +644,10 @@ void terminate_process(pcb_t *pcb) {
 }
 
 void block_process(pcb_t *pcb) {
+    if (pcb == NULL) {
+        return;
+    }
+
     pcb->state = PROC_BLOCKED_STATE;
     if (get_curr_process() == pcb) {
         schedule_yield();
@@ -645,6 +655,10 @@ void block_process(pcb_t *pcb) {
 }
 
 void unblock_process(pcb_t *pcb) {
+    if (pcb == NULL) {
+        return;
+    }
+
     if (pcb->state != PROC_BLOCKED_STATE) {
         return;
     }

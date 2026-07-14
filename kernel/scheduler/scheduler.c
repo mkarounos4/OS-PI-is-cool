@@ -197,8 +197,11 @@ void scheduler_tick(void *ctx) {
         int curr = 0;
         while (curr_proc->pending_signals >> curr) {
             if ((curr_proc->pending_signals & (1 << curr)) && !(curr_proc->mask & (1 << curr))) {
+                void (*handler)(int) = curr_proc->sigactions[curr].sa_handler;
                 curr_proc->pending_signals &= ~(1 << curr);
-                curr_proc->sigactions[curr].sa_handler(curr);
+                if (handler == SIG_DFL || handler == SIG_IGN) {
+                    handler(curr);
+                }
             }
             curr++;
         }

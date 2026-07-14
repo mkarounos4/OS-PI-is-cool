@@ -51,10 +51,6 @@ static void repair_default_fops(struct oft_entry *entry) {
         return;
     }
 
-    if (entry->inode->inode.metadata.fops != NULL) {
-        return;
-    }
-
     uint8_t type = entry->inode->inode.metadata.type;
     if (type == DIRECTORY_TYPE) {
         entry->inode->inode.metadata.fops = get_default_dir_fops();

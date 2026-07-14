@@ -15,6 +15,7 @@ typedef void *ptr_t;
 #define ECHILD_NEG (-ECHILD)
 
 #define BLOCK_UNTIL_NEW_CHILD 1
+#define BLOCK_UNTIL_TTY_REQUEST 8
 
 #define SIGKILL 9
 #define SIGSTOP 10
@@ -69,6 +70,7 @@ enum syscall_type {
     S_GETCWD = 44,
     S_SLEEP = 45,
     S_STAT = 46,
+    S_TTY_NEXT_REQUEST = 47,
 };
 
 long write_console(const char *s, uint64_t len);
@@ -83,6 +85,7 @@ long waitpid(pid_t pid, int *status, uint32_t flags);
 long sbrk(uint64_t old_brk, uint64_t new_brk);
 long kill(pid_t pid, int signal);
 long block_until_event(uint32_t events);
+long tty_next_request(void);
 void putstr(const char *s);
 void puthex(uint64_t value);
 

@@ -54,6 +54,7 @@ enum syscall_type {
     S_GETCWD = 44,
     S_SLEEP = 45,
     S_STAT = 46,
+    S_TTY_NEXT_REQUEST = 47,
 };
 
 struct trap_frame *syscall_dispatch(struct trap_frame *frame);

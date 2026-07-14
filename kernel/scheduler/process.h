@@ -30,6 +30,7 @@ typedef int32_t pid_t;
 #define BLOCK_UNTIL_NEW_CHILD 1
 #define BLOCK_UNTIL_SIGNAL 2
 #define BLOCK_UNTIL_TIMER 4
+#define BLOCK_UNTIL_TTY_REQUEST 8
 
 enum process_state {
     PROC_UNUSED_STATE,

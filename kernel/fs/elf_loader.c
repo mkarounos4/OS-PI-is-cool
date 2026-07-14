@@ -345,14 +345,15 @@ int elf_exec_process(pcb_t *pcb, const char *path, char *const argv[],
         return INVALID_ARGS;
     }
 
-    uint64_t kernel_stack_page_va = PROC_KERNEL_STACK_TOP - PAGE_SIZE;
-    uint8_t *new_kernel_stack_page = pt_seed_kernel_page(new_table,
-                                                         kernel_stack_page_va);
-    if (new_kernel_stack_page == NULL) {
-        free_exec_args(args, argc);
-        destroy_page_table(new_table);
-        k_close(entry);
-        return INVALID_ARGS;
+    uint64_t kernel_stack_base = PROC_KERNEL_STACK_TOP - PROC_KERNEL_STACK_SIZE;
+    for (uint64_t va = kernel_stack_base; va < PROC_KERNEL_STACK_TOP;
+         va += PAGE_SIZE) {
+        if (pt_seed_kernel_page(new_table, va) == NULL) {
+            free_exec_args(args, argc);
+            destroy_page_table(new_table);
+            k_close(entry);
+            return INVALID_ARGS;
+        }
     }
 
     uint64_t user_sp = USER_STACK_TOP;
@@ -418,26 +419,38 @@ int elf_exec_process(pcb_t *pcb, const char *path, char *const argv[],
     }
 
     uint64_t *old_table = (uint64_t *)(uintptr_t)pcb->ctx.ttbr0_el1_va;
-    uint64_t frame_offset = frame_va - kernel_stack_page_va;
-    if (frame_offset >= PAGE_SIZE) {
+    uint64_t frame_page_va = frame_va & ~((uint64_t)PAGE_OFFSET_MASK);
+    uint64_t frame_offset = frame_va - frame_page_va;
+    if (frame_va < kernel_stack_base || frame_va >= PROC_KERNEL_STACK_TOP ||
+        frame_offset >= PAGE_SIZE) {
         free_exec_args(args, argc);
         destroy_page_table(new_table);
         return INVALID_ARGS;
     }
 
-    void *old_kernel_stack_page = pt_get_mapped_page(old_table,
-                                                     kernel_stack_page_va);
-    if (old_kernel_stack_page == NULL) {
+    for (uint64_t va = kernel_stack_base; va < PROC_KERNEL_STACK_TOP;
+         va += PAGE_SIZE) {
+        void *old_kernel_stack_page = pt_get_mapped_page(old_table, va);
+        void *new_kernel_stack_page = pt_get_mapped_page(new_table, va);
+        if (old_kernel_stack_page == NULL || new_kernel_stack_page == NULL) {
+            free_exec_args(args, argc);
+            destroy_page_table(new_table);
+            return INVALID_ARGS;
+        }
+
+        copy_bytes(new_kernel_stack_page, old_kernel_stack_page, PAGE_SIZE);
+    }
+
+    uint8_t *new_frame_page = pt_get_mapped_page(new_table, frame_page_va);
+    if (new_frame_page == NULL) {
         free_exec_args(args, argc);
         destroy_page_table(new_table);
         return INVALID_ARGS;
     }
-
-    copy_bytes(new_kernel_stack_page, old_kernel_stack_page, PAGE_SIZE);
 
     struct trap_frame *new_frame =
-        (struct trap_frame *)(uintptr_t)(new_kernel_stack_page + frame_offset);
-    uint64_t new_frame_va = kernel_stack_page_va + frame_offset;
+        (struct trap_frame *)(uintptr_t)(new_frame_page + frame_offset);
+    uint64_t new_frame_va = frame_page_va + frame_offset;
 
     new_frame->elr = entry_pc;
     new_frame->sp = user_sp;
