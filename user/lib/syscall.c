@@ -49,6 +49,10 @@ long block_until_event(uint32_t events) {
     return sys_call1(S_BLOCK_UNTIL_EVENT, events);
 }
 
+long tty_next_request(void) {
+    return sys_call0(S_TTY_NEXT_REQUEST);
+}
+
 void putstr(const char *s) {
     uint64_t len = 0;
     while (s[len] != '\0') {

@@ -9,8 +9,14 @@
 int tty_open(struct oft_entry *entry);
 int tty_close(struct oft_entry *entry);
 int tty_read(struct oft_entry *entry, char *buffer, size_t count);
+static void tty_clear_input_line(struct tty_device *tty);
+void wake_up_readers(int minor);
 
 static struct tty_driver_state tty_state;
+static int pending_shell_ttys[MAX_TTY_DEVICES];
+static int pending_shell_count;
+static int pending_terminal_creates;
+static uint8_t tty_nodes_ready;
 
 static const struct file_operations tty_fops = {
     .open = tty_open,
@@ -28,21 +34,83 @@ static struct char_driver tty_char_driver = {
 
 int tty_drivers_init(void) {
     kmemset(&tty_state, 0, sizeof(struct tty_driver_state));
+    pending_shell_count = 0;
+    pending_terminal_creates = 0;
+    tty_nodes_ready = 0;
 
     return register_char_driver(&tty_char_driver);
+}
+
+int tty_create_device_nodes(void) {
+    for (int minor = 0; minor < MAX_TTY_DEVICES; minor++) {
+        struct dev_st device_number = {
+            .major = TTY_MAJOR,
+            .minor = (uint16_t)minor,
+        };
+        err_t err = devfs_create_char_device(device_number);
+        if (err) {
+            return err;
+        }
+    }
+
+    tty_nodes_ready = 1;
+    return 0;
+}
+
+int tty_pop_shell_request(void) {
+    if (pending_terminal_creates > 0) {
+        pending_terminal_creates--;
+        int created = tty_create();
+        if (created >= 0) {
+            tty_gui_activate_terminal(created);
+            return created;
+        }
+    }
+
+    if (pending_shell_count == 0) {
+        return -1;
+    }
+
+    int minor = pending_shell_ttys[0];
+    for (int i = 1; i < pending_shell_count; i++) {
+        pending_shell_ttys[i - 1] = pending_shell_ttys[i];
+    }
+    pending_shell_count--;
+    return minor;
 }
 
 int tty_create() {
     if (tty_state.num_ttys == MAX_TTY_DEVICES) {
         return -1;
     }
-
-    uint16_t minor = tty_state.num_ttys++;
-    struct tty_device *new_tty = kmalloc(sizeof(struct tty_device));
-    if (new_tty == NULL) {
-        return -2;
+    if (!tty_nodes_ready) {
+        return -1;
     }
-    tty_state.devices[minor] = new_tty;
+
+    int minor = -1;
+    for (int i = 0; i < MAX_TTY_DEVICES; i++) {
+        if (tty_state.devices[i] == NULL || !tty_state.devices[i]->active) {
+            minor = i;
+            break;
+        }
+    }
+    if (minor < 0) {
+        return -1;
+    }
+
+    struct tty_device *new_tty = tty_state.devices[minor];
+    if (new_tty == NULL) {
+        new_tty = kmalloc(sizeof(struct tty_device));
+        if (new_tty == NULL) {
+            return -2;
+        }
+        tty_state.devices[minor] = new_tty;
+        kmemset(new_tty, 0, sizeof(struct tty_device));
+        new_tty->rx = create_ring_buffer(4096);
+        new_tty->tx = create_ring_buffer(4096);
+        new_tty->rx_wait_queue = vec_new(2, NULL);
+        new_tty->tx_wait_queue = vec_new(2, NULL);
+    }
 
     new_tty->name[0] = 't';
     new_tty->name[1] = 't';
@@ -54,42 +122,43 @@ int tty_create() {
         .major = TTY_MAJOR,
         .minor = minor,
     };
-    
-    new_tty->rx = create_ring_buffer(4096);
-    new_tty->tx = create_ring_buffer(4096);
-    
-    new_tty->rx_wait_queue = vec_new(2, NULL);
-    new_tty->tx_wait_queue = vec_new(2, NULL);
 
     new_tty->fg_pgid = 0;
+    new_tty->active = 0;
     new_tty->input_len = 0;
     new_tty->input_cursor = 0;
     new_tty->escape_state = 0;
+    new_tty->rx.head = NULL;
+    new_tty->rx.tail = NULL;
+    new_tty->rx.size = 0;
+    new_tty->tx.head = NULL;
+    new_tty->tx.tail = NULL;
+    new_tty->tx.size = 0;
 
-    err_t err = devfs_create_char_device(new_tty->device_number);
-    if (err) {
-        return err;
-    }
-
+    new_tty->active = 1;
+    tty_state.num_ttys++;
+    tty_gui_set_terminal_visible(minor, 1);
     return minor;
 }
 
 int tty_open(struct oft_entry *entry) {
     uint16_t minor = entry->inode->inode.metadata.i_rdev.minor;
+    if (minor >= MAX_TTY_DEVICES || tty_state.devices[minor] == NULL ||
+        !tty_state.devices[minor]->active) {
+        return -1;
+    }
     tty_state.devices[minor]->refcount++;
     return 0;
 }
 
 int tty_close(struct oft_entry *entry) {
     uint16_t minor = entry->inode->inode.metadata.i_rdev.minor;
+    if (minor >= MAX_TTY_DEVICES || tty_state.devices[minor] == NULL) {
+        return -1;
+    }
     tty_state.devices[minor]->refcount--;
-    if (tty_state.devices[minor]->refcount == 0) {
-        vec_destroy(&tty_state.devices[minor]->rx_wait_queue);
-        vec_destroy(&tty_state.devices[minor]->tx_wait_queue);
-        destroy_ring_buffer(&tty_state.devices[minor]->rx);
-        destroy_ring_buffer(&tty_state.devices[minor]->tx);
-        kfree(tty_state.devices[minor]);
-        // TODO: somehow free /dev/ttyx file
+    if (tty_state.devices[minor]->refcount < 0) {
+        tty_state.devices[minor]->refcount = 0;
     }
 
     return 0;
@@ -99,6 +168,9 @@ int tty_read(struct oft_entry *entry, char *buffer, size_t count) {
     uint16_t minor = entry->inode->inode.metadata.i_rdev.minor;
 
     struct tty_device *curr_tty = tty_state.devices[minor];
+    if (minor >= MAX_TTY_DEVICES || curr_tty == NULL || !curr_tty->active) {
+        return 0;
+    }
 
     pcb_t *curr_pcb = get_curr_process();
     if (curr_pcb == NULL) {
@@ -143,6 +215,10 @@ int tty_write(struct oft_entry *entry, const char *buffer, size_t count) {
     if (entry != NULL) {
         minor = entry->inode->inode.metadata.i_rdev.minor;
     }
+    if (minor >= MAX_TTY_DEVICES || tty_state.devices[minor] == NULL ||
+        !tty_state.devices[minor]->active) {
+        return 0;
+    }
     /*uint16_t minor = entry->inode->inode.metadata.i_rdev.major;
 
     struct tty_device *curr_tty = tty_state.devices[minor];
@@ -176,9 +252,9 @@ int tty_format_proc(char *buf, size_t size) {
     }
 
     int len = snprintf(buf, size, "ttys: %u\n", tty_state.num_ttys);
-    for (uint16_t minor = 0; minor < tty_state.num_ttys; minor++) {
+    for (uint16_t minor = 0; minor < MAX_TTY_DEVICES; minor++) {
         struct tty_device *tty = tty_state.devices[minor];
-        if (tty == NULL) {
+        if (tty == NULL || !tty->active) {
             continue;
         }
 
@@ -222,6 +298,44 @@ void wake_up_readers(int minor) {
         }
         unblock_thread(thread_get_by_tid((int)(uintptr_t)tid));
     }
+}
+
+static int tty_visible_count(void) {
+    int count = 0;
+    for (int i = 0; i < MAX_TTY_DEVICES; i++) {
+        if (tty_state.devices[i] != NULL &&
+            tty_state.devices[i]->active &&
+            tty_gui_is_terminal_visible(i)) {
+            count++;
+        }
+    }
+    return count;
+}
+
+static int tty_show_hidden_terminal(void) {
+    for (int i = 0; i < MAX_TTY_DEVICES; i++) {
+        if (tty_state.devices[i] != NULL &&
+            tty_state.devices[i]->active &&
+            !tty_gui_is_terminal_visible(i)) {
+            tty_gui_set_terminal_visible(i, 1);
+            tty_gui_activate_terminal(i);
+            return i;
+        }
+    }
+    return -1;
+}
+
+int tty_delete(int minor) {
+    if (minor < 0 || minor >= MAX_TTY_DEVICES ||
+        tty_state.devices[minor] == NULL ||
+        !tty_state.devices[minor]->active ||
+        !tty_gui_is_terminal_visible(minor) ||
+        tty_visible_count() <= 1) {
+        return -1;
+    }
+
+    tty_gui_set_terminal_visible(minor, 0);
+    return 0;
 }
 
 static void tty_move_cursor_left(size_t count) {
@@ -316,11 +430,10 @@ static void tty_switch_terminal_delta(int delta) {
     }
 
     int active = tty_gui_get_active_terminal();
-    int next = (active + delta) % tty_state.num_ttys;
-    if (next < 0) {
-        next += tty_state.num_ttys;
+    int next = tty_gui_next_visible_terminal(active, delta);
+    if (next >= 0) {
+        tty_gui_activate_terminal(next);
     }
-    tty_gui_activate_terminal(next);
 }
 
 static void tty_reset_escape(struct tty_device *tty) {
@@ -374,14 +487,26 @@ void tty_send_input(int minor, const char *buffer, size_t count) {
         char ch = *buffer;
 
         if (ch == 0x14) {
-            if (tty_state.num_ttys < MAX_TTY_DEVICES) {
-                int created = tty_create();
-                if (created >= 0) {
-                    tty_gui_activate_terminal(created);
-                }
+            int restored = tty_show_hidden_terminal();
+            if (restored >= 0) {
+                buffer++;
+                count--;
+                continue;
+            }
+
+            if (tty_state.num_ttys + pending_terminal_creates < MAX_TTY_DEVICES) {
+                pending_terminal_creates++;
+                send_unblock_event(0, BLOCK_UNTIL_TTY_REQUEST);
             } else if (tty_state.num_ttys > 1) {
                 tty_gui_activate_terminal(1);
             }
+            buffer++;
+            count--;
+            continue;
+        }
+
+        if (ch == 0x17) {
+            tty_delete(minor);
             buffer++;
             count--;
             continue;

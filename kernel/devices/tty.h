@@ -8,7 +8,7 @@
 #include "scheduler/scheduler.h"
 #include "fs/oft.h"
 
-#define MAX_TTY_DEVICES 2
+#define MAX_TTY_DEVICES 8
 #define TTY_INPUT_BUFFER_SIZE 4096
 
 struct tty_device {
@@ -25,6 +25,7 @@ struct tty_device {
     int refcount;
 
     pid_t fg_pgid;
+    uint8_t active;
 
     char input_buffer[TTY_INPUT_BUFFER_SIZE];
     size_t input_len;
@@ -40,7 +41,10 @@ struct tty_driver_state {
 
 void tty_send_input(int minor, const char *buffer, size_t count);
 int tty_drivers_init(void);
+int tty_create_device_nodes(void);
 int tty_create();
+int tty_delete(int minor);
+int tty_pop_shell_request(void);
 int tcsetpgrp(int fd, pid_t pgid);
 int tty_write(struct oft_entry *entry, const char *buffer, size_t count);
 int tty_format_proc(char *buf, size_t size);

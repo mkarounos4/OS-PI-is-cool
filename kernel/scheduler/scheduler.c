@@ -141,6 +141,57 @@ void scheduler_tick(void *ctx) {
 
     timer_schedule_interrupt_ms(SCHEDULER_QUANTUM_MS, set_ready_to_schedule, 0);
     context_switch(old_ctx, &next_thread->ctx);
+
+    // Handle queue'd process level signals
+    pcb_t *curr_proc = curr_thread->pcb;
+    if (curr_thread != NULL) {
+        if ((curr_proc->pending_signals & (1 << SIGKILL)) &&
+            curr_proc->sigactions[SIGKILL].sa_handler == SIG_DFL) {
+            curr_proc->pending_signals &= ~(1 << SIGKILL);
+            terminate_thread(curr_thread);
+        } else if ((curr_proc->pending_signals & (1 << SIGSTOP)) &&
+                   curr_proc->sigactions[SIGSTOP].sa_handler == SIG_DFL) {
+            curr_proc->pending_signals &= ~(1 << SIGSTOP);
+            stop_thread(curr_thread);
+        }
+
+        int curr = 0;
+        while (curr_proc->pending_signals >> curr) {
+            if ((curr_proc->pending_signals & (1 << curr)) && !(curr_thread->mask & (1 << curr))) {
+                void (*handler)(int) = curr_proc->sigactions[curr].sa_handler;
+                curr_proc->pending_signals &= ~(1 << curr);
+                if (handler == SIG_DFL || handler == SIG_IGN) {
+                    handler(curr);
+                }
+            }
+            curr++;
+        }
+    }
+
+    // Handle queue'd thread level signals
+    if (curr_thread != NULL) {
+        if ((curr_thread->pending_signals & (1 << SIGKILL)) &&
+            curr_proc->sigactions[SIGKILL].sa_handler == SIG_DFL) {
+            curr_thread->pending_signals &= ~(1 << SIGKILL);
+            terminate_thread(curr_thread);
+        } else if ((curr_thread->pending_signals & (1 << SIGSTOP)) &&
+                   curr_proc->sigactions[SIGSTOP].sa_handler == SIG_DFL) {
+            curr_thread->pending_signals &= ~(1 << SIGSTOP);
+            stop_thread(curr_thread);
+        }
+
+        int curr = 0;
+        while (curr_thread->pending_signals >> curr) {
+            if ((curr_thread->pending_signals & (1 << curr)) && !(curr_thread->mask & (1 << curr))) {
+                void (*handler)(int) = curr_proc->sigactions[curr].sa_handler;
+                curr_thread->pending_signals &= ~(1 << curr);
+                if (handler == SIG_DFL || handler == SIG_IGN) {
+                    handler(curr);
+                }
+            }
+            curr++;
+        }
+    }
 }
 
 pcb_t *get_curr_process(void) {

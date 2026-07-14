@@ -31,12 +31,19 @@ void *init_process_entry(void *args) {
     (void)args;
 
     spawn_shell_for_tty("0");
-    spawn_shell_for_tty("1");
 
     while (1) {
-        int ret = waitpid(-1, NULL, 0);
-        if (ret == -ECHILD) {
-            block_until_event(BLOCK_UNTIL_NEW_CHILD);
+        long tty_num;
+        while ((tty_num = tty_next_request()) >= 0) {
+            char tty_arg[2];
+            tty_arg[0] = (char)('0' + tty_num);
+            tty_arg[1] = '\0';
+            spawn_shell_for_tty(tty_arg);
+        }
+
+        int ret = waitpid(-1, NULL, WNOHANG);
+        if (ret <= 0) {
+            block_until_event(BLOCK_UNTIL_NEW_CHILD | BLOCK_UNTIL_TTY_REQUEST);
         }
     }
 

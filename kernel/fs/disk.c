@@ -24,6 +24,7 @@ static uint32_t inode_bitmap_start = 2;
 static uint32_t inode_bitmap_blocks = 1;
 static uint32_t inode_table_start = 3;
 static uint32_t data_start_block = 4;
+static unsigned char mount_block_buffer[FS_MOUNT_BLOCK_BUFFER_SIZE] __attribute__((aligned(16)));
 
 static err_t seed_user_bin_file(const user_bin_t *bin) {
     if (bin == NULL || bin->path == NULL || bin->start == NULL ||
@@ -580,13 +581,12 @@ err_t mount(void) {
         return err_code;
     }
 
-    unsigned char superblock_data[FS_MOUNT_BLOCK_BUFFER_SIZE] __attribute__((aligned(16)));
-    if (block_read(fs_get_base_block(), 1, superblock_data) != 0) {
+    if (block_read(fs_get_base_block(), 1, mount_block_buffer) != 0) {
         return FILE_READ_ERROR;
     }
 
     const struct superblock_st *superblock =
-        (const struct superblock_st *)superblock_data;
+        (const struct superblock_st *)mount_block_buffer;
     err_code = validate_superblock(superblock);
     if (err_code != SUCCESS) {
         return err_code;

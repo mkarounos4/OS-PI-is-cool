@@ -577,9 +577,11 @@ pid_t fork(struct trap_frame *frame) {
     cpy_address_space(parent, child);
 
     uint64_t frame_va = (uint64_t)(uintptr_t)frame;
-    uint64_t kernel_stack_page_va = PROC_KERNEL_STACK_TOP - PAGE_SIZE;
+    uint64_t kernel_stack_base = PROC_KERNEL_STACK_TOP - PROC_KERNEL_STACK_SIZE;
+    uint64_t kernel_stack_page_va = frame_va & ~(PAGE_SIZE - 1);
     uint64_t frame_offset = frame_va - kernel_stack_page_va;
-    if (frame_offset >= PAGE_SIZE) {
+    if (frame_va < kernel_stack_base || frame_va >= PROC_KERNEL_STACK_TOP ||
+        frame_offset >= PAGE_SIZE) {
         proc_destroy(child);
         return (pid_t)SYS_EINVAL;
     }

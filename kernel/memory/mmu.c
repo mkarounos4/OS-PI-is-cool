@@ -277,7 +277,7 @@ void handle_data_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t esr) {
                 return;
             }
 
-            table_base_addr = kernel_direct_map_va(curr_proc->ttbr0_el1);
+            table_base_addr = curr_proc->ttbr0_el1_va;
             int heap_fault = is_in_range(far, USER_HEAP_START, USER_HEAP_SIZE);
             int stack_fault = is_in_range(far, USER_STACK_TOP - USER_STACK_SIZE,
                                           USER_STACK_SIZE);
@@ -345,8 +345,7 @@ void handle_data_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t esr) {
         }
 
         // walk page table
-        uint64_t table_base_va = kernel_direct_map_va(curr_proc->ttbr0_el1);
-        uint64_t *l0 = (uint64_t *)(uintptr_t)table_base_va;
+        uint64_t *l0 = (uint64_t *)(uintptr_t)curr_proc->ttbr0_el1_va;
 
         uint64_t va = far;
         uint64_t l0_index = (va >> 39) & 0x1ffULL;

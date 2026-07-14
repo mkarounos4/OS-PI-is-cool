@@ -30,7 +30,6 @@ void kernel_main(void) {
     uart_init();
     printf("\nAArch64 bare-metal kernel entered\n");
     gui_framebuffer_init();
-    init_tty_gui();
     fan_init();
 
     exceptions_init();
@@ -56,6 +55,7 @@ void kernel_main(void) {
     kmem_init((void *)(uintptr_t)KERNEL_HEAP_START,
               (void *)(uintptr_t)(KERNEL_HEAP_START + KERNEL_HEAP_SIZE));
     printf("[boot] kernel heap ready\n");
+    init_tty_gui();
     struct Page *pages = kmalloc(RAM_END_PHYS / PAGE_SIZE);
     pt_init(pages);
     printf("[boot] virtual memory enabled\n");
@@ -101,13 +101,15 @@ void kernel_main(void) {
     } else {
         printf("[tty] Initialized tty driver.");
     }
-    for (int i = 0; i < 2; i++) {
-        int tty = tty_create();
-        if (tty < 0) {
-            printf("[tty] ERROR: failed to create tty instance\n");
-        } else {
-            printf("[tty] Created terminal");
-        }
+    err = tty_create_device_nodes();
+    if (err) {
+        printf("[tty] ERROR: failed to create tty device nodes\n");
+    }
+    int tty = tty_create();
+    if (tty < 0) {
+        printf("[tty] ERROR: failed to create tty instance\n");
+    } else {
+        printf("[tty] Created terminal");
     }
 
     scheduler_init();

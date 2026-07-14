@@ -251,12 +251,10 @@ err_t get_dirent_by_f_name(const char* f_name, uint8_t is_dir_type, struct fs_di
         return INVALID_ARGS;
     }
 
-    if (metadata.fops == NULL) {
-        metadata.fops = get_default_dir_fops();
-        err = set_inode_metadata(curr_dir, &metadata);
-        if (err != SUCCESS) {
-            return err;
-        }
+    metadata.fops = get_default_dir_fops();
+    err = set_inode_metadata(curr_dir, &metadata);
+    if (err != SUCCESS) {
+        return err;
     }
 
     if (metadata.fops->lookup == NULL) {
@@ -417,10 +415,8 @@ err_t list_dirents(ino_id_t ino_id, int out_fd) {
         return INVALID_ARGS;
     }
 
-    if (inode->inode.metadata.fops == NULL) {
-        inode->inode.metadata.fops = get_default_dir_fops();
-        inode->dirty = 1;
-    }
+    inode->inode.metadata.fops = get_default_dir_fops();
+    inode->dirty = 1;
 
     struct file_operations *fops = inode->inode.metadata.fops;
     if (fops == NULL || fops->open == NULL || fops->close == NULL ||
