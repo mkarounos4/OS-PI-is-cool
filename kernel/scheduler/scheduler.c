@@ -17,12 +17,15 @@
 static pcb_t *curr_proc;
 static uint64_t curr_tick;
 
+static thread_t *curr_thread;
+// priority queues for threads
+static Vec thread_ready_queues[3];
+
 static struct cpu_context boot_ctx;
 static struct cpu_context idle_ctx;
 static volatile int ready_to_schedule = 0;
 static void *ready_ctx = NULL;
 
-static Vec pri_qs[3];
 static int pri_counters[3] = {0, 0, 0};
 static const int MAX_PRI_CNTRS[3] = {9, 6, 4};
 static int curr_pri = 0;
@@ -35,32 +38,18 @@ static void set_ready_to_schedule(void *ctx) {
 }
 
 void add_task_to_scheduler(pcb_t *task) {
-    vec_insert(&(pri_qs[task->priority]), 0, (ptr_t *) task);
-}
-
-// Runs 4 quantum on 2, 6 on 1, and 9 on 0
-static pcb_t *get_next_task() {
-    for (int i = 0; i < 3; i++) {
-        if (!vec_is_empty(&(pri_qs[curr_pri]))) {
-            ptr_t to_return;
-            vec_pop_back(&(pri_qs[curr_pri]), &to_return);
-            pcb_t *pcb = (pcb_t*) to_return;
-            if (pcb->state != PROC_READY_STATE) {
-                return get_next_task();
-            }
-
-            pri_counters[curr_pri]++;
-            if (pri_counters[curr_pri] > MAX_PRI_CNTRS[curr_pri]) {
-                pri_counters[curr_pri] = 0;
-                curr_pri = (curr_pri+1) % 3;
-            }
-            return pcb;
-        }
-
-        curr_pri = (curr_pri+1) % 3;
+    if (task == NULL || task->state == PROC_UNUSED_STATE ||
+        task->state == PROC_ZOMBIE_STATE ||
+        task->state == PROC_STOPPED_STATE ||
+        task->state == PROC_BLOCKED_STATE) {
+        return;
     }
 
-    return NULL;
+    for (int i = 0; i < task->thread_count; i++) {
+        if (task->threads[i].state == THREAD_READY) {
+            add_thread_to_scheduler(&task->threads[i], task);
+        }
+    }
 }
 
 void idle_task_fn(void* args) {
@@ -73,10 +62,11 @@ void idle_task_fn(void* args) {
 void scheduler_init(void) {
     curr_tick = 0;
     curr_proc = NULL;
+    curr_thread = NULL;
     curr_pri = 0;
 
     for (int i = 0; i < 3; i++) {
-        pri_qs[i] = vec_new(2, NULL);
+        thread_ready_queues[i] = vec_new(2, NULL);
         pri_counters[i] = 0;
     }
 
@@ -111,12 +101,14 @@ void scheduler_init(void) {
 // Starts execution at thread 0. Does not return.
 void scheduler_start(void) {
     timer_schedule_interrupt_ms(SCHEDULER_QUANTUM_MS, set_ready_to_schedule, 0);
-    pcb_t *next_pcb = get_next_task();
-    curr_proc = next_pcb;
+    thread_t *next_thread = get_next_thread();
     
-    if (next_pcb != NULL) {
-        next_pcb->state = PROC_RUNNING_STATE;
-        context_switch(&boot_ctx, &next_pcb->ctx);
+    if (next_thread != NULL) {
+        curr_thread = next_thread;
+        curr_proc = next_thread->pcb;
+        curr_thread->state = THREAD_RUNNING;
+        curr_proc->state = PROC_RUNNING_STATE;
+        context_switch(&boot_ctx, &next_thread->ctx);
     } else {
         context_switch(&boot_ctx, &idle_ctx);
     }
@@ -142,45 +134,41 @@ static void __attribute__((unused)) scheduler_print_tick(unsigned int tid1, unsi
 // Timer interrupt handler which performs actual scheduling
 void scheduler_tick(void *ctx) {
     (void)ctx;
-
-    struct cpu_context *old_ctx;
-    struct cpu_context *new_ctx;
-
-    // Get previous ctx
-    if (curr_proc != NULL) {
-        old_ctx = &curr_proc->ctx;
-    } else {
-        // if idle task, ignore ctx
-        old_ctx = &idle_ctx;
-    }
-
-    if (curr_proc != NULL) {
-        if (curr_proc->state == PROC_RUNNING_STATE) {
-            curr_proc->state = PROC_READY_STATE;
-            add_task_to_scheduler(curr_proc);
+    
+    // Save current thread context
+    if (curr_thread != NULL) {
+        if (curr_thread->state == THREAD_RUNNING) {
+            curr_thread->state = THREAD_READY;
+            if (curr_thread->pcb != NULL &&
+                curr_thread->pcb->state == PROC_RUNNING_STATE) {
+                curr_thread->pcb->state = PROC_READY_STATE;
+            }
+            add_thread_to_scheduler(curr_thread, curr_thread->pcb);
         }
     }
 
-    // idle if no tasks
-    curr_proc = get_next_task();
-    // Load new proc heap to malloc
-    if (curr_proc == NULL) {
-        new_ctx = &idle_ctx;
-    } else {
-        new_ctx = &curr_proc->ctx;
+    // Get next thread from any process
+    thread_t *next_thread = get_next_thread();
 
-        // Update new thread data
+    if (next_thread == NULL) {
+        struct cpu_context *old_ctx = curr_thread ? &curr_thread->ctx : &idle_ctx;
+        curr_thread = NULL;
+        curr_proc = NULL;
+        timer_schedule_interrupt_ms(SCHEDULER_QUANTUM_MS, set_ready_to_schedule, 0);
+        context_switch(old_ctx, &idle_ctx);
+        return;
+    }
+
+    struct cpu_context *old_ctx = curr_thread ? &curr_thread->ctx : &idle_ctx;
+    curr_thread = next_thread;
+    curr_proc = next_thread->pcb;
+    next_thread->state = THREAD_RUNNING;
+    if (curr_proc != NULL) {
         curr_proc->state = PROC_RUNNING_STATE;
     }
 
-    // If next thread exists, run it
-    // scheduler_print_tick(old_pid, new_pid);
-    
-    // Setup next scheduler interrupt
     timer_schedule_interrupt_ms(SCHEDULER_QUANTUM_MS, set_ready_to_schedule, 0);
-
-    // context switch to next process
-    context_switch(old_ctx, new_ctx);
+    context_switch(old_ctx, &next_thread->ctx);
 
     // Handle queue'd signals
     if (curr_proc != NULL) {
@@ -210,6 +198,41 @@ void scheduler_tick(void *ctx) {
 
 pcb_t *get_curr_process() {
     return curr_proc;
+}
+
+thread_t *get_curr_thread(void) {
+    return curr_thread;
+}
+
+void add_thread_to_scheduler(thread_t *thread, pcb_t *pcb) {
+    if (thread == NULL) {
+        return;
+    }
+    thread->pcb = pcb;
+    vec_insert(&thread_ready_queues[pcb->priority], 0, (ptr_t*)thread);
+}
+
+thread_t *get_next_thread(void) {
+    for (int i = 0; i < 3; i++) {
+        if (!vec_is_empty(&thread_ready_queues[curr_pri])) {
+            ptr_t to_return;
+            vec_pop_back(&thread_ready_queues[curr_pri], &to_return);
+            thread_t *thread = (thread_t*)to_return;
+
+            if (thread->state != THREAD_READY) {
+                return get_next_thread();
+            }
+
+            pri_counters[curr_pri]++;
+            if (pri_counters[curr_pri] > MAX_PRI_CNTRS[curr_pri]) {
+                pri_counters[curr_pri] = 0;
+                curr_pri = (curr_pri + 1) % 3;
+            }
+            return thread;
+        }
+        curr_pri = (curr_pri + 1) % 3;
+    }
+    return NULL;
 }
 
 void schedule_yield() {

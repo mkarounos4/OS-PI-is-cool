@@ -683,15 +683,16 @@ int k_exec_process(int pid, const char *path, char *const argv[]) {
         return INVALID_ARGS;
     }
 
+    thread_t *main_thread = &pcb->threads[0];
     uint64_t kernel_stack_page_va = PROC_KERNEL_STACK_TOP - PAGE_SIZE;
-    uint64_t frame_va = pcb->ctx.x19;
+    uint64_t frame_va = main_thread->ctx.x19;
     uint64_t frame_offset = frame_va - kernel_stack_page_va;
     if (frame_offset >= PAGE_SIZE) {
         return INVALID_ARGS;
     }
 
     void *kernel_stack_page =
-        pt_get_mapped_page((uint64_t *)(uintptr_t)pcb->ctx.ttbr0_el1_va,
+        pt_get_mapped_page((uint64_t *)(uintptr_t)main_thread->ctx.ttbr0_el1_va,
                            kernel_stack_page_va);
     if (kernel_stack_page == NULL) {
         return INVALID_ARGS;
