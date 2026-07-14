@@ -17,6 +17,10 @@ long delay(uint64_t ms) {
     return sys_call1(S_DELAY, ms);
 }
 
+long sleep(uint64_t ms) {
+    return sys_call1(S_SLEEP, ms);
+}
+
 long exit(int code) {
     return sys_call1(S_EXIT, code);
 }

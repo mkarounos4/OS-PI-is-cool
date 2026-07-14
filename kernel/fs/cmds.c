@@ -6,6 +6,7 @@
 #include "inode_cache.h"
 #include "kapi.h"
 #include "oft.h"
+#include "timer/timer.h"
 #include "scheduler/scheduler.h"
 
 int open(const char *fname, int mode) {
@@ -593,6 +594,9 @@ err_t getcwd(char* path, size_t size) {
 }
 
 err_t sleep(long ms) {
-    (void)ms;
-    return INVALID_ARGS;
+    if (ms < 0) {
+        return INVALID_ARGS;
+    }
+
+    return timer_sleep_ms((uint64_t)ms) == 0 ? SUCCESS : INVALID_ARGS;
 }

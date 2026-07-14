@@ -342,7 +342,7 @@ struct trap_frame *syscall_dispatch(struct trap_frame *frame) {
                                          (size_t)frame->regs[1]));
         break;
     case S_SLEEP:
-        ret = SYS_ENOSYS;
+        ret = timer_sleep_ms(frame->regs[0]);
         break;
     case S_STAT:
         ret = fs_err_to_sys_errno(k_stat((const char *)(uintptr_t)frame->regs[0],
