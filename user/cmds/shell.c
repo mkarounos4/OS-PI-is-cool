@@ -27,9 +27,16 @@ void print_status_updates();
 void print_prompt();
 
 int main(int argc, char **argv) {
-    (void)argc;
-    (void)argv;
-    shell_init((void*)0);
+    int shell_num = 0;
+    if (argc > 1) {
+        char *endptr;
+        long parsed = strtol(argv[1], &endptr, 10);
+        if (argv[1] != endptr && *endptr == '\0') {
+            shell_num = (int)parsed;
+        }
+    }
+
+    shell_init((void *)(uintptr_t)shell_num);
     return 0;
 }
 

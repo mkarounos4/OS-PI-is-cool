@@ -8,7 +8,7 @@
 #include "scheduler/scheduler.h"
 #include "fs/oft.h"
 
-#define MAX_TTY_DEVICES 16
+#define MAX_TTY_DEVICES 2
 #define TTY_INPUT_BUFFER_SIZE 4096
 
 struct tty_device {
