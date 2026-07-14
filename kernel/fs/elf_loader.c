@@ -455,6 +455,7 @@ int elf_exec_process(pcb_t *pcb, const char *path, char *const argv[],
     pcb->ctx.sp = new_frame_va;
     pcb->ctx.ttbr0_el1 = kernel_phys_addr((uint64_t)(uintptr_t)new_table);
     pcb->ctx.ttbr0_el1_va = (uint64_t)(uintptr_t)new_table;
+    pcb->threads[0].ctx = pcb->ctx;
 
     if (install_table) {
         install_ttbr0(pcb->ctx.ttbr0_el1);
