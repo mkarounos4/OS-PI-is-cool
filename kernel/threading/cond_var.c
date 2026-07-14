@@ -54,7 +54,7 @@ int cond_wait(condition_variable_t *cond, mutex_t *mutex)
         return -1;
     }
 
-    vec_push_back(&cond->waiting_threads, (ptr_t)current->tid);
+    vec_push_back(&cond->waiting_threads, (ptr_t)(uintptr_t)current->tid);
 
     mutex_unlock(mutex);
 
@@ -83,7 +83,7 @@ int cond_signal(condition_variable_t *cond)
     ptr_t tid = vec_get(&cond->waiting_threads, 0);
     vec_erase(&cond->waiting_threads, 0);
 
-    wake_thread((tid_t)tid);
+    wake_thread((tid_t)(uintptr_t)tid);
 
     return 0;
 }
@@ -100,7 +100,7 @@ int cond_broadcast(condition_variable_t *cond)
         ptr_t tid = vec_get(&cond->waiting_threads, 0);
         vec_erase(&cond->waiting_threads, 0);
 
-        wake_thread((tid_t)tid);
+        wake_thread((tid_t)(uintptr_t)tid);
     }
 
     return 0;

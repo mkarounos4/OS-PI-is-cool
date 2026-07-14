@@ -56,7 +56,7 @@ int sem_wait(semaphore_t *sem)
         return -1;
     }
 
-    vec_push_back(&sem->waiting_threads, (ptr_t *)current->tid);
+    vec_push_back(&sem->waiting_threads, (ptr_t)(uintptr_t)current->tid);
 
     current->state = THREAD_STOPPED;
 
@@ -81,7 +81,7 @@ int sem_post(semaphore_t *sem)
             ptr_t tid = vec_get(&sem->waiting_threads, 0);
             vec_erase(&sem->waiting_threads, 0);
 
-            wake_thread((tid_t)tid);
+            wake_thread((tid_t)(uintptr_t)tid);
         }
     }
 

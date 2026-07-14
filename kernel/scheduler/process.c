@@ -335,8 +335,19 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     new_proc->entry_func = func;
     new_proc->args = args;
     new_proc->priority = 1;
+    new_proc->thread_count = 1;
+    new_proc->next_tid = 1;
     new_proc->mask = 0;
     new_proc->pending_signals = 0;
+    for (int i = 0; i < MAX_THREADS_PER_PROCESS; i++) {
+        new_proc->threads[i].tid = i;
+        new_proc->threads[i].state = THREAD_UNUSED;
+        new_proc->threads[i].pcb = new_proc;
+        new_proc->threads[i].kernel_stack = NULL;
+        new_proc->threads[i].user_stack_va = NULL;
+        new_proc->threads[i].return_value = NULL;
+        new_proc->threads[i].is_joinable = 0;
+    }
     for (int i = 0; i < 32; i++) {
         new_proc->sigactions[i].sa_handler = SIG_DFL;
         new_proc->sigactions[i].sa_mask = 0;
@@ -395,6 +406,17 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     new_proc->ctx.ttbr0_el1 = kernel_phys_addr((uint64_t)user_l0);
     new_proc->ctx.ttbr0_el1_va = (uint64_t)user_l0;
 
+    thread_t *main_thread = &new_proc->threads[0];
+    main_thread->tid = 0;
+    main_thread->state = THREAD_READY;
+    main_thread->ctx = new_proc->ctx;
+    main_thread->pcb = new_proc;
+    main_thread->kernel_stack = kernel_stack_page;
+    main_thread->user_stack_va = (uint64_t *)(uintptr_t)USER_STACK_TOP;
+    main_thread->return_value = NULL;
+    main_thread->is_joinable = 0;
+    main_thread->waiting_on_this = vec_new(2, NULL);
+
     if (add_to_pgrp(new_proc->pid) != 0) {
         uart_puts("ERROR: failed to add process to process group");
         return (pid_t)SYS_EAGAIN;
@@ -421,6 +443,14 @@ void proc_destroy(pcb_t *p) {
     vec_destroy(&p->file_descriptors);
     remove_from_pgrp(p->pid);
     destroy_page_table((uint64_t *)(uintptr_t)p->ctx.ttbr0_el1_va);
+    for (int i = 0; i < p->thread_count; i++) {
+        if (p->threads[i].state != THREAD_UNUSED) {
+            vec_destroy(&p->threads[i].waiting_on_this);
+            p->threads[i].state = THREAD_UNUSED;
+        }
+    }
+    p->thread_count = 0;
+    p->next_tid = 0;
 
     // Rn, stack and heap are tied to pcb, so automatically "free" when create new process
     // When adding VM, TODO add cleanup of stack/heap
@@ -595,6 +625,8 @@ pid_t fork(struct trap_frame *frame) {
     child_frame->regs[0] = 0;
     child->ctx.x19 = frame_va;
     child->ctx.sp = frame_va;
+    child->threads[0].ctx = child->ctx;
+    child->threads[0].state = THREAD_READY;
 
     for (size_t i = 0; i < vec_len(&parent->file_descriptors); i++) {
         void *fd = vec_get(&parent->file_descriptors, i);
@@ -640,6 +672,10 @@ void terminate_process(pcb_t *pcb) {
 void block_process(pcb_t *pcb) {
     pcb->state = PROC_BLOCKED_STATE;
     if (get_curr_process() == pcb) {
+        thread_t *thread = get_curr_thread();
+        if (thread != NULL && thread->pcb == pcb) {
+            thread->state = THREAD_STOPPED;
+        }
         schedule_yield();
     }
 }
@@ -650,6 +686,11 @@ void unblock_process(pcb_t *pcb) {
     }
     pcb->state = PROC_READY_STATE;
     pcb->blocked_until = 0;
+    for (int i = 0; i < pcb->thread_count; i++) {
+        if (pcb->threads[i].state == THREAD_STOPPED) {
+            pcb->threads[i].state = THREAD_READY;
+        }
+    }
     add_task_to_scheduler(pcb);
 }
 

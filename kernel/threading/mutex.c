@@ -27,7 +27,7 @@ int mutex_lock(mutex_t *mutex) {
     // wait until lock acquired
     while (mutex->owner_tid != -1) {
         // add to waiting list
-        vec_push_back(&mutex->waiting_threads, (ptr_t*)current->tid);
+        vec_push_back(&mutex->waiting_threads, (ptr_t)(uintptr_t)current->tid);
         current->state = THREAD_STOPPED;
         schedule_yield();  // yield to scheduler
     }

@@ -19,6 +19,7 @@ void add_thread_to_scheduler(thread_t *thread, pcb_t *pcb);
 thread_t *get_next_thread(void);
 
 pcb_t *get_curr_process();
+thread_t *get_curr_thread(void);
 
 void scheduler_exit_current(int exit_code);
 
