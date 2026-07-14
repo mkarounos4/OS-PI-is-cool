@@ -1,5 +1,7 @@
 #include "tty.h"
 #include "gui/tty_gui.h"
+#include "scheduler.h"
+#include "threading/thread.h"
 #include "uart/uart.h"
 
 #define TTY_MAJOR 0
@@ -106,13 +108,16 @@ int tty_read(struct oft_entry *entry, char *buffer, size_t count) {
         s_kill(-curr_pcb->pgid, SIGTTIN);
     }
     
+
+    tcb_t *curr_thd = get_curr_thread();
+
     ssize_t num_read = 0;
     while (num_read < count) {
         char char_void;
         bool read_char = consume_ring_buffer(&curr_tty->rx, &char_void);
         if (!read_char) {
-            vec_push_back(&curr_tty->rx_wait_queue, (ptr_t)(uintptr_t)curr_pcb->pid);
-            block_process(curr_pcb);
+            vec_push_back(&curr_tty->rx_wait_queue, (ptr_t)(uintptr_t)curr_thd->tid);
+            block_thread(curr_thd, THREAD_BLOCKED_INTERRUPTABLE);
             continue;
         }
 
@@ -210,12 +215,12 @@ int tty_format_proc(char *buf, size_t size) {
 
 void wake_up_readers(int minor) {
     while (!vec_is_empty(&tty_state.devices[minor]->rx_wait_queue)) {
-        void *pid;
-        int removed = (int)(uintptr_t)vec_pop_back(&tty_state.devices[minor]->rx_wait_queue, &pid);
+        void *tid;
+        int removed = (int)(uintptr_t)vec_pop_back(&tty_state.devices[minor]->rx_wait_queue, &tid);
         if (!removed) {
             continue;
         }
-        unblock_process(get_pcb_by_pid((int)(uintptr_t)pid));
+        unblock_thread(thread_get_by_tid((int)(uintptr_t)tid));
     }
 }
 

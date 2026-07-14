@@ -37,6 +37,7 @@
 #define PROC_FILE_PID_CWD 13
 #define PROC_FILE_PID_FD 14
 #define PROC_FILE_PID_MAPS 15
+#define PROC_FILE_PID_THREADS 16
 
 #define PROC_READ_BUFFER_SIZE 4096
 #define PROC_INO_ROOT_FILE_BASE (PROCFS_INO_BASE + UINT32_C(0x1000))
@@ -67,6 +68,7 @@ static const struct proc_file_def proc_pid_files[] = {
     {"cwd", PROC_FILE_PID_CWD},
     {"fd", PROC_FILE_PID_FD},
     {"maps", PROC_FILE_PID_MAPS},
+    {"threads", PROC_FILE_PID_THREADS},
 };
 
 static ino_id_t proc_root_ino = 0;
@@ -160,7 +162,6 @@ static void write_pid_name(char name[32], pid_t pid) {
 
 static char process_state_char(enum process_state state) {
     switch (state) {
-    case PROC_READY_STATE:
     case PROC_RUNNING_STATE:
         return 'R';
     case PROC_BLOCKED_STATE:
@@ -177,8 +178,6 @@ static char process_state_char(enum process_state state) {
 
 static const char *process_state_name(enum process_state state) {
     switch (state) {
-    case PROC_READY_STATE:
-        return "ready";
     case PROC_RUNNING_STATE:
         return "running";
     case PROC_BLOCKED_STATE:
@@ -188,6 +187,47 @@ static const char *process_state_name(enum process_state state) {
     case PROC_ZOMBIE_STATE:
         return "zombie";
     case PROC_UNUSED_STATE:
+    default:
+        return "unused";
+    }
+}
+
+static char thread_state_char(enum thread_state state) {
+    switch (state) {
+    case THREAD_READY:
+    case THREAD_RUNNING:
+        return 'R';
+    case THREAD_STOPPED:
+        return 'T';
+    case THREAD_ZOMBIE:
+        return 'Z';
+    case THREAD_BLOCKED_INTERRUPTABLE:
+    case THREAD_BLOCKED_UNINTERUPTABLE:
+    case THREAD_BLOCKED_KILLABLE:
+        return 'B';
+    case THREAD_UNUSED:
+    default:
+        return 'U';
+    }
+}
+
+static const char *thread_state_name(enum thread_state state) {
+    switch (state) {
+    case THREAD_READY:
+        return "ready";
+    case THREAD_RUNNING:
+        return "running";
+    case THREAD_STOPPED:
+        return "stopped";
+    case THREAD_ZOMBIE:
+        return "zombie";
+    case THREAD_BLOCKED_INTERRUPTABLE:
+        return "blocked-interruptable";
+    case THREAD_BLOCKED_UNINTERUPTABLE:
+        return "blocked-uninterruptable";
+    case THREAD_BLOCKED_KILLABLE:
+        return "blocked-killable";
+    case THREAD_UNUSED:
     default:
         return "unused";
     }
@@ -721,16 +761,17 @@ static int append(char *buf, size_t size, int len, const char *fmt, ...) {
 }
 
 static int build_processes(char *buf, size_t size) {
-    int len = snprintf(buf, size, "PID PPID PGID STATE NAME\n");
+    int len = snprintf(buf, size, "PID PPID PGID STATE THREADS NAME\n");
     for (pid_t pid = 0; pid < MAX_PROCESS_COUNT; pid++) {
         pcb_t *pcb = get_pcb_by_pid(pid);
         if (pcb == NULL) {
             continue;
         }
 
-        len = append(buf, size, len, "%d %d %d %c %s\n",
+        len = append(buf, size, len, "%d %d %d %c %u %s\n",
                      pcb->pid, pcb->ppid, pcb->pgid,
-                     process_state_char(pcb->state), pcb->name);
+                     process_state_char(pcb->state),
+                     (unsigned int)vec_len(&pcb->tids), pcb->name);
     }
     return len;
 }
@@ -746,32 +787,96 @@ static unsigned int proc_count_open_files(pcb_t *pcb) {
     return count;
 }
 
+struct proc_thread_metrics {
+    unsigned int total;
+    unsigned int running;
+    unsigned int blocked;
+    unsigned int stopped;
+    unsigned int zombie;
+    int min_priority;
+    uint32_t blocked_until;
+};
+
+static void proc_collect_thread_metrics(pcb_t *pcb,
+                                        struct proc_thread_metrics *metrics) {
+    memset(metrics, 0, sizeof(*metrics));
+    metrics->min_priority = 0;
+
+    for (size_t i = 0; i < vec_len(&pcb->tids); i++) {
+        tid_t tid = (tid_t)(uintptr_t)vec_get(&pcb->tids, i);
+        tcb_t *thread = thread_get_by_tid(tid);
+        if (thread == NULL) {
+            continue;
+        }
+
+        metrics->total++;
+        if (metrics->total == 1 || thread->priority < metrics->min_priority) {
+            metrics->min_priority = thread->priority;
+        }
+        metrics->blocked_until |= thread->blocked_until;
+
+        switch (thread->state) {
+        case THREAD_READY:
+        case THREAD_RUNNING:
+            metrics->running++;
+            break;
+        case THREAD_STOPPED:
+            metrics->stopped++;
+            break;
+        case THREAD_ZOMBIE:
+            metrics->zombie++;
+            break;
+        case THREAD_BLOCKED_INTERRUPTABLE:
+        case THREAD_BLOCKED_UNINTERUPTABLE:
+        case THREAD_BLOCKED_KILLABLE:
+            metrics->blocked++;
+            break;
+        case THREAD_UNUSED:
+        default:
+            break;
+        }
+    }
+}
+
 static int build_pid_status(pcb_t *pcb, char *buf, size_t size) {
+    struct proc_thread_metrics metrics;
+    proc_collect_thread_metrics(pcb, &metrics);
+
     return snprintf(buf, size,
                     "Name: %s\n"
                     "Pid: %d\n"
                     "PPid: %d\n"
                     "Pgid: %d\n"
                     "State: %s\n"
-                    "Priority: %d\n"
+                    "Threads: %u\n"
+                    "ThreadsRunning: %u\n"
+                    "ThreadsBlocked: %u\n"
+                    "ThreadsStopped: %u\n"
+                    "ThreadsZombie: %u\n"
+                    "MinPriority: %d\n"
                     "ExitCode: %d\n"
                     "CwdIno: %u\n"
                     "OpenFiles: %u\n"
                     "SignalsPending: 0x%x\n"
                     "BlockedUntil: %u\n"
-                    "TTBR0: 0x%x\n",
+                    "TTBR0: 0x%lx\n",
                     pcb->name,
                     pcb->pid,
                     pcb->ppid,
                     pcb->pgid,
                     process_state_name(pcb->state),
-                    pcb->priority,
+                    metrics.total,
+                    metrics.running,
+                    metrics.blocked,
+                    metrics.stopped,
+                    metrics.zombie,
+                    metrics.min_priority,
                     pcb->exit_code,
                     pcb->cwd,
                     proc_count_open_files(pcb),
-                    (unsigned long)pcb->pending_signals,
-                    pcb->blocked_until,
-                    pcb->ctx.ttbr0_el1);
+                    (unsigned int)pcb->pending_signals,
+                    metrics.blocked_until,
+                    (unsigned long)pcb->ttbr0_el1);
 }
 
 static int build_pid_fd(pcb_t *pcb, char *buf, size_t size) {
@@ -782,6 +887,28 @@ static int build_pid_fd(pcb_t *pcb, char *buf, size_t size) {
             continue;
         }
         len = append(buf, size, len, "%u %d\n", (unsigned int)i, k_fd);
+    }
+    return len;
+}
+
+static int build_pid_threads(pcb_t *pcb, char *buf, size_t size) {
+    int len = snprintf(buf, size,
+                       "TID STATE STATE_NAME PRIORITY BLOCKED_UNTIL WAIT_PID WAIT_FLAGS\n");
+    for (size_t i = 0; i < vec_len(&pcb->tids); i++) {
+        tid_t tid = (tid_t)(uintptr_t)vec_get(&pcb->tids, i);
+        tcb_t *thread = thread_get_by_tid(tid);
+        if (thread == NULL) {
+            continue;
+        }
+
+        len = append(buf, size, len, "%d %c %s %d %u %d %u\n",
+                     thread->tid,
+                     thread_state_char(thread->state),
+                     thread_state_name(thread->state),
+                     thread->priority,
+                     thread->blocked_until,
+                     thread->waiting_for_pid,
+                     thread->waiting_for_flags);
     }
     return len;
 }
@@ -838,7 +965,9 @@ static int build_proc_file(struct proc_st *proc, char *buf, size_t size) {
             return build_pid_fd(pcb, buf, size);
         case PROC_FILE_PID_MAPS:
             return page_table_format_segments(
-                (uint64_t *)(uintptr_t)pcb->ctx.ttbr0_el1_va, buf, size);
+                (uint64_t *)(uintptr_t)pcb->ttbr0_el1_va, buf, size);
+        case PROC_FILE_PID_THREADS:
+            return build_pid_threads(pcb, buf, size);
         default:
             return FILE_NOT_FOUND;
         }

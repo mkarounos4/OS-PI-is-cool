@@ -3,6 +3,7 @@
 #include "irq/irq.h"
 #include "scheduler/process.h"
 #include "scheduler/scheduler.h"
+#include "threading/thread.h"
 
 #define ARM_GENERIC_TIMER_INTID 30u
 #define CNTP_CTL_ENABLE        1u
@@ -208,19 +209,19 @@ void timer_delay_ms(uint64_t milliseconds) {
     }
 }
 
-static void timer_wake_process(void *ctx) {
-    pid_t pid = (pid_t)(uintptr_t)ctx;
-    pcb_t *pcb = get_pcb_by_pid(pid);
+static void timer_wake_thread(void *ctx) {
+    tid_t tid = (tid_t)(uintptr_t)ctx;
+    tcb_t *tcb = thread_get_by_tid(tid);
 
-    if (pcb != NULL) {
-        unblock_process(pcb);
+    if (tcb != NULL) {
+        unblock_thread(tcb);
     }
 }
 
 long timer_sleep_ms(uint64_t milliseconds) {
-    pcb_t *pcb = get_curr_process();
+    tcb_t *tcb = get_curr_thread();
 
-    if (pcb == 0) {
+    if (tcb == 0) {
         return SYS_ESRCH;
     }
 
@@ -229,13 +230,13 @@ long timer_sleep_ms(uint64_t milliseconds) {
         return 0;
     }
 
-    pcb->blocked_until |= BLOCK_UNTIL_TIMER;
-    if (timer_schedule_interrupt_ms(milliseconds, timer_wake_process,
-                                    (void *)(uintptr_t)pcb->pid) != 0) {
-        pcb->blocked_until &= ~BLOCK_UNTIL_TIMER;
+    tcb->blocked_until |= BLOCK_UNTIL_TIMER;
+    if (timer_schedule_interrupt_ms(milliseconds, timer_wake_thread,
+                                    (void *)(uintptr_t)tcb->tid) != 0) {
+        tcb->blocked_until &= ~BLOCK_UNTIL_TIMER;
         return SYS_EAGAIN;
     }
 
-    block_process(pcb);
+    block_thread(tcb, THREAD_BLOCKED_INTERRUPTABLE);
     return 0;
 }

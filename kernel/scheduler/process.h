@@ -34,14 +34,11 @@ typedef int32_t pid_t;
 
 enum process_state {
     PROC_UNUSED_STATE,
-    PROC_READY_STATE,
     PROC_RUNNING_STATE,
     PROC_BLOCKED_STATE,
     PROC_STOPPED_STATE,
     PROC_ZOMBIE_STATE,
 };
-
-#define MAX_THREADS_PER_PROCESS 16
 
 typedef struct pcb_st {
     pid_t pid; 
@@ -49,35 +46,31 @@ typedef struct pcb_st {
     pid_t pgid; // group id
     
     char name[32];
-    pid_t waiting_for_pid;
-    uint32_t waiting_for_flags;
     enum process_state state;
     int exit_code;
-    uint32_t blocked_until;
-    void *(*entry_func)(void*);
-    void *args;
-
-    struct cpu_context ctx;
 
     // Thread parameters
-    thread_t threads[MAX_THREADS_PER_PROCESS];
-    int thread_count;
-    tid_t next_tid;
+    Vec tids;
 
     uint8_t wait_stop_pending;
     uint8_t wait_cont_pending;
 
+    uint64_t ttbr0_el1;
+    uint64_t ttbr0_el1_va;
+
     Vec children;   // vec of children PIDs
     Vec file_descriptors;   // vec of fds
                             
-    signalset_t mask;
-    signalset_t pending_signals;
-    
     struct sigaction sigactions[32];
-
-    int priority;
+    signalset_t pending_signals;
+    Vec child_waitq;
 
     ino_id_t cwd;
+    
+    int num_blocked_threads;
+    int num_stopped_threads;
+    int num_zombie_threads;
+    int num_running_threads;
 } pcb_t;
 
 typedef struct pgrp_st {
@@ -94,16 +87,10 @@ void proc_destroy(pcb_t *p);
 long s_waitpid_impl(pid_t pid, int *status, int32_t flags);
 pid_t fork(struct trap_frame *frame);
 
-void terminate_process(pcb_t *pcb);
-void stop_process(pcb_t *pcb);
-void block_process(pcb_t *pcb);
-void unblock_process(pcb_t *pcb);
-void continue_process(pcb_t *pcb);
-void send_unblock_event(pid_t pid, uint32_t event);
-
 pid_t getpgid();
 int setpgrp(pid_t pid, pid_t pgid);
 int dup2(int oldfd, int newfd);
 int print_processes(int fd);
 int set_process_name(const char *name);
 int set_process_name_for_pid(pid_t pid, const char *name);
+void pcb_thread_change_state(pcb_t *pcb, int old_state, int new_state);

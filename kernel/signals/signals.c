@@ -3,6 +3,7 @@
 #include "scheduler/scheduler.h"
 #include "scheduler/process.h"
 #include "errno.h"
+#include "threading/thread.h"
 
 #define USER_SIG_DFL ((void (*)(int))0)
 #define USER_SIG_IGN ((void (*)(int))1)
@@ -15,25 +16,25 @@ void SIG_IGN(int signum) {
 
 void SIG_CONT(int signum) {
     (void)signum;
-    pcb_t *pcb = get_curr_process();
-    if (pcb != NULL) {
-        continue_process(pcb);
+    tcb_t *tcb = get_curr_thread();
+    if (tcb != NULL) {
+        continue_thread(tcb);
     }
 }
 
 void SIG_STOP(int signum) {
     (void)signum;
-    pcb_t *pcb = get_curr_process();
-    if (pcb != NULL) {
-        stop_process(pcb);
+    tcb_t *tcb = get_curr_thread();
+    if (tcb != NULL) {
+        stop_thread(tcb);
     }
 }
 
 void SIG_TERM(int signum) {
     (void)signum;
-    pcb_t *pcb = get_curr_process();
-    if (pcb != NULL) {
-        terminate_process(pcb);
+    tcb_t *tcb = get_curr_thread();
+    if (tcb != NULL) {
+        terminate_thread(tcb);
     }
 }
 
@@ -71,6 +72,35 @@ void initialize_signals() {
     def_signal_handlers[SIGCHLD] = SIG_IGN;
 }
 
+
+static void handle_interruptable_signal(tcb_t *tcb, int signum) {
+    pcb_t *pcb = tcb->pcb;
+    int terminating = pcb->sigactions[signum].sa_handler == SIG_TERM;
+    int continuing = pcb->sigactions[signum].sa_handler == SIG_CONT;
+
+    if (signum == SIGKILL) {
+        terminate_thread(tcb);
+        return;
+    }
+
+    if (tcb->state == THREAD_BLOCKED_INTERRUPTABLE) {
+        if (!continuing) {
+            unblock_thread(tcb);
+            return;
+        }
+    } else if (tcb->state == THREAD_BLOCKED_KILLABLE) {
+        if (terminating) {
+            terminate_thread(tcb);
+        }
+    } else if (tcb->state == THREAD_STOPPED) {
+        if (continuing) {
+            continue_thread(tcb);
+            return;
+        }
+    }
+}
+
+
 int s_kill(pid_t pid, int signal) {
     if (signal < 0 || signal >= 32) {
         return (int)SYS_EINVAL;
@@ -98,7 +128,45 @@ int s_kill(pid_t pid, int signal) {
     if (pcb == NULL) {
         return (int)SYS_ESRCH;
     }
-    if (pcb == get_curr_process() && !(pcb->mask & (1 << signal))) {
+
+    // If cont/stop/term, send to all threads
+    if (pcb->sigactions[signal].sa_handler == SIG_STOP || pcb->sigactions[signal].sa_handler == SIG_CONT || pcb->sigactions[signal].sa_handler == SIG_TERM) {
+        int sent = 0;
+
+        for (size_t i = 0; i < vec_len(&pcb->tids); i++) {
+            tid_t member_tid = (tid_t)(uintptr_t)vec_get(&pcb->tids, i);
+            if (pthread_kill(member_tid, signal) == 0) {
+                sent = 1;
+            }
+        }
+
+        return sent ? 0 : (int)SYS_ESRCH;
+    }
+
+    // otherwise send process wide (only one thread).
+    // If someone needs it to wake up, do that first, otherwise process pending stack
+    for (size_t i = 0; i < vec_len(&pcb->tids); i++) {
+        tid_t member_tid = (tid_t)(uintptr_t)vec_get(&pcb->tids, i);
+        int unblocked = send_unblock_event(member_tid, BLOCK_UNTIL_SIGNAL);
+        if (unblocked) {
+            tcb_t *tcb = thread_get_by_tid(member_tid);
+            tcb->pending_signals |= (1 << signal);
+            return 0;
+        }
+    }
+
+    pcb->pending_signals |= (1 << signal);
+    return 0;
+}
+
+int pthread_kill(tid_t tid, int signal) {
+    tcb_t *tcb = thread_get_by_tid(tid);
+    if (tcb == NULL) {
+        return (int)SYS_EINVAL;
+    }
+    pcb_t *pcb = tcb->pcb;
+
+    if (tcb == get_curr_thread() && !(tcb->mask & (1 << signal))) {
         pcb->sigactions[signal].sa_handler(signal);
         return 0;
     }
@@ -113,10 +181,14 @@ int s_kill(pid_t pid, int signal) {
         }
     }
 
-    pcb->pending_signals |= (1 << signal);
-    if (!(pcb->mask & (1 << signal))) {
-        send_unblock_event(pcb->pid, BLOCK_UNTIL_SIGNAL);
+    tcb->pending_signals |= (1 << signal);
+    if (!(tcb->mask & (1 << signal))) {
+        int unblocked = send_unblock_event(tcb->tid, BLOCK_UNTIL_SIGNAL);
+        if (!unblocked) {
+            handle_interruptable_signal(tcb, signal);
+        }
     }
+
 
     return 0;
 }
@@ -129,7 +201,7 @@ long send_sigchld(pid_t child) {
 
     if (child_pcb->state == PROC_STOPPED_STATE) {
         child_pcb->wait_stop_pending = 1;
-    } else if (child_pcb->state == PROC_READY_STATE || child_pcb->state == PROC_RUNNING_STATE) {
+    } else if (child_pcb->state == PROC_RUNNING_STATE) {
         child_pcb->wait_cont_pending = 1;
     }
 
@@ -139,17 +211,18 @@ long send_sigchld(pid_t child) {
         return SYS_ESRCH;
     }
 
-    if (parent_pcb->waiting_for_pid == -1 ||
-        parent_pcb->waiting_for_pid == child ||
-        (parent_pcb->waiting_for_pid < -1 &&
-         child_pcb->pgid == -parent_pcb->waiting_for_pid)) {
-        if (child_pcb->state == PROC_ZOMBIE_STATE ||
-            (child_pcb->state == PROC_STOPPED_STATE && (parent_pcb->waiting_for_flags & WUNTRACED)) ||
-            ((child_pcb->state == PROC_RUNNING_STATE || child_pcb->state == PROC_READY_STATE) &&
-             (parent_pcb->waiting_for_flags & WCONTINUED))) {
-            unblock_process(parent_pcb);
+    for (size_t i = 0; i < vec_len(&parent_pcb->child_waitq); i++) {
+        tid_t next_thread = (tid_t)(uintptr_t)vec_get(&parent_pcb->child_waitq, i);
+        tcb_t *tcb = thread_get_by_tid(next_thread);
+        if (tcb->waiting_for_pid == -1 || tcb->waiting_for_pid == child) {
+            if (child_pcb->state == PROC_ZOMBIE_STATE ||
+                (child_pcb->state == PROC_STOPPED_STATE && (tcb->waiting_for_flags & WUNTRACED)) ||
+                ((child_pcb->state == PROC_RUNNING_STATE) &&
+                 (tcb->waiting_for_flags & WCONTINUED))) {
+                unblock_thread(tcb);
+            }
+            return 0;
         }
-        return 0;
     }
 
     return 0;
@@ -160,21 +233,21 @@ int sigprocmask(int how, const signalset_t *set, signalset_t *oldset) {
         return (int)SYS_EFAULT;
     }
 
-    pcb_t *pcb = get_curr_process();
-    if (pcb == NULL) {
+    tcb_t *tcb = get_curr_thread();
+    if (tcb == NULL) {
         return (int)SYS_ESRCH;
     }
 
     if (oldset != NULL) {
-        *oldset = pcb->mask;
+        *oldset = tcb->mask;
     }
 
     if (how == SIG_BLOCK) {
-        pcb->mask |= *set;
+        tcb->mask |= *set;
     } else if (how == SIG_UNBLOCK) {
-        pcb->mask &= ~(*set);
+        tcb->mask &= ~(*set);
     } else if (how == SIG_SET) {
-        pcb->mask = *set;
+        tcb->mask = *set;
     } else {
         return (int)SYS_EINVAL;
     }
@@ -213,18 +286,18 @@ int sigfillset(signalset_t *set) {
 }
 
 int sigsuspend(const signalset_t *mask) {
-    pcb_t *pcb = get_curr_process();
+    tcb_t *tcb = get_curr_thread();
     if (mask == NULL) {
         return (int)SYS_EFAULT;
     }
-    if (pcb == NULL) {
+    if (tcb == NULL) {
         return (int)SYS_ESRCH;
     }
 
     signalset_t old_set = 0;
     sigprocmask(SIG_SETMASK, mask, &old_set);
-    pcb->blocked_until |= (1 << BLOCK_UNTIL_SIGNAL);
-    block_process(pcb);
+    tcb->blocked_until |= (1 << BLOCK_UNTIL_SIGNAL);
+    block_thread(tcb, THREAD_BLOCKED_INTERRUPTABLE);
     sigprocmask(SIG_SETMASK, &old_set, NULL);
 
     return (int)SYS_EINTR;

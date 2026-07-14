@@ -321,15 +321,15 @@ static struct trap_frame *handle_sync_exception(struct trap_frame *frame) {
 }
 
 void handle_fatal_exception(const char *reason, struct trap_frame *frame) {
-    pcb_t *proc = get_curr_process();
+    tcb_t *thd = get_curr_thread();
 
     uart_puts("\nFatal exception: ");
     uart_puts(reason);
     uart_puts("\n");
-    uart_puts("pid: ");
-    uart_puthex(proc != NULL ? (uint64_t)proc->pid : UINT64_C(0xffffffffffffffff));
+    uart_puts("tid: ");
+    uart_puthex(thd != NULL ? (uint64_t)thd->tid: UINT64_C(0xffffffffffffffff));
 
-    if (proc == NULL) {
+    if (thd == NULL) {
         exception_halt("Fatal exception without a current process. Halting.", frame);
     }
 
@@ -337,7 +337,7 @@ void handle_fatal_exception(const char *reason, struct trap_frame *frame) {
         trap_frame_dump(frame);
     }
 
-    terminate_process(proc);
+    terminate_thread(thd);
 }
 
 void fatal_exception(const char *reason) {

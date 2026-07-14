@@ -14,10 +14,9 @@
 #define SCHEDULER_QUANTUM_MS 10u
 #define PA_MASK UINT64_C(0x0000ffffffffffff)
 
-static pcb_t *curr_proc;
 static uint64_t curr_tick;
 
-static thread_t *curr_thread;
+static tcb_t *curr_thread;
 // priority queues for threads
 static Vec thread_ready_queues[3];
 
@@ -37,21 +36,6 @@ static void set_ready_to_schedule(void *ctx) {
     ready_ctx = ctx;
 }
 
-void add_task_to_scheduler(pcb_t *task) {
-    if (task == NULL || task->state == PROC_UNUSED_STATE ||
-        task->state == PROC_ZOMBIE_STATE ||
-        task->state == PROC_STOPPED_STATE ||
-        task->state == PROC_BLOCKED_STATE) {
-        return;
-    }
-
-    for (int i = 0; i < task->thread_count; i++) {
-        if (task->threads[i].state == THREAD_READY) {
-            add_thread_to_scheduler(&task->threads[i], task);
-        }
-    }
-}
-
 void idle_task_fn(void* args) {
     (void)args;
     while (1) {
@@ -61,7 +45,6 @@ void idle_task_fn(void* args) {
 
 void scheduler_init(void) {
     curr_tick = 0;
-    curr_proc = NULL;
     curr_thread = NULL;
     curr_pri = 0;
 
@@ -101,13 +84,11 @@ void scheduler_init(void) {
 // Starts execution at thread 0. Does not return.
 void scheduler_start(void) {
     timer_schedule_interrupt_ms(SCHEDULER_QUANTUM_MS, set_ready_to_schedule, 0);
-    thread_t *next_thread = get_next_thread();
+    tcb_t *next_thread = get_next_thread();
     
     if (next_thread != NULL) {
         curr_thread = next_thread;
-        curr_proc = next_thread->pcb;
         curr_thread->state = THREAD_RUNNING;
-        curr_proc->state = PROC_RUNNING_STATE;
         context_switch(&boot_ctx, &next_thread->ctx);
     } else {
         context_switch(&boot_ctx, &idle_ctx);
@@ -139,21 +120,16 @@ void scheduler_tick(void *ctx) {
     if (curr_thread != NULL) {
         if (curr_thread->state == THREAD_RUNNING) {
             curr_thread->state = THREAD_READY;
-            if (curr_thread->pcb != NULL &&
-                curr_thread->pcb->state == PROC_RUNNING_STATE) {
-                curr_thread->pcb->state = PROC_READY_STATE;
-            }
-            add_thread_to_scheduler(curr_thread, curr_thread->pcb);
+            add_thread_to_scheduler(curr_thread);
         }
     }
 
     // Get next thread from any process
-    thread_t *next_thread = get_next_thread();
+    tcb_t *next_thread = get_next_thread();
 
     if (next_thread == NULL) {
         struct cpu_context *old_ctx = curr_thread ? &curr_thread->ctx : &idle_ctx;
         curr_thread = NULL;
-        curr_proc = NULL;
         timer_schedule_interrupt_ms(SCHEDULER_QUANTUM_MS, set_ready_to_schedule, 0);
         context_switch(old_ctx, &idle_ctx);
         return;
@@ -161,38 +137,37 @@ void scheduler_tick(void *ctx) {
 
     struct cpu_context *old_ctx = curr_thread ? &curr_thread->ctx : &idle_ctx;
     curr_thread = next_thread;
-    curr_proc = next_thread->pcb;
     next_thread->state = THREAD_RUNNING;
-    if (curr_proc != NULL) {
-        curr_proc->state = PROC_RUNNING_STATE;
-    }
 
     timer_schedule_interrupt_ms(SCHEDULER_QUANTUM_MS, set_ready_to_schedule, 0);
     context_switch(old_ctx, &next_thread->ctx);
 }
 
-pcb_t *get_curr_process() {
-    return curr_proc;
+pcb_t *get_curr_process(void) {
+    if (curr_thread == NULL) {
+        return NULL;
+    }
+
+    return curr_thread->pcb;
 }
 
-thread_t *get_curr_thread(void) {
+tcb_t *get_curr_thread(void) {
     return curr_thread;
 }
 
-void add_thread_to_scheduler(thread_t *thread, pcb_t *pcb) {
+void add_thread_to_scheduler(tcb_t *thread) {
     if (thread == NULL) {
         return;
     }
-    thread->pcb = pcb;
-    vec_insert(&thread_ready_queues[pcb->priority], 0, (ptr_t*)thread);
+    vec_insert(&thread_ready_queues[thread->priority], 0, (ptr_t*)thread);
 }
 
-thread_t *get_next_thread(void) {
+tcb_t *get_next_thread(void) {
     for (int i = 0; i < 3; i++) {
         if (!vec_is_empty(&thread_ready_queues[curr_pri])) {
             ptr_t to_return;
             vec_pop_back(&thread_ready_queues[curr_pri], &to_return);
-            thread_t *thread = (thread_t*)to_return;
+            tcb_t *thread = (tcb_t*)to_return;
 
             if (thread->state != THREAD_READY) {
                 return get_next_thread();

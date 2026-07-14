@@ -9,6 +9,7 @@
 #include "oft.h"
 #include "signals/signals.h"
 #include "string.h"
+#include "threading/thread.h"
 
 #define ELF_NIDENT 16
 #define ELF_CLASS_64 2
@@ -292,6 +293,15 @@ int elf_exec_process(pcb_t *pcb, const char *path, char *const argv[],
         return INVALID_ARGS;
     }
 
+    // kill all threads other than myself
+    for (size_t i = 0; i < vec_len(&pcb->tids); i++) {
+        tcb_t *tcb = thread_get_by_tid((tid_t)(uintptr_t)vec_get(&pcb->tids, i));
+        if (tcb == get_curr_thread())  continue;
+
+        thread_detach(tcb->tid);
+        terminate_thread(tcb);
+    }
+
     char *args[EXEC_MAX_ARGS];
     int argc = 0;
     int err = copy_exec_args(argv, args, &argc);
@@ -417,7 +427,7 @@ int elf_exec_process(pcb_t *pcb, const char *path, char *const argv[],
         return err;
     }
 
-    uint64_t *old_table = (uint64_t *)(uintptr_t)pcb->ctx.ttbr0_el1_va;
+    uint64_t *old_table = (uint64_t *)(uintptr_t)pcb->ttbr0_el1_va;
     uint64_t frame_offset = frame_va - kernel_stack_page_va;
     if (frame_offset >= PAGE_SIZE) {
         free_exec_args(args, argc);
@@ -451,14 +461,16 @@ int elf_exec_process(pcb_t *pcb, const char *path, char *const argv[],
     new_frame->regs[0] = (uint64_t)argc;
     new_frame->regs[1] = user_argv;
 
-    pcb->ctx.x19 = new_frame_va;
-    pcb->ctx.sp = new_frame_va;
-    pcb->ctx.ttbr0_el1 = kernel_phys_addr((uint64_t)(uintptr_t)new_table);
-    pcb->ctx.ttbr0_el1_va = (uint64_t)(uintptr_t)new_table;
-    pcb->threads[0].ctx = pcb->ctx;
+    tcb_t *tcb = get_curr_thread();
+    tcb->ctx.x19 = new_frame_va;
+    tcb->ctx.sp = new_frame_va;
+    tcb->ctx.ttbr0_el1 = kernel_phys_addr((uint64_t)(uintptr_t)new_table);
+    tcb->ctx.ttbr0_el1_va = (uint64_t)(uintptr_t)new_table;
+    pcb->ttbr0_el1 = kernel_phys_addr((uint64_t)(uintptr_t)new_table);
+    pcb->ttbr0_el1_va = (uint64_t)(uintptr_t)new_table;
 
     if (install_table) {
-        install_ttbr0(pcb->ctx.ttbr0_el1);
+        install_ttbr0(pcb->ttbr0_el1);
     }
     if (next_frame != NULL) {
         *next_frame = (struct trap_frame *)(uintptr_t)new_frame_va;

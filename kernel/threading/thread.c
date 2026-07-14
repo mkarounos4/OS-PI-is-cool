@@ -1,8 +1,11 @@
 #include "threading/thread.h"
+#include "process.h"
 #include "scheduler/scheduler.h"
 #include "memory/kmalloc.h"
 #include "memory/page_table/page_table.h"
 #include "uart/uart.h"
+
+static Vec threads;
 
 static void __attribute__((noreturn)) thread_start_trampoline(void) {
     void *(*start_routine)(void *);
@@ -13,33 +16,39 @@ static void __attribute__((noreturn)) thread_start_trampoline(void) {
     thread_exit(start_routine(arg));
 }
 
-thread_t *thread_get_by_tid(pcb_t *pcb, tid_t tid) {
-    if (pcb == NULL || tid < 0 || tid >= MAX_THREADS_PER_PROCESS) {
+void threads_init() {
+    threads = vec_new(10, NULL);
+}
+
+tcb_t *thread_get_by_tid(tid_t tid) {
+    if (tid < 0 || tid >= vec_len(&threads)) {
         return NULL;
     }
  
-    if (pcb->threads[tid].state == THREAD_UNUSED) {
+    if (((tcb_t*) vec_get(&threads, tid))->state == THREAD_UNUSED) {
         return NULL;
     }
  
-    return &pcb->threads[tid];
+    return vec_get(&threads, tid);
 }
 
 tid_t thread_create(pcb_t *parent_pcb, void *(*start_routine)(void*), void *arg) {
-    if (parent_pcb == NULL || parent_pcb->thread_count >= MAX_THREADS_PER_PROCESS) {
-        return -1;
-    }
- 
     // find next available thread slot
-    tid_t tid = parent_pcb->next_tid;
-    while (parent_pcb->threads[tid].state != THREAD_UNUSED) {
-        tid = (tid + 1) % MAX_THREADS_PER_PROCESS;
-        if (tid == parent_pcb->next_tid) {
-            return -1;  // no available slots
+    tid_t tid = -1;
+    for (int i = 0; i < vec_len(&threads); i++) {
+        tcb_t *thd = (tcb_t*) vec_get(&threads, i);
+        if (thd->state == THREAD_UNUSED) {
+            tid = i;
+            break;
         }
     }
+    if (tid == -1) {
+        tid = vec_len(&threads);
+        tcb_t *tcb = kcalloc(0, sizeof(tcb_t));
+        vec_push_back(&threads, tcb);
+    }
  
-    thread_t *new_thread = &parent_pcb->threads[tid];
+    tcb_t *new_thread = (tcb_t*) vec_get(&threads, tid);
  
     // allocate per-thread kernel stack
     new_thread->kernel_stack = alloc_page();
@@ -54,6 +63,16 @@ tid_t thread_create(pcb_t *parent_pcb, void *(*start_routine)(void*), void *arg)
     new_thread->return_value = NULL;
     new_thread->is_joinable = 1;
     new_thread->waiting_on_this = vec_new(2, NULL);
+
+    sigemptyset(&new_thread->pending_signals);
+    new_thread->mask = 0;
+    new_thread->priority = 1;
+    new_thread->blocked_until = 0;
+    new_thread->waiting_for_flags = 0;
+    new_thread->waiting_for_pid = -2;
+
+    new_thread->entry_func = start_routine;
+    new_thread->args = arg;
  
     // setup CPU context
     uint8_t *stack_top = new_thread->kernel_stack + THREAD_STACK_SIZE;
@@ -70,20 +89,17 @@ tid_t thread_create(pcb_t *parent_pcb, void *(*start_routine)(void*), void *arg)
     new_thread->ctx.x28 = 0;
     new_thread->ctx.x29 = 0;
     new_thread->ctx.x30 = (uint64_t)(uintptr_t)thread_start_trampoline;
-    new_thread->ctx.ttbr0_el1 = parent_pcb->ctx.ttbr0_el1;
-    new_thread->ctx.ttbr0_el1_va = parent_pcb->ctx.ttbr0_el1_va;
+    new_thread->ctx.ttbr0_el1 = parent_pcb->ttbr0_el1;
+    new_thread->ctx.ttbr0_el1_va = parent_pcb->ttbr0_el1_va;
  
-    parent_pcb->thread_count++;
-    parent_pcb->next_tid = (tid + 1) % MAX_THREADS_PER_PROCESS;
- 
-    // add to scheduler's ready queue
-    add_thread_to_scheduler(new_thread, parent_pcb);
+    pcb_thread_change_state(parent_pcb, THREAD_UNUSED, THREAD_RUNNING);
+    vec_push_back(&parent_pcb->tids, (ptr_t)(uintptr_t)new_thread->tid);
 
     return tid;
 }
 
 void thread_exit(void *retval) {
-    thread_t *thread = get_curr_thread();
+    tcb_t *thread = get_curr_thread();
     if (thread == NULL) {
         while (1) {
             asm volatile ("wfe");
@@ -96,10 +112,10 @@ void thread_exit(void *retval) {
     // wake up any waiting threads
     for (size_t i = 0; i < vec_len(&thread->waiting_on_this); i++) {
         tid_t waiting_tid = (tid_t)(uintptr_t)vec_get(&thread->waiting_on_this, i);
-        thread_t *waiting = thread_get_by_tid(thread->pcb, waiting_tid);
+        tcb_t *waiting = thread_get_by_tid(waiting_tid);
         if (waiting != NULL && waiting->state == THREAD_STOPPED) {
             waiting->state = THREAD_READY;
-            add_thread_to_scheduler(waiting, thread->pcb);
+            add_thread_to_scheduler(waiting);
         }
     }
     vec_clear(&thread->waiting_on_this);
@@ -113,13 +129,13 @@ void thread_exit(void *retval) {
 }
 
 int thread_join(tid_t tid, void **retval) {
-    thread_t *current = get_curr_thread();
+    tcb_t *current = get_curr_thread();
     if (current == NULL || current->pcb == NULL || current->tid == tid) {
         return -1;
     }
     pcb_t *pcb = current->pcb;
  
-    thread_t *target = thread_get_by_tid(pcb, tid);
+    tcb_t *target = thread_get_by_tid(tid);
     if (target == NULL || !target->is_joinable) {
         return -1;
     }
@@ -129,13 +145,7 @@ int thread_join(tid_t tid, void **retval) {
         if (retval != NULL) {
             *retval = target->return_value;
         }
-        target->state = THREAD_UNUSED;
-        target->is_joinable = 0;
-        target->return_value = NULL;
-        vec_destroy(&target->waiting_on_this);
-        if (pcb->thread_count > 0) {
-            pcb->thread_count--;
-        }
+        thread_cleanup(target);
         return 0;
     }
  
@@ -148,36 +158,122 @@ int thread_join(tid_t tid, void **retval) {
     if (retval != NULL) {
         *retval = target->return_value;
     }
-    target->state = THREAD_UNUSED;
-    target->is_joinable = 0;
-    target->return_value = NULL;
-    vec_destroy(&target->waiting_on_this);
-    if (pcb->thread_count > 0) {
-        pcb->thread_count--;
-    }
+    thread_cleanup(target);
  
     return 0;
 }
 
 int thread_detach(tid_t tid) {
     // look up thread from current process
-    thread_t *current = get_curr_thread();
+    tcb_t *current = get_curr_thread();
     if (current == NULL) {
         return -1;
     }
  
-    thread_t *target = thread_get_by_tid(current->pcb, tid);
+    tcb_t *target = thread_get_by_tid(tid);
     if (target == NULL) {
         return -1;
     }
  
     target->is_joinable = 0;
     if (target->state == THREAD_ZOMBIE) {
-        target->state = THREAD_UNUSED;
-        vec_destroy(&target->waiting_on_this);
-        if (current->pcb->thread_count > 0) {
-            current->pcb->thread_count--;
-        }
+        thread_cleanup(target);
     }
     return 0;
 }
+
+void thread_cleanup(tcb_t *target) {
+    pcb_t *pcb = target->pcb;
+    vec_destroy(&target->waiting_on_this);
+    target->state = THREAD_UNUSED;
+    
+    for (size_t i = 0; i < vec_len(&pcb->tids); i++) {
+        tid_t tid = (tid_t)(uintptr_t)vec_get(&pcb->tids, i);
+        if (tid == target->tid) {
+            vec_erase(&pcb->tids, i);
+            break;
+        }
+    }
+
+    if (vec_len(&threads)-1 == target->tid) {
+        vec_pop_back(&threads, NULL);
+        kfree(target);
+    }
+
+    pcb_thread_change_state(pcb, THREAD_ZOMBIE, THREAD_UNUSED);
+}
+
+// Add stop/terminate/block/unblock/continue process (but reqs signal mask and handlers)
+void stop_thread(tcb_t *tcb) {
+    if (tcb->state == THREAD_STOPPED) {
+        return;
+    }
+
+    pcb_thread_change_state(tcb->pcb, tcb->state, THREAD_STOPPED);
+    tcb->state = THREAD_STOPPED;
+    if (get_curr_thread() == tcb) {
+        schedule_yield();
+    }
+}
+
+void terminate_thread(tcb_t *tcb) {
+    if (tcb->state == THREAD_ZOMBIE) {
+        return;
+    }
+
+    pcb_thread_change_state(tcb->pcb, tcb->state, THREAD_ZOMBIE);
+    tcb->state = THREAD_ZOMBIE;
+
+    if (get_curr_thread() == tcb) {
+        schedule_yield();
+    }
+}
+
+void block_thread(tcb_t *tcb, int blocked_state) {
+    if (blocked_state != THREAD_BLOCKED_INTERRUPTABLE && blocked_state != THREAD_BLOCKED_KILLABLE && blocked_state != THREAD_BLOCKED_UNINTERUPTABLE) {
+        return;
+    }
+
+    pcb_thread_change_state(tcb->pcb, tcb->state, blocked_state);
+    tcb->state = blocked_state;
+    if (get_curr_thread() == tcb) {
+        schedule_yield();
+    }
+}
+
+void unblock_thread(tcb_t *tcb) {
+    if (tcb->state != THREAD_BLOCKED_INTERRUPTABLE || tcb->state != THREAD_BLOCKED_UNINTERUPTABLE || tcb->state != THREAD_BLOCKED_KILLABLE) {
+        return;
+    }
+
+    pcb_thread_change_state(tcb->pcb, tcb->state, THREAD_READY);
+    tcb->state = THREAD_READY;
+    tcb->blocked_until = 0;
+    add_thread_to_scheduler(tcb);
+}
+
+void continue_thread(tcb_t *tcb) {
+    if (tcb->state != THREAD_STOPPED) {
+        return;
+    }
+
+    pcb_thread_change_state(tcb->pcb, tcb->state, THREAD_READY);
+    tcb->state = THREAD_READY;
+    add_thread_to_scheduler(tcb);
+}
+
+
+int send_unblock_event(tid_t tid, uint32_t event) {
+    tcb_t *tcb = thread_get_by_tid(tid);
+    if (tcb == NULL || (tcb->state != THREAD_BLOCKED_INTERRUPTABLE && tcb->state != THREAD_BLOCKED_UNINTERUPTABLE && tcb->state != THREAD_BLOCKED_KILLABLE)) {
+        return 0;
+    }
+
+    if (tcb->blocked_until & event) {
+        unblock_thread(tcb);
+        return 1;
+    }
+
+    return 0;
+}
+

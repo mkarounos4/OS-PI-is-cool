@@ -9,6 +9,11 @@
 typedef int32_t pid_t;
 #endif
 
+#ifndef TID_T_DEFINED
+#define TID_T_DEFINED
+typedef int32_t tid_t;
+#endif
+
 enum signal_type {
     SIGINT = 2,
     SIGTTOU = 6,
@@ -37,6 +42,7 @@ struct sigaction {
 void SIG_IGN(int signum);
 void SIG_DFL(int signum);
 int s_kill(pid_t pid, int signal);
+int pthread_kill(tid_t tid, int signal);
 long send_sigchld(pid_t child);
 int sigprocmask(int how, const signalset_t *set, signalset_t *oldset);
 int sigemptyset(signalset_t *set);

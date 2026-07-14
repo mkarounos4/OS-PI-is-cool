@@ -184,7 +184,7 @@ void handle_instruction_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t
         pcb_t *curr_proc = get_curr_process();
         if (curr_proc != NULL) {
             int fault_status =
-                load_segment_page_for_fault((uint64_t *)(uintptr_t)curr_proc->ctx.ttbr0_el1_va,
+                load_segment_page_for_fault((uint64_t *)(uintptr_t)curr_proc->ttbr0_el1_va,
                                             far, 1);
             if (fault_status == PAGE_FAULT_HANDLED) {
                 invalidate_all_stage1_tlbs();
@@ -277,7 +277,7 @@ void handle_data_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t esr) {
                 return;
             }
 
-            table_base_addr = kernel_direct_map_va(curr_proc->ctx.ttbr0_el1);
+            table_base_addr = kernel_direct_map_va(curr_proc->ttbr0_el1);
             int heap_fault = is_in_range(far, USER_HEAP_START, USER_HEAP_SIZE);
             int stack_fault = is_in_range(far, USER_STACK_TOP - USER_STACK_SIZE,
                                           USER_STACK_SIZE);
@@ -295,7 +295,7 @@ void handle_data_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t esr) {
                                              far);
             } else {
                 int fault_status =
-                    load_segment_page_for_fault((uint64_t *)(uintptr_t)curr_proc->ctx.ttbr0_el1_va,
+                    load_segment_page_for_fault((uint64_t *)(uintptr_t)curr_proc->ttbr0_el1_va,
                                                 far, 0);
                 if (fault_status == PAGE_FAULT_HANDLED) {
                     mapped = 1;
@@ -345,7 +345,7 @@ void handle_data_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t esr) {
         }
 
         // walk page table
-        uint64_t table_base_va = kernel_direct_map_va(curr_proc->ctx.ttbr0_el1);
+        uint64_t table_base_va = kernel_direct_map_va(curr_proc->ttbr0_el1);
         uint64_t *l0 = (uint64_t *)(uintptr_t)table_base_va;
 
         uint64_t va = far;

@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include "traps/traps.h"
 #include "data-structs/vec.h"
+#include "signals.h"
 
 #ifndef TID_T_DEFINED
 #define TID_T_DEFINED
@@ -20,7 +21,10 @@ enum thread_state {
     THREAD_READY,
     THREAD_RUNNING,
     THREAD_STOPPED,
-    THREAD_ZOMBIE
+    THREAD_ZOMBIE,
+    THREAD_BLOCKED_INTERRUPTABLE,
+    THREAD_BLOCKED_UNINTERUPTABLE,
+    THREAD_BLOCKED_KILLABLE
 };
 
 // thread control block
@@ -34,16 +38,30 @@ typedef struct thread_st {
     void *return_value;
     uint8_t is_joinable;
     Vec waiting_on_this;
-} thread_t;
+
+    void*(*entry_func)(void*);
+    void *args;
+
+    signalset_t pending_signals;
+    signalset_t mask;
+    
+    int priority;
+    uint32_t blocked_until;
+
+
+    pid_t waiting_for_pid;
+    uint32_t waiting_for_flags;
+} tcb_t;
 
 tid_t thread_create(pcb_t *parent_pcb, void *(*start_routine)(void*), void *arg);
 void thread_exit(void *retval) __attribute__((noreturn));
 int thread_join(tid_t tid, void **retval);
 int thread_detach(tid_t tid);
-thread_t *get_curr_thread(void);
-thread_t *thread_get_by_tid(pcb_t *pcb, tid_t tid);
+tcb_t *get_curr_thread(void);
+tcb_t *thread_get_by_tid(tid_t tid);
 int thread_is_valid(pcb_t *pcb, tid_t tid);
 void threading_init(void);
+void thread_cleanup(tcb_t *target);
 
 /* synchronization structs */
 // mutex
@@ -85,3 +103,10 @@ int cond_signal(condition_variable_t *cond);
 int cond_broadcast(condition_variable_t *cond);
 int cond_destroy(condition_variable_t *cond);
 
+/* signal logic */
+void stop_thread(tcb_t *tcb);
+void terminate_thread(tcb_t *tcb);
+void block_thread(tcb_t *tcb, int blocked_state);
+void unblock_thread(tcb_t *tcb);
+void continue_thread(tcb_t *tcb);
+int send_unblock_event(tid_t tid, uint32_t event);

@@ -12,14 +12,12 @@ void scheduler_init(void);
 // Starts execution at thread 0. Does not return.
 void scheduler_start(void) __attribute__((noreturn));
 
-void add_task_to_scheduler(pcb_t *pcb);
-
 /* Threading */
-void add_thread_to_scheduler(thread_t *thread, pcb_t *pcb);
-thread_t *get_next_thread(void);
+void add_thread_to_scheduler(tcb_t *thread);
+tcb_t *get_next_thread(void);
 
 pcb_t *get_curr_process();
-thread_t *get_curr_thread(void);
+tcb_t *get_curr_thread(void);
 
 void scheduler_exit_current(int exit_code);
 

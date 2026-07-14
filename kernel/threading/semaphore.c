@@ -4,13 +4,13 @@
 
 static void wake_thread(tid_t tid)
 {
-    thread_t *current = get_curr_thread();
+    tcb_t *current = get_curr_thread();
     if (current == NULL)
     {
         return;
     }
 
-    thread_t *thread = thread_get_by_tid(current->pcb, tid);
+    tcb_t *thread = thread_get_by_tid(tid);
     if (thread == NULL) 
     {
         return;
@@ -19,7 +19,7 @@ static void wake_thread(tid_t tid)
     if (thread->state == THREAD_STOPPED)
     {
         thread->state = THREAD_READY;
-        add_thread_to_scheduler(thread, current->pcb);
+        add_thread_to_scheduler(thread);
     }
 }
 
@@ -50,7 +50,7 @@ int sem_wait(semaphore_t *sem)
         return 0;
     }
 
-    thread_t *current = get_curr_thread();
+    tcb_t *current = get_curr_thread();
     if (current == NULL)
     {
         return -1;

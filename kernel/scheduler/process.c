@@ -1,8 +1,10 @@
+#include "process.h"
 #include "scheduler/scheduler.h"
 #include "data-structs/hashmap.h"
 #include "memory/kmalloc.h"
 #include "memory/malloc.h"
 #include "memory/page_table/page_table.h"
+#include "threading/thread.h"
 #include "traps/traps.h"
 #include "uart/uart.h"
 #include "signals/signals.h"
@@ -152,14 +154,29 @@ static int has_wait_child(Vec *children, pid_t wait_pid) {
     return 0;
 }
 
+void remove_from_waitq(pcb_t *pcb, tid_t tid) {
+    for (size_t i = 0; i < vec_len(&pcb->child_waitq); i++) {
+        tid_t next_tid = (tid_t)(uintptr_t)vec_get(&pcb->child_waitq, i);
+        if (tid == next_tid) {
+            vec_erase(&pcb->child_waitq, i);
+            return;
+        }
+    }
+}
+
 long s_waitpid_impl(pid_t pid, int *status, int32_t flags) {
     pcb_t *curr_pcb = get_curr_process();
+    tcb_t *curr_tcb = get_curr_thread();
     if (curr_pcb == NULL) {
         return SYS_ESRCH;
     }
 
+    if (pid < -1) {
+        return SYS_EINVAL;
+    }
+
     pcb_t *done_child;
-    if (pid < 0) {
+    if (pid == -1) {
         if (!has_wait_child(&curr_pcb->children, pid)) {
             return ECHILD;
         }
@@ -169,13 +186,18 @@ long s_waitpid_impl(pid_t pid, int *status, int32_t flags) {
                 return 0;
             }
 
-            curr_pcb->waiting_for_pid = pid;
-            curr_pcb->waiting_for_flags = flags;
+            curr_tcb->waiting_for_pid = pid;
+            curr_tcb->waiting_for_flags = flags;
+            vec_push_back(&curr_pcb->child_waitq, (ptr_t)(uintptr_t)curr_tcb->tid);
+
             while (done_child == NULL) {
-                block_process(curr_pcb);
+                block_thread(curr_tcb, THREAD_BLOCKED_INTERRUPTABLE);
                 done_child = find_waitable_child(&curr_pcb->children, pid, flags);
             }
-            curr_pcb->waiting_for_pid = -2;
+            
+            curr_tcb->waiting_for_flags = flags;
+            curr_tcb->waiting_for_pid = -2;
+            remove_from_waitq(curr_pcb, curr_tcb->tid);
         }
     } else {
         done_child = get_pcb_by_pid(pid);
@@ -187,12 +209,20 @@ long s_waitpid_impl(pid_t pid, int *status, int32_t flags) {
             if (flags & WNOHANG) {
                 return 0;
             }
+
+            curr_tcb->waiting_for_pid = pid;
+            curr_tcb->waiting_for_flags = flags;
+            vec_push_back(&curr_pcb->child_waitq, (ptr_t)(uintptr_t)curr_tcb->tid);
+
             while (!can_wait_on_child(done_child, flags)) {
-                curr_pcb->waiting_for_pid = pid;
-                curr_pcb->waiting_for_flags = flags;
-                block_process(curr_pcb);
+                curr_tcb->waiting_for_pid = pid;
+                curr_tcb->waiting_for_flags = flags;
+                block_thread(curr_tcb, THREAD_BLOCKED_INTERRUPTABLE);
             }
-            curr_pcb->waiting_for_pid = -2;
+
+            curr_tcb->waiting_for_flags = flags;
+            curr_tcb->waiting_for_pid = -2;
+            remove_from_waitq(curr_pcb, curr_tcb->tid);
         }
     }
 
@@ -225,7 +255,7 @@ static pcb_t *get_next_unused_pcb() {
 }
 
 static const char *process_state_char(enum process_state state) {
-    if (state == PROC_READY_STATE || state == PROC_RUNNING_STATE) {
+    if (state == PROC_RUNNING_STATE) {
         return "R";
     }
     if (state == PROC_BLOCKED_STATE) {
@@ -241,7 +271,7 @@ static const char *process_state_char(enum process_state state) {
 }
 
 int print_processes(int fd) {
-    int err = fprintf(fd, "PID PPID PRI STAT CMD\n");
+    int err = fprintf(fd, "PID PPID STAT CMD\n");
     if (err < 0) {
         return err;
     }
@@ -252,10 +282,9 @@ int print_processes(int fd) {
             continue;
         }
 
-        err = fprintf(fd, "%d %d %d %s %s\n",
+        err = fprintf(fd, "%d %d %s %s\n",
                       pcb->pid,
                       pcb->ppid,
-                      pcb->priority,
                       process_state_char(pcb->state),
                       pcb->name);
         if (err < 0) {
@@ -325,29 +354,19 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     new_proc->children = vec_new(5, NULL);
     new_proc->file_descriptors = vec_new(3, NULL);
 
-    new_proc->state = PROC_READY_STATE;
-    new_proc->waiting_for_pid = -2;
+    new_proc->state = PROC_RUNNING_STATE;
     new_proc->wait_stop_pending = 0;
     new_proc->wait_cont_pending = 0;
-    new_proc->waiting_for_flags = 0;
     new_proc->exit_code = 0;
+    new_proc->tids = vec_new(1, NULL);
+    new_proc->num_blocked_threads = 0;
+    new_proc->num_stopped_threads = 0;
+    new_proc->num_zombie_threads = 0;
+    new_proc->num_running_threads = 0;
+    sigemptyset(&new_proc->pending_signals);
     process_copy_name(new_proc, parent_proc != NULL ? parent_proc->name : "?");
-    new_proc->entry_func = func;
-    new_proc->args = args;
-    new_proc->priority = 1;
-    new_proc->thread_count = 1;
-    new_proc->next_tid = 1;
-    new_proc->mask = 0;
-    new_proc->pending_signals = 0;
-    for (int i = 0; i < MAX_THREADS_PER_PROCESS; i++) {
-        new_proc->threads[i].tid = i;
-        new_proc->threads[i].state = THREAD_UNUSED;
-        new_proc->threads[i].pcb = new_proc;
-        new_proc->threads[i].kernel_stack = NULL;
-        new_proc->threads[i].user_stack_va = NULL;
-        new_proc->threads[i].return_value = NULL;
-        new_proc->threads[i].is_joinable = 0;
-    }
+    new_proc->child_waitq = vec_new(1, NULL);
+
     for (int i = 0; i < 32; i++) {
         new_proc->sigactions[i].sa_handler = SIG_DFL;
         new_proc->sigactions[i].sa_mask = 0;
@@ -360,62 +379,13 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
         return (pid_t)SYS_ENOMEM;
     }
 
-    uint64_t kernel_stack_page_va = PROC_KERNEL_STACK_TOP - PAGE_SIZE;
-    uint8_t *kernel_stack_page = pt_seed_kernel_page(user_l0,
-                                                     kernel_stack_page_va);
-    if (kernel_stack_page == NULL) {
-        uart_puts("ERROR: failed to seed process kernel stack");
-        return (pid_t)SYS_ENOMEM;
+    new_proc->ttbr0_el1 = kernel_phys_addr((uint64_t)user_l0);
+    new_proc->ttbr0_el1_va = (uint64_t)user_l0;
+
+    tid_t tid = thread_create(new_proc, func, args);
+    if (tid < 0) {
+        return (pid_t)SYS_EAGAIN;
     }
-
-    uint64_t frame_va = PROC_KERNEL_STACK_TOP - sizeof(struct trap_frame);
-    struct trap_frame *frame = (struct trap_frame *)(uintptr_t)
-        (kernel_stack_page + (frame_va - kernel_stack_page_va));
-
-    // Initialize all thread registers to 0.
-    for (unsigned i = 0; i < 31; i++) {
-        frame->regs[i] = 0;
-    }
-
-    frame->regs[0] = (uint64_t)(uintptr_t)func;
-    frame->regs[1] = (uint64_t)(uintptr_t)args;
-
-    // Initialize all special registers.
-    frame->sp = USER_STACK_TOP;
-    frame->elr = USER_THREAD_START;
-    frame->spsr = 0; // Initialize to SP_EL0 for user exception level
-    frame->esr = 0;
-    frame->far = 0;
-    frame->type = 0;
-    frame->intid = 0;
-
-    // Initialize rest of tcb
-    new_proc->ctx.x19 = frame_va;
-    new_proc->ctx.x20 = 0;
-    new_proc->ctx.x21 = 0;
-    new_proc->ctx.x22 = 0;
-    new_proc->ctx.x23 = 0;
-    new_proc->ctx.x24 = 0;
-    new_proc->ctx.x25 = 0;
-    new_proc->ctx.x26 = 0;
-    new_proc->ctx.x27 = 0;
-    new_proc->ctx.x28 = 0;
-    new_proc->ctx.x29 = 0;
-    new_proc->ctx.x30 = (uint64_t)(uintptr_t)process_first_run;
-    new_proc->ctx.sp = frame_va;
-    new_proc->ctx.ttbr0_el1 = kernel_phys_addr((uint64_t)user_l0);
-    new_proc->ctx.ttbr0_el1_va = (uint64_t)user_l0;
-
-    thread_t *main_thread = &new_proc->threads[0];
-    main_thread->tid = 0;
-    main_thread->state = THREAD_READY;
-    main_thread->ctx = new_proc->ctx;
-    main_thread->pcb = new_proc;
-    main_thread->kernel_stack = kernel_stack_page;
-    main_thread->user_stack_va = (uint64_t *)(uintptr_t)USER_STACK_TOP;
-    main_thread->return_value = NULL;
-    main_thread->is_joinable = 0;
-    main_thread->waiting_on_this = vec_new(2, NULL);
 
     if (add_to_pgrp(new_proc->pid) != 0) {
         uart_puts("ERROR: failed to add process to process group");
@@ -442,15 +412,15 @@ void proc_destroy(pcb_t *p) {
     }
     vec_destroy(&p->file_descriptors);
     remove_from_pgrp(p->pid);
-    destroy_page_table((uint64_t *)(uintptr_t)p->ctx.ttbr0_el1_va);
-    for (int i = 0; i < p->thread_count; i++) {
-        if (p->threads[i].state != THREAD_UNUSED) {
-            vec_destroy(&p->threads[i].waiting_on_this);
-            p->threads[i].state = THREAD_UNUSED;
-        }
+    destroy_page_table((uint64_t *)(uintptr_t)p->ttbr0_el1_va);
+    vec_destroy(&p->tids);
+    vec_destroy(&p->child_waitq);
+
+    // Clean up all threads
+    for (size_t i = 0; i < vec_len(&p->tids); i++) {
+        tid_t next_tid = (tid_t)(uintptr_t)vec_get(&p->tids, i);
+        thread_cleanup(thread_get_by_tid(next_tid));
     }
-    p->thread_count = 0;
-    p->next_tid = 0;
 
     // Rn, stack and heap are tied to pcb, so automatically "free" when create new process
     // When adding VM, TODO add cleanup of stack/heap
@@ -485,8 +455,10 @@ void proc_destroy(pcb_t *p) {
         }
     }
 
+    // Unblock init if added orphans
     if (added_child) {
-        send_unblock_event(init_proc->pid, BLOCK_UNTIL_NEW_CHILD);
+        send_unblock_event((tid_t)(uintptr_t)vec_get(&init_proc->tids, 0), BLOCK_UNTIL_NEW_CHILD);
+        
     }
 }
 
@@ -518,17 +490,18 @@ void processes_init() {
             process_copy_name(init_pcb, "init");
         }
     }
-    add_task_to_scheduler(get_pcb_by_pid(pid));
+
+    add_thread_to_scheduler(thread_get_by_tid((tid_t)(uintptr_t)vec_get(&get_pcb_by_pid(pid)->tids, 0)));
 }
 
 void cpy_address_space(pcb_t *src, pcb_t *dst) {
-    uint64_t *src_l0 = (uint64_t *)src->ctx.ttbr0_el1_va;
+    uint64_t *src_l0 = (uint64_t *)src->ttbr0_el1_va;
     uint64_t *dst_l0 = (uint64_t *)alloc_page();
     if (dst_l0 == NULL) return;
     if (copy_page_table_struct(src_l0, dst_l0) != SUCCESS) return;
-    destroy_page_table((uint64_t *)(uintptr_t)dst->ctx.ttbr0_el1_va);
-    dst->ctx.ttbr0_el1 = (uint64_t)(uintptr_t)kernel_phys_addr((uint64_t)(uintptr_t)dst_l0);
-    dst->ctx.ttbr0_el1_va = (uint64_t)dst_l0;
+    destroy_page_table((uint64_t *)(uintptr_t)dst->ttbr0_el1_va);
+    dst->ttbr0_el1 = (uint64_t)(uintptr_t)kernel_phys_addr((uint64_t)(uintptr_t)dst_l0);
+    dst->ttbr0_el1_va = (uint64_t)dst_l0;
 
     for (size_t i = 0; i < PAGE_TABLE_ENTRIES; i++) {
 	    if ((src_l0[i] & DESC_VALID) == 0) continue;
@@ -592,11 +565,12 @@ void cpy_address_space(pcb_t *src, pcb_t *dst) {
 pid_t fork(struct trap_frame *frame) {
     // create child process off of parent
     pcb_t *parent = get_curr_process();
+    tcb_t *parent_thd = get_curr_thread();
     if (parent == NULL) {
         return (pid_t)SYS_ESRCH;
     }
 
-    pid_t child_pid = proc_create(parent->entry_func, parent->args, parent->pid);
+    pid_t child_pid = proc_create(parent_thd->entry_func, parent_thd->args, parent->pid);
     if (child_pid < 0) return (pid_t)SYS_EAGAIN;
     pcb_t *child = get_pcb_by_pid(child_pid); 
 
@@ -611,7 +585,7 @@ pid_t fork(struct trap_frame *frame) {
     }
 
     void *child_kernel_stack_page =
-        pt_get_mapped_page((uint64_t *)(uintptr_t)child->ctx.ttbr0_el1_va,
+        pt_get_mapped_page((uint64_t *)(uintptr_t)child->ttbr0_el1_va,
                            kernel_stack_page_va);
     if (child_kernel_stack_page == NULL) {
         proc_destroy(child);
@@ -621,12 +595,13 @@ pid_t fork(struct trap_frame *frame) {
     struct trap_frame *child_frame =
         (struct trap_frame *)(uintptr_t)((uint8_t *)child_kernel_stack_page +
                                          frame_offset);
+
+    tcb_t *child_tcb = thread_get_by_tid((tid_t)(uintptr_t)vec_get(&child->tids, 0));
+
     *child_frame = *frame;
     child_frame->regs[0] = 0;
-    child->ctx.x19 = frame_va;
-    child->ctx.sp = frame_va;
-    child->threads[0].ctx = child->ctx;
-    child->threads[0].state = THREAD_READY;
+    child_tcb->ctx.x19 = frame_va;
+    child_tcb->ctx.sp = frame_va;
 
     for (size_t i = 0; i < vec_len(&parent->file_descriptors); i++) {
         void *fd = vec_get(&parent->file_descriptors, i);
@@ -637,82 +612,9 @@ pid_t fork(struct trap_frame *frame) {
     }
     
     // save_curr_context(&child->ctx);
-    add_task_to_scheduler(child);
+    add_thread_to_scheduler(child_tcb);
     // return child pid to parent's call
     return child->pid;
-}
-
-// Add stop/terminate/block/unblock/continue process (but reqs signal mask and handlers)
-void stop_process(pcb_t *pcb) {
-    if (pcb->state == PROC_STOPPED_STATE) {
-        return;
-    }
-
-    pcb->state = PROC_STOPPED_STATE;
-    send_sigchld(pcb->pid);
-    if (get_curr_process() == pcb) {
-        schedule_yield();
-    }
-}
-
-void terminate_process(pcb_t *pcb) {
-    if (pcb->state == PROC_ZOMBIE_STATE) {
-        return;
-    }
-
-    pcb->state = PROC_ZOMBIE_STATE;
-    pcb->exit_code = 128;
-    send_sigchld(pcb->pid);
-
-    if (get_curr_process() == pcb) {
-        schedule_yield();
-    }
-}
-
-void block_process(pcb_t *pcb) {
-    pcb->state = PROC_BLOCKED_STATE;
-    if (get_curr_process() == pcb) {
-        thread_t *thread = get_curr_thread();
-        if (thread != NULL && thread->pcb == pcb) {
-            thread->state = THREAD_STOPPED;
-        }
-        schedule_yield();
-    }
-}
-
-void unblock_process(pcb_t *pcb) {
-    if (pcb->state != PROC_BLOCKED_STATE) {
-        return;
-    }
-    pcb->state = PROC_READY_STATE;
-    pcb->blocked_until = 0;
-    for (int i = 0; i < pcb->thread_count; i++) {
-        if (pcb->threads[i].state == THREAD_STOPPED) {
-            pcb->threads[i].state = THREAD_READY;
-        }
-    }
-    add_task_to_scheduler(pcb);
-}
-
-void continue_process(pcb_t *pcb) {
-    if (pcb->state != PROC_STOPPED_STATE) {
-        return;
-    }
-
-    pcb->state = PROC_READY_STATE;
-    send_sigchld(pcb->pid);
-    add_task_to_scheduler(pcb);
-}
-
-void send_unblock_event(pid_t pid, uint32_t event) {
-    pcb_t *pcb = get_pcb_by_pid(pid);
-    if (pcb == NULL || pcb->state != PROC_BLOCKED_STATE) {
-        return;
-    }
-
-    if (pcb->blocked_until & event) {
-        unblock_process(pcb);
-    }
 }
 
 int dup2(int oldfd, int newfd) {
@@ -775,4 +677,65 @@ pid_t getpgid() {
     }
 
     return pcb->pgid;
+}
+
+void pcb_thread_change_state(pcb_t *pcb, int old_state, int new_state) {
+    switch(old_state) {
+        case THREAD_READY:
+        case THREAD_RUNNING:
+            pcb->num_running_threads--;
+            break;
+        case THREAD_STOPPED:
+            pcb->num_stopped_threads--;
+            break;
+        case THREAD_ZOMBIE:
+            pcb->num_zombie_threads--;
+            break;
+        case THREAD_BLOCKED_INTERRUPTABLE:
+        case THREAD_BLOCKED_KILLABLE:
+        case THREAD_BLOCKED_UNINTERUPTABLE:
+            pcb->num_blocked_threads--;
+            break;
+        default:
+    }
+
+    switch(new_state) {
+        case THREAD_READY:
+        case THREAD_RUNNING:
+            pcb->num_running_threads++;
+            break;
+        case THREAD_STOPPED:
+            pcb->num_stopped_threads++;
+            break;
+        case THREAD_ZOMBIE:
+            pcb->num_zombie_threads++;
+            break;
+        case THREAD_BLOCKED_INTERRUPTABLE:
+        case THREAD_BLOCKED_KILLABLE:
+        case THREAD_BLOCKED_UNINTERUPTABLE:
+            pcb->num_blocked_threads++;
+            break;
+        default:
+    }
+
+    if (pcb->num_running_threads > 0) {
+        pcb->state = PROC_RUNNING_STATE;
+        send_sigchld(pcb->pid);
+        return;
+    }
+
+    if (pcb->num_blocked_threads > 0) {
+        pcb->state = PROC_BLOCKED_STATE;
+        return;
+    }
+
+    if (pcb->num_stopped_threads > 0) {
+        pcb->state = PROC_STOPPED_STATE;
+        send_sigchld(pcb->pid);
+        return;
+    }
+
+    pcb->state = PROC_ZOMBIE_STATE;
+    send_sigchld(pcb->pid);
+    return;
 }

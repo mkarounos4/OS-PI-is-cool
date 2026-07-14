@@ -687,7 +687,7 @@ int k_exec_process(int pid, const char *path, char *const argv[]) {
         return INVALID_ARGS;
     }
 
-    thread_t *main_thread = &pcb->threads[0];
+    tcb_t *main_thread = get_curr_thread();
     uint64_t kernel_stack_page_va = PROC_KERNEL_STACK_TOP - PAGE_SIZE;
     uint64_t frame_va = main_thread->ctx.x19;
     uint64_t frame_offset = frame_va - kernel_stack_page_va;

@@ -2,6 +2,7 @@
 
 #include <stddef.h>
 
+#include "threading/thread.h"
 #include "timer/timer.h"
 #include "traps/traps.h"
 #include "uart/uart.h"
@@ -133,22 +134,22 @@ static long s_spawn(void* (*func)(void*), void *argv) {
     if (new_pcb == NULL) {
         return SYS_ESRCH;
     }
-    add_task_to_scheduler(new_pcb);
+    add_thread_to_scheduler(thread_get_by_tid((tid_t)(uintptr_t)vec_get(&new_pcb->tids, 0)));
 
     return new_pcb->pid;
 }
 
 static struct trap_frame *s_block_until_event(uint32_t event,
                                               struct trap_frame *frame) {
-    pcb_t *curr_proc = get_curr_process();
-    if (curr_proc == NULL) {
+    tcb_t *curr_thread = get_curr_thread();
+    if (curr_thread == NULL) {
         frame->regs[0] = (uint64_t)SYS_ESRCH;
         return frame;
     }
 
-    curr_proc->blocked_until = event;
+    curr_thread->blocked_until = event;
     frame->regs[0] = 0;
-    block_process(curr_proc);
+    block_thread(curr_thread, THREAD_BLOCKED_INTERRUPTABLE);
 
     return frame;
 }

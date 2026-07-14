@@ -10,6 +10,7 @@
 #include "scheduler/process.h"
 #include "scheduler/scheduler.h"
 #include "fs/oft.h"
+#include "threading/thread.h"
 
 #define PIPE_CAPACITY 4096
 
@@ -143,23 +144,23 @@ int pipe(int pipefd[2]) {
 
 void pipe_wake_up_readers(struct pipe_st *pipe) {
     while (!vec_is_empty(&pipe->rx_wait_queue)) {
-        void *pid;
-        int removed = (int)(uintptr_t)vec_pop_back(&pipe->rx_wait_queue, &pid);
+        void *tid;
+        int removed = (int)(uintptr_t)vec_pop_back(&pipe->rx_wait_queue, &tid);
         if (!removed) {
             continue;
         }
-        unblock_process(get_pcb_by_pid((int)(uintptr_t)pid));
+        unblock_thread(thread_get_by_tid((tid_t)(uintptr_t)tid));
     }
 }
 
 void pipe_wake_up_writers(struct pipe_st *pipe) {
     while (!vec_is_empty(&pipe->tx_wait_queue)) {
-        void *pid;
-        int removed = (int)(uintptr_t)vec_pop_back(&pipe->tx_wait_queue, &pid);
+        void *tid;
+        int removed = (int)(uintptr_t)vec_pop_back(&pipe->tx_wait_queue, &tid);
         if (!removed) {
             continue;
         }
-        unblock_process(get_pcb_by_pid((int)(uintptr_t)pid));
+        unblock_thread(thread_get_by_tid((int)(uintptr_t)tid));
     }
 }
 
@@ -215,6 +216,7 @@ int pipe_read(struct oft_entry *entry, char *buffer, size_t count) {
         return (int)SYS_ESRCH;
     }
 
+    tcb_t *curr_thd = get_curr_thread();
     ssize_t num_read = 0;
     while (num_read < count) {
         char char_void;
@@ -224,8 +226,8 @@ int pipe_read(struct oft_entry *entry, char *buffer, size_t count) {
                 return num_read;
             }
             pipe_wake_up_writers(pipe);
-            vec_push_back(&pipe->rx_wait_queue, (ptr_t)(uintptr_t)curr_pcb->pid);
-            block_process(curr_pcb);
+            vec_push_back(&pipe->rx_wait_queue, (ptr_t)(uintptr_t)curr_thd->tid);
+            block_thread(curr_thd, THREAD_BLOCKED_INTERRUPTABLE);
             continue;
         }
 
@@ -250,13 +252,15 @@ int pipe_write(struct oft_entry *entry, const char *buffer, size_t count) {
         return (int)SYS_ESRCH;
     }
 
+    tcb_t *curr_thd = get_curr_thread();
+
     ssize_t num_read = 0;
     while (num_read < count) {
         bool wrote_char = produce_ring_buffer(&pipe->buffer, buffer);
         if (!wrote_char) {
             pipe_wake_up_readers(pipe);
-            vec_push_back(&pipe->tx_wait_queue, (ptr_t)(uintptr_t)curr_pcb->pid);
-            block_process(curr_pcb);
+            vec_push_back(&pipe->tx_wait_queue, (ptr_t)(uintptr_t)curr_thd->tid);
+            block_thread(curr_thd, THREAD_BLOCKED_INTERRUPTABLE);
             continue;
         }
 

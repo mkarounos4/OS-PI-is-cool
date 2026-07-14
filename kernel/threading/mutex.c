@@ -19,7 +19,7 @@ int mutex_lock(mutex_t *mutex) {
         return -1;
     }
     
-    thread_t *current = get_curr_thread();
+    tcb_t *current = get_curr_thread();
     if (current == NULL) {
         return -1;
     }
@@ -44,7 +44,7 @@ int mutex_trylock(mutex_t *mutex) {
         return -1;
     }
     
-    thread_t *current = get_curr_thread();
+    tcb_t *current = get_curr_thread();
     if (current == NULL) {
         return -1;
     }
@@ -64,7 +64,7 @@ int mutex_unlock(mutex_t *mutex) {
         return -1;
     }
     
-    thread_t *current = get_curr_thread();
+    tcb_t *current = get_curr_thread();
     if (current == NULL || mutex->owner_tid != current->tid) {
         return -1;  // not the owner
     }
@@ -79,10 +79,10 @@ int mutex_unlock(mutex_t *mutex) {
             vec_pop_back(&mutex->waiting_threads, &waiting_tid);
             
             pcb_t *pcb = current->pcb;
-            thread_t *waiting_thread = thread_get_by_tid(pcb, (tid_t)(uintptr_t)waiting_tid);
+            tcb_t *waiting_thread = thread_get_by_tid((tid_t)(uintptr_t)waiting_tid);
             if (waiting_thread != NULL) {
                 waiting_thread->state = THREAD_READY;
-                add_thread_to_scheduler(waiting_thread, pcb);
+                add_thread_to_scheduler(waiting_thread);
             }
         }
     }
