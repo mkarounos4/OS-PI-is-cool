@@ -150,7 +150,9 @@ int find_file_in_table(int *oft_id) {
             }
         }
     }
-    if (oft_id != NULL) *oft_id = (int)vec_len(&open_file_table);
+    if (oft_id != NULL && *oft_id == -1) {
+        *oft_id = (int)vec_len(&open_file_table);
+    }
     return FILE_NOT_FOUND;
 }
 

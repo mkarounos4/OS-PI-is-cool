@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "traps/traps.h"
@@ -26,3 +27,5 @@ void timer_delay_ms(uint64_t milliseconds);
 
 // Block the current process until at least the given number of milliseconds pass.
 long timer_sleep_ms(uint64_t milliseconds);
+
+int timer_format_proc(char *buf, size_t size);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 #include "traps/traps.h"
 #include "data-structs/vec.h"
@@ -67,6 +68,8 @@ void thread_cleanup(tcb_t *target);
 /* synchronization structs */
 // mutex
 typedef struct {
+    uint32_t lock_id;
+    char lock_name[16];
     tid_t owner_tid;
     int lock_count;
     Vec waiting_threads;
@@ -74,6 +77,8 @@ typedef struct {
 
 // semaphore
 typedef struct {
+    uint32_t lock_id;
+    char lock_name[16];
     int count;
     Vec waiting_threads;
 } semaphore_t;
@@ -111,3 +116,4 @@ void block_thread(tcb_t *tcb, int blocked_state);
 void unblock_thread(tcb_t *tcb);
 void continue_thread(tcb_t *tcb);
 int send_unblock_event(tid_t tid, uint32_t event);
+int threading_format_locks(char *buf, size_t size);

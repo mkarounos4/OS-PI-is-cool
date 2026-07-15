@@ -139,3 +139,15 @@ err_t vfs_get_metadata(ino_id_t ino, attributes_t *metadata) {
     vfs_put_inode(node);
     return SUCCESS;
 }
+
+err_t vfs_format_path(ino_id_t ino, char *path, size_t size) {
+    if (path == NULL || size == 0 || ino == 0) {
+        return INVALID_ARGS;
+    }
+
+    const struct virtual_fs_ops *ops = vfs_ops_for_inode(ino);
+    if (ops == NULL || ops->format_path == NULL) {
+        return FILE_NOT_FOUND;
+    }
+    return ops->format_path(ino, path, size);
+}

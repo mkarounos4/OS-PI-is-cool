@@ -2,6 +2,9 @@
 #include "scheduler/scheduler.h"
 #include "data-structs/vec.h"
 
+void threading_register_semaphore(semaphore_t *sem);
+void threading_unregister_semaphore(semaphore_t *sem);
+
 static void wake_thread(tid_t tid)
 {
     tcb_t *current = get_curr_thread();
@@ -32,6 +35,7 @@ int sem_init(semaphore_t *sem, int initial_value)
 
     sem->count = initial_value;
     sem->waiting_threads = vec_new(2, NULL);
+    threading_register_semaphore(sem);
 
     return 0;
 }
@@ -100,7 +104,8 @@ int sem_destroy(semaphore_t *sem)
         return -1;
     }
 
-    vec_clear(&sem->waiting_threads);
+    threading_unregister_semaphore(sem);
+    vec_destroy(&sem->waiting_threads);
 
     sem->count = 0;
 

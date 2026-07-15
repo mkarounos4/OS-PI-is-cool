@@ -34,11 +34,13 @@
 #define PROC_FILE_TTY 9
 #define PROC_FILE_VERSION 10
 #define PROC_FILE_CPUINFO 11
-#define PROC_FILE_PID_STATUS 12
-#define PROC_FILE_PID_CWD 13
-#define PROC_FILE_PID_FD 14
-#define PROC_FILE_PID_MAPS 15
-#define PROC_FILE_PID_THREADS 16
+#define PROC_FILE_THREADS 12
+#define PROC_FILE_LOCKS 13
+#define PROC_FILE_PID_STATUS 14
+#define PROC_FILE_PID_CWD 15
+#define PROC_FILE_PID_FD 16
+#define PROC_FILE_PID_MAPS 17
+#define PROC_FILE_PID_THREADS 18
 
 #define PROC_READ_BUFFER_SIZE 4096
 #define PROC_INO_ROOT_DIR PROCFS_INO_BASE
@@ -63,6 +65,8 @@ static const struct proc_file_def proc_root_files[] = {
     {"tty", PROC_FILE_TTY},
     {"version", PROC_FILE_VERSION},
     {"cpuinfo", PROC_FILE_CPUINFO},
+    {"threads", PROC_FILE_THREADS},
+    {"locks", PROC_FILE_LOCKS},
 };
 
 static const struct proc_file_def proc_pid_files[] = {
@@ -84,12 +88,15 @@ static struct proc_st *proc_pid_file_nodes[MAX_PROCESS_COUNT]
 
 static int proc_dir_open(struct oft_entry *entry);
 static int proc_dir_close(struct oft_entry *entry);
+static int proc_emit_dirent(struct fs_dirent *out, const char *name,
+                            ino_id_t ino);
 static int proc_dir_lookup(const char *f_name, uint8_t is_dir_type,
                            struct fs_dirent *dirent, int curr_dir);
 static int proc_dir_readdir(struct oft_entry *dir, struct fs_dirent *out);
 static int proc_file_open(struct oft_entry *entry);
 static int proc_file_close(struct oft_entry *entry);
 static int proc_file_read(struct oft_entry *entry, char *buffer, size_t count);
+static err_t procfs_format_path(ino_id_t ino, char *path, size_t size);
 
 static struct file_operations proc_dir_ops = {
     .open = proc_dir_open,
@@ -116,6 +123,7 @@ static const struct virtual_fs_ops procfs_vfs_ops = {
     .get_metadata = procfs_get_metadata,
     .alloc_cached_inode = procfs_alloc_cached_inode,
     .free_cached_inode = procfs_free_cached_inode,
+    .format_path = procfs_format_path,
 };
 
 static int proc_file_count(const struct proc_file_def *files, size_t bytes) {
@@ -201,45 +209,59 @@ static const char *process_state_name(enum process_state state) {
     }
 }
 
-static char thread_state_char(enum thread_state state) {
+static const char *proc_thread_state_name(enum thread_state state) {
     switch (state) {
     case THREAD_READY:
-    case THREAD_RUNNING:
-        return 'R';
-    case THREAD_STOPPED:
-        return 'T';
-    case THREAD_ZOMBIE:
-        return 'Z';
-    case THREAD_BLOCKED_INTERRUPTABLE:
-    case THREAD_BLOCKED_UNINTERUPTABLE:
-    case THREAD_BLOCKED_KILLABLE:
-        return 'B';
-    case THREAD_UNUSED:
-    default:
-        return 'U';
-    }
-}
-
-static const char *thread_state_name(enum thread_state state) {
-    switch (state) {
-    case THREAD_READY:
-        return "ready";
+        return "runnable";
     case THREAD_RUNNING:
         return "running";
     case THREAD_STOPPED:
-        return "stopped";
+        return "sleep";
     case THREAD_ZOMBIE:
         return "zombie";
     case THREAD_BLOCKED_INTERRUPTABLE:
-        return "blocked-interruptable";
     case THREAD_BLOCKED_UNINTERUPTABLE:
-        return "blocked-uninterruptable";
     case THREAD_BLOCKED_KILLABLE:
-        return "blocked-killable";
+        return "blocked";
     case THREAD_UNUSED:
     default:
         return "unused";
     }
+}
+
+static const char *proc_root_thread_state_name(enum thread_state state) {
+    switch (state) {
+    case THREAD_READY:
+        return "runnable";
+    case THREAD_RUNNING:
+        return "running";
+    case THREAD_STOPPED:
+    case THREAD_BLOCKED_INTERRUPTABLE:
+    case THREAD_BLOCKED_UNINTERUPTABLE:
+    case THREAD_BLOCKED_KILLABLE:
+        return "sleep";
+    case THREAD_ZOMBIE:
+        return "zombie";
+    case THREAD_UNUSED:
+    default:
+        return "unused";
+    }
+}
+
+static const char *proc_thread_name(pcb_t *pcb, tcb_t *thread,
+                                    char *buf, size_t size) {
+    if (pcb == NULL || thread == NULL || buf == NULL || size == 0) {
+        return "?";
+    }
+
+    const char *role = "thread";
+    if (vec_len(&pcb->tids) > 0 &&
+        (tid_t)(uintptr_t)vec_get(&pcb->tids, 0) == thread->tid) {
+        role = "main";
+    }
+
+    snprintf(buf, size, "%s.%s", pcb->name, role);
+    return buf;
 }
 
 static struct proc_st *proc_alloc_node(uint8_t kind, pid_t pid,
@@ -400,6 +422,34 @@ int procfs_is_virtual_inode(ino_id_t ino) {
         (ino_id_t)MAX_PROCESS_COUNT * (ino_id_t)proc_pid_file_count();
     return ino >= PROC_INO_PID_FILE_BASE &&
            ino < PROC_INO_PID_FILE_BASE + pid_file_count;
+}
+
+static err_t procfs_format_path(ino_id_t ino, char *path, size_t size) {
+    if (path == NULL || size == 0 || !procfs_is_virtual_inode(ino)) {
+        return INVALID_ARGS;
+    }
+
+    if (ino == PROC_INO_ROOT_DIR) {
+        if (size < 6) {
+            return INVALID_ARGS;
+        }
+        strcpy(path, "/proc");
+        return SUCCESS;
+    }
+
+    if (ino >= PROC_INO_PID_DIR_BASE &&
+        ino < PROC_INO_PID_DIR_BASE + (ino_id_t)MAX_PROCESS_COUNT) {
+        pid_t pid = (pid_t)(ino - PROC_INO_PID_DIR_BASE);
+        if (get_pcb_by_pid(pid) == NULL) {
+            return FILE_NOT_FOUND;
+        }
+        if (snprintf(path, size, "/proc/%d", pid) >= (int)size) {
+            return INVALID_ARGS;
+        }
+        return SUCCESS;
+    }
+
+    return FILE_NOT_FOUND;
 }
 
 err_t procfs_get_metadata(ino_id_t ino, attributes_t *metadata) {
@@ -615,6 +665,19 @@ static int proc_dir_lookup(const char *f_name, uint8_t is_dir_type,
     if (proc == NULL) {
         return INVALID_ARGS;
     }
+
+    if (is_dir_type && strcmp(f_name, ".") == 0) {
+        return proc_emit_dirent(dirent, ".", (ino_id_t)curr_dir);
+    }
+    if (is_dir_type && strcmp(f_name, "..") == 0) {
+        if (proc->kind == PROC_KIND_ROOT_DIR) {
+            return proc_emit_dirent(dirent, "..", ROOT_INO);
+        }
+        if (proc->kind == PROC_KIND_PID_DIR) {
+            return proc_emit_dirent(dirent, "..", proc_root_ino);
+        }
+    }
+
     if (proc->kind == PROC_KIND_ROOT_DIR) {
         return proc_lookup_root(f_name, is_dir_type, dirent);
     }
@@ -866,8 +929,7 @@ static int build_pid_fd(pcb_t *pcb, char *buf, size_t size) {
 }
 
 static int build_pid_threads(pcb_t *pcb, char *buf, size_t size) {
-    int len = snprintf(buf, size,
-                       "TID STATE STATE_NAME PRIORITY BLOCKED_UNTIL WAIT_PID WAIT_FLAGS\n");
+    int len = snprintf(buf, size, "TID STATE KSTACK USTACK NAME\n");
     for (size_t i = 0; i < vec_len(&pcb->tids); i++) {
         tid_t tid = (tid_t)(uintptr_t)vec_get(&pcb->tids, i);
         tcb_t *thread = thread_get_by_tid(tid);
@@ -875,14 +937,39 @@ static int build_pid_threads(pcb_t *pcb, char *buf, size_t size) {
             continue;
         }
 
-        len = append(buf, size, len, "%d %c %s %d %u %d %u\n",
+        char name[48];
+        len = append(buf, size, len, "%d %s 0x%lx 0x%lx %s\n",
                      thread->tid,
-                     thread_state_char(thread->state),
-                     thread_state_name(thread->state),
-                     thread->priority,
-                     thread->blocked_until,
-                     thread->waiting_for_pid,
-                     thread->waiting_for_flags);
+                     proc_thread_state_name(thread->state),
+                     (unsigned long)(uintptr_t)thread->kernel_stack,
+                     (unsigned long)(uintptr_t)thread->user_stack_va,
+                     proc_thread_name(pcb, thread, name, sizeof(name)));
+    }
+    return len;
+}
+
+static int build_threads(char *buf, size_t size) {
+    int len = snprintf(buf, size, "TID PID STATE CPU NAME\n");
+    for (pid_t pid = 0; pid < MAX_PROCESS_COUNT; pid++) {
+        pcb_t *pcb = get_pcb_by_pid(pid);
+        if (pcb == NULL) {
+            continue;
+        }
+
+        for (size_t i = 0; i < vec_len(&pcb->tids); i++) {
+            tid_t tid = (tid_t)(uintptr_t)vec_get(&pcb->tids, i);
+            tcb_t *thread = thread_get_by_tid(tid);
+            if (thread == NULL) {
+                continue;
+            }
+
+            char name[48];
+            len = append(buf, size, len, "%d %d %s 0 %s\n",
+                         thread->tid,
+                         pcb->pid,
+                         proc_root_thread_state_name(thread->state),
+                         proc_thread_name(pcb, thread, name, sizeof(name)));
+        }
     }
     return len;
 }
@@ -959,9 +1046,7 @@ static int build_proc_file(struct proc_st *proc, char *buf, size_t size) {
     case PROC_FILE_VMSTAT:
         return page_table_format_vmstat(buf, size);
     case PROC_FILE_TIMERS:
-        return snprintf(buf, size, "timer_ticks: %u\nfrequency: %u\n",
-                        (unsigned int)timer_get_ticks(),
-                        (unsigned int)timer_get_frequency());
+        return timer_format_proc(buf, size);
     case PROC_FILE_INTERRUPTS:
         return irq_format_proc(buf, size);
     case PROC_FILE_SYSCALLS:
@@ -1014,6 +1099,10 @@ static int build_proc_file(struct proc_st *proc, char *buf, size_t size) {
                         (unsigned int)PAGE_SIZE
 #endif
         );
+    case PROC_FILE_THREADS:
+        return build_threads(buf, size);
+    case PROC_FILE_LOCKS:
+        return threading_format_locks(buf, size);
     default:
         return FILE_NOT_FOUND;
     }

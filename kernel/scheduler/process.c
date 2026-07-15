@@ -51,6 +51,7 @@ static int setup_process_main_thread(pcb_t *pcb, tcb_t *thread,
     frame->regs[0] = (uint64_t)(uintptr_t)func;
     frame->regs[1] = (uint64_t)(uintptr_t)args;
     frame->sp = USER_STACK_TOP;
+    thread->user_stack_va = (uint64_t *)(uintptr_t)USER_STACK_TOP;
     frame->elr = USER_THREAD_START;
     frame->spsr = 0;
     frame->esr = 0;

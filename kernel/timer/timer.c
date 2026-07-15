@@ -3,6 +3,7 @@
 #include "irq/irq.h"
 #include "scheduler/process.h"
 #include "scheduler/scheduler.h"
+#include "string.h"
 #include "threading/thread.h"
 
 #define ARM_GENERIC_TIMER_INTID 30u
@@ -21,6 +22,7 @@ typedef struct software_timer_st {
 } software_timer_t;
 
 static software_timer_t software_timers[MAX_SOFTWARE_TIMERS];
+static void timer_wake_thread(void *ctx);
 
 static inline uint64_t read_cntfrq_el0(void) {
     uint64_t value;
@@ -146,6 +148,66 @@ uint64_t timer_get_ticks(void) {
 
 uint64_t timer_get_frequency(void) {
     return timer_frequency;
+}
+
+int timer_format_proc(char *buf, size_t size) {
+    if (buf == NULL || size == 0) {
+        return -1;
+    }
+
+    uint64_t flags = irq_save();
+    uint64_t now = read_cntpct_el0();
+    uint64_t ticks = timer_ticks;
+    uint64_t frequency = timer_frequency;
+    unsigned int active = 0;
+    for (unsigned int i = 0; i < MAX_SOFTWARE_TIMERS; i++) {
+        if (software_timers[i].active) {
+            active++;
+        }
+    }
+
+    int len = snprintf(buf, size, "timer_hz: %u\n"
+                                  "ticks: %u\n"
+                                  "timers: %u\n\n"
+                                  "ID OWNER WAKE_TICK REMAINING_MS\n",
+                       (unsigned int)frequency,
+                       (unsigned int)ticks,
+                       active);
+
+    for (unsigned int i = 0; i < MAX_SOFTWARE_TIMERS; i++) {
+        if (!software_timers[i].active) {
+            continue;
+        }
+
+        uint64_t remaining_ticks =
+            (int64_t)(software_timers[i].deadline - now) > 0 ?
+            software_timers[i].deadline - now : 0;
+        uint64_t remaining_ms =
+            frequency == 0 ? 0 : (remaining_ticks * 1000u) / frequency;
+        const char *owner = "callback";
+        char owner_buf[32];
+        if (software_timers[i].handler == timer_wake_thread) {
+            snprintf(owner_buf, sizeof(owner_buf), "tid=%d",
+                     (int)(tid_t)(uintptr_t)software_timers[i].ctx);
+            owner = owner_buf;
+        } else if (software_timers[i].ctx == NULL) {
+            owner = "none";
+        }
+
+        size_t used = len < (int)size ? (size_t)len : size - 1;
+        int ret = snprintf(buf + used, size - used, "%u %s %u %u\n",
+                           i, owner,
+                           (unsigned int)software_timers[i].deadline,
+                           (unsigned int)remaining_ms);
+        if (ret < 0) {
+            irq_restore(flags);
+            return ret;
+        }
+        len += ret;
+    }
+
+    irq_restore(flags);
+    return len;
 }
 
 int timer_schedule_interrupt_ms(uint64_t milliseconds, timer_handler_t handler, void *ctx) {

@@ -106,6 +106,7 @@ int k_open(const char *fname, int mode) {
         entry->inode->inode.metadata.fops->open != NULL) {
         err = entry->inode->inode.metadata.fops->open(entry);
         if (err) {
+            oft_close_file(entry);
             return err;
         }
     }
@@ -638,6 +639,9 @@ int k_change_directory(char *f_path) {
 
     struct fs_dirent dir;
     err_t err = get_dirent_by_path(f_path, &dir, 1, NULL, NULL);
+    if (err == FILE_NOT_CREATED) {
+        return FILE_NOT_FOUND;
+    }
     if (err) {
         return err;
     }

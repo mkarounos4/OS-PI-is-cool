@@ -8,6 +8,7 @@
 #include "oft.h"
 #include "timer/timer.h"
 #include "scheduler/scheduler.h"
+#include "virtual_fs.h"
 
 int open(const char *fname, int mode) {
     pcb_t *pcb = get_curr_process();
@@ -543,6 +544,11 @@ err_t getcwd(char* path, size_t size) {
         }
         path[0] = '/';
         path[1] = '\0';
+        return SUCCESS;
+    }
+
+    err_t virtual_path = vfs_format_path(curr, path, size);
+    if (virtual_path == SUCCESS) {
         return SUCCESS;
     }
 
