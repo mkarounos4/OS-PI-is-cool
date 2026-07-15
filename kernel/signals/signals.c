@@ -129,8 +129,12 @@ int s_kill(pid_t pid, int signal) {
         return (int)SYS_ESRCH;
     }
 
-    // If cont/stop/term, send to all threads
-    if (pcb->sigactions[signal].sa_handler == SIG_STOP || pcb->sigactions[signal].sa_handler == SIG_CONT || pcb->sigactions[signal].sa_handler == SIG_TERM) {
+    void (*handler)(int) = pcb->sigactions[signal].sa_handler;
+    void (*default_handler)(int) = handler == SIG_DFL ? def_signal_handlers[signal] : handler;
+
+    // If cont/stop/term, send to all threads.
+    if (default_handler == SIG_STOP || default_handler == SIG_CONT ||
+        default_handler == SIG_TERM) {
         int sent = 0;
 
         for (size_t i = 0; i < vec_len(&pcb->tids); i++) {
@@ -184,7 +188,8 @@ int pthread_kill(tid_t tid, int signal) {
     tcb->pending_signals |= (1 << signal);
     if (!(tcb->mask & (1 << signal))) {
         int unblocked = send_unblock_event(tcb->tid, BLOCK_UNTIL_SIGNAL);
-        if (!unblocked) {
+        if (!unblocked || tcb->state == THREAD_BLOCKED_INTERRUPTABLE ||
+            tcb->state == THREAD_BLOCKED_KILLABLE || tcb->state == THREAD_STOPPED) {
             handle_interruptable_signal(tcb, signal);
         }
     }
@@ -214,7 +219,12 @@ long send_sigchld(pid_t child) {
     for (size_t i = 0; i < vec_len(&parent_pcb->child_waitq); i++) {
         tid_t next_thread = (tid_t)(uintptr_t)vec_get(&parent_pcb->child_waitq, i);
         tcb_t *tcb = thread_get_by_tid(next_thread);
-        if (tcb->waiting_for_pid == -1 || tcb->waiting_for_pid == child) {
+        if (tcb == NULL) {
+            continue;
+        }
+        if (tcb->waiting_for_pid == -1 ||
+            tcb->waiting_for_pid == child ||
+            (tcb->waiting_for_pid < -1 && child_pcb->pgid == -tcb->waiting_for_pid)) {
             if (child_pcb->state == PROC_ZOMBIE_STATE ||
                 (child_pcb->state == PROC_STOPPED_STATE && (tcb->waiting_for_flags & WUNTRACED)) ||
                 ((child_pcb->state == PROC_RUNNING_STATE) &&

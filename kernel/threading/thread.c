@@ -44,7 +44,10 @@ tid_t thread_create(pcb_t *parent_pcb, void *(*start_routine)(void*), void *arg)
     }
     if (tid == -1) {
         tid = vec_len(&threads);
-        tcb_t *tcb = kcalloc(0, sizeof(tcb_t));
+        tcb_t *tcb = kcalloc(1, sizeof(tcb_t));
+        if (tcb == NULL) {
+            return -1;
+        }
         vec_push_back(&threads, tcb);
     }
  
@@ -107,7 +110,6 @@ void thread_exit(void *retval) {
     }
  
     thread->return_value = retval;
-    thread->state = THREAD_ZOMBIE;
  
     // wake up any waiting threads
     for (size_t i = 0; i < vec_len(&thread->waiting_on_this); i++) {
@@ -119,6 +121,9 @@ void thread_exit(void *retval) {
         }
     }
     vec_clear(&thread->waiting_on_this);
+
+    pcb_thread_change_state(thread->pcb, thread->state, THREAD_ZOMBIE);
+    thread->state = THREAD_ZOMBIE;
  
     schedule_yield();
  
@@ -242,7 +247,13 @@ void block_thread(tcb_t *tcb, int blocked_state) {
 }
 
 void unblock_thread(tcb_t *tcb) {
-    if (tcb->state != THREAD_BLOCKED_INTERRUPTABLE || tcb->state != THREAD_BLOCKED_UNINTERUPTABLE || tcb->state != THREAD_BLOCKED_KILLABLE) {
+    if (tcb == NULL) {
+        return;
+    }
+
+    if (tcb->state != THREAD_BLOCKED_INTERRUPTABLE &&
+        tcb->state != THREAD_BLOCKED_UNINTERUPTABLE &&
+        tcb->state != THREAD_BLOCKED_KILLABLE) {
         return;
     }
 
@@ -276,4 +287,3 @@ int send_unblock_event(tid_t tid, uint32_t event) {
 
     return 0;
 }
-

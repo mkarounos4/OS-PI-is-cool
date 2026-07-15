@@ -21,6 +21,62 @@ static void __attribute__((noreturn)) process_first_run(void) {
     trap_frame_restore(frame);
 }
 
+static int setup_process_main_thread(pcb_t *pcb, tcb_t *thread,
+                                     void *(*func)(void *), void *args) {
+    uint64_t kernel_stack_base = PROC_KERNEL_STACK_TOP - PROC_KERNEL_STACK_SIZE;
+    uint64_t frame_va = PROC_KERNEL_STACK_TOP - sizeof(struct trap_frame);
+    uint64_t frame_page_va = frame_va & ~(PAGE_SIZE - 1);
+    uint64_t frame_offset = frame_va - frame_page_va;
+
+    for (uint64_t va = kernel_stack_base; va < PROC_KERNEL_STACK_TOP;
+         va += PAGE_SIZE) {
+        if (pt_seed_kernel_page((uint64_t *)(uintptr_t)pcb->ttbr0_el1_va,
+                                va) == NULL) {
+            return SYS_ENOMEM;
+        }
+    }
+
+    uint8_t *frame_page =
+        pt_get_mapped_page((uint64_t *)(uintptr_t)pcb->ttbr0_el1_va,
+                           frame_page_va);
+    if (frame_page == NULL || frame_offset >= PAGE_SIZE) {
+        return SYS_EFAULT;
+    }
+
+    struct trap_frame *frame =
+        (struct trap_frame *)(uintptr_t)(frame_page + frame_offset);
+    for (unsigned i = 0; i < 31; i++) {
+        frame->regs[i] = 0;
+    }
+    frame->regs[0] = (uint64_t)(uintptr_t)func;
+    frame->regs[1] = (uint64_t)(uintptr_t)args;
+    frame->sp = USER_STACK_TOP;
+    frame->elr = USER_THREAD_START;
+    frame->spsr = 0;
+    frame->esr = 0;
+    frame->far = 0;
+    frame->type = 0;
+    frame->intid = 0;
+
+    thread->ctx.x19 = frame_va;
+    thread->ctx.x20 = 0;
+    thread->ctx.x21 = 0;
+    thread->ctx.x22 = 0;
+    thread->ctx.x23 = 0;
+    thread->ctx.x24 = 0;
+    thread->ctx.x25 = 0;
+    thread->ctx.x26 = 0;
+    thread->ctx.x27 = 0;
+    thread->ctx.x28 = 0;
+    thread->ctx.x29 = 0;
+    thread->ctx.x30 = (uint64_t)(uintptr_t)process_first_run;
+    thread->ctx.sp = frame_va;
+    thread->ctx.ttbr0_el1 = pcb->ttbr0_el1;
+    thread->ctx.ttbr0_el1_va = pcb->ttbr0_el1_va;
+
+    return SUCCESS;
+}
+
 uint8_t can_wait_on_child(pcb_t *pcb, uint32_t flags) {
     if (pcb->state == PROC_ZOMBIE_STATE) {
         return 1;
@@ -171,12 +227,8 @@ long s_waitpid_impl(pid_t pid, int *status, int32_t flags) {
         return SYS_ESRCH;
     }
 
-    if (pid < -1) {
-        return SYS_EINVAL;
-    }
-
     pcb_t *done_child;
-    if (pid == -1) {
+    if (pid == -1 || pid < -1) {
         if (!has_wait_child(&curr_pcb->children, pid)) {
             return ECHILD;
         }
@@ -386,6 +438,11 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
     if (tid < 0) {
         return (pid_t)SYS_EAGAIN;
     }
+    tcb_t *main_thread = thread_get_by_tid(tid);
+    if (main_thread == NULL ||
+        setup_process_main_thread(new_proc, main_thread, func, args) != SUCCESS) {
+        return (pid_t)SYS_EAGAIN;
+    }
 
     if (add_to_pgrp(new_proc->pid) != 0) {
         uart_puts("ERROR: failed to add process to process group");
@@ -412,15 +469,21 @@ void proc_destroy(pcb_t *p) {
     }
     vec_destroy(&p->file_descriptors);
     remove_from_pgrp(p->pid);
+
+    // Clean up all threads
+    while (!vec_is_empty(&p->tids)) {
+        tid_t next_tid = (tid_t)(uintptr_t)vec_get(&p->tids, 0);
+        tcb_t *next_thread = thread_get_by_tid(next_tid);
+        if (next_thread == NULL) {
+            vec_erase(&p->tids, 0);
+            continue;
+        }
+        thread_cleanup(next_thread);
+    }
+
     destroy_page_table((uint64_t *)(uintptr_t)p->ttbr0_el1_va);
     vec_destroy(&p->tids);
     vec_destroy(&p->child_waitq);
-
-    // Clean up all threads
-    for (size_t i = 0; i < vec_len(&p->tids); i++) {
-        tid_t next_tid = (tid_t)(uintptr_t)vec_get(&p->tids, i);
-        thread_cleanup(thread_get_by_tid(next_tid));
-    }
 
     // Rn, stack and heap are tied to pcb, so automatically "free" when create new process
     // When adding VM, TODO add cleanup of stack/heap
@@ -491,7 +554,24 @@ void processes_init() {
         }
     }
 
-    add_thread_to_scheduler(thread_get_by_tid((tid_t)(uintptr_t)vec_get(&get_pcb_by_pid(pid)->tids, 0)));
+    init_pcb = get_pcb_by_pid(pid);
+    if (init_pcb == NULL) {
+        uart_puts("ERROR: init process disappeared during exec\n");
+        return;
+    }
+    if (vec_len(&init_pcb->tids) == 0) {
+        uart_puts("ERROR: init process has no main thread\n");
+        return;
+    }
+
+    tcb_t *init_thread =
+        thread_get_by_tid((tid_t)(uintptr_t)vec_get(&init_pcb->tids, 0));
+    if (init_thread == NULL) {
+        uart_puts("ERROR: failed to resolve init main thread\n");
+        return;
+    }
+
+    add_thread_to_scheduler(init_thread);
 }
 
 void cpy_address_space(pcb_t *src, pcb_t *dst) {
@@ -604,6 +684,8 @@ pid_t fork(struct trap_frame *frame) {
     child_frame->regs[0] = 0;
     child_tcb->ctx.x19 = frame_va;
     child_tcb->ctx.sp = frame_va;
+    child_tcb->ctx.ttbr0_el1 = child->ttbr0_el1;
+    child_tcb->ctx.ttbr0_el1_va = child->ttbr0_el1_va;
 
     for (size_t i = 0; i < vec_len(&parent->file_descriptors); i++) {
         void *fd = vec_get(&parent->file_descriptors, i);

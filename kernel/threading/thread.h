@@ -60,6 +60,7 @@ int thread_detach(tid_t tid);
 tcb_t *get_curr_thread(void);
 tcb_t *thread_get_by_tid(tid_t tid);
 int thread_is_valid(pcb_t *pcb, tid_t tid);
+void threads_init(void);
 void threading_init(void);
 void thread_cleanup(tcb_t *target);
 

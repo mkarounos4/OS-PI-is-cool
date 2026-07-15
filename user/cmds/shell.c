@@ -72,6 +72,14 @@ void *shell_init(void *args) {
         return NULL;
     }
 
+    struct sigaction action;
+    sigemptyset(&action.sa_mask);
+    action.sa_flags = 0;
+    action.sa_handler = ctrCHandler;
+    sigaction(SIGINT, &action, NULL);
+    action.sa_handler = ctrZHandler;
+    sigaction(SIGTSTP, &action, NULL);
+
 	// Setup SIGTSP + SIGTTOU blocking
     sigset_t mask;
     sigemptyset(&mask);

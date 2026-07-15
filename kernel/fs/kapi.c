@@ -7,9 +7,9 @@
 #include "memory/page_table/page_table.h"
 #include "scheduler/scheduler.h"
 #include "pipe/pipe.h"
-#include "procfs.h"
 #include "string.h"
 
+int default_open(struct oft_entry *entry);
 int default_read(struct oft_entry *entry, char *buf, size_t n);
 int default_write(struct oft_entry *entry, const char *buf, size_t n);
 int dir_open(struct oft_entry *entry);
@@ -19,7 +19,7 @@ int dir_lookup(const char* f_name, uint8_t is_dir_type,
 int dir_readdir(struct oft_entry *dir, struct fs_dirent *out);
 
 static struct file_operations default_ops = (struct file_operations) {
-    .open = NULL,
+    .open = default_open,
     .close = NULL,
     .read = default_read,
     .write = default_write,
@@ -44,19 +44,6 @@ struct file_operations *get_default_fops() {
 
 struct file_operations *get_default_dir_fops() {
     return &default_dir_ops;
-}
-
-static void repair_default_fops(struct oft_entry *entry) {
-    if (entry == NULL || entry->inode == NULL) {
-        return;
-    }
-
-    uint8_t type = entry->inode->inode.metadata.type;
-    if (type == DIRECTORY_TYPE) {
-        entry->inode->inode.metadata.fops = get_default_dir_fops();
-    } else if (type == FILE_TYPE || type == SYMLINK_TYPE) {
-        entry->inode->inode.metadata.fops = get_default_fops();
-    }
 }
 
 int k_open(const char *fname, int mode) {
@@ -96,12 +83,6 @@ int k_open(const char *fname, int mode) {
             return INVALID_PERMISSIONS;
         }
 
-        if ((mode & O_TRUNC) && !procfs_is_virtual_inode(dirent.ino_id)) {
-            err_t err = clear_blocks_of_file_by_id(dirent.ino_id);
-            if (err) {
-                return err;
-            }
-        }
     } else if (!(mode & O_CREAT)) {
         return FILE_NOT_FOUND;
     }
@@ -121,7 +102,6 @@ int k_open(const char *fname, int mode) {
         return err;
     }
 
-    repair_default_fops(entry);
     if (entry->inode->inode.metadata.fops != NULL &&
         entry->inode->inode.metadata.fops->open != NULL) {
         err = entry->inode->inode.metadata.fops->open(entry);
@@ -139,7 +119,6 @@ int k_close(struct oft_entry *entry) {
         return FS_NOT_MOUNTED;
     }
 
-    repair_default_fops(entry);
     if (entry->inode->inode.metadata.fops != NULL &&
         entry->inode->inode.metadata.fops->close != NULL) {
         err_t err = entry->inode->inode.metadata.fops->close(entry);
@@ -161,12 +140,27 @@ int k_read(struct oft_entry *entry, char *buf, size_t n) {
         return INVALID_PERMISSIONS;
     }
 
-    repair_default_fops(entry);
     if (entry->inode->inode.metadata.fops != NULL &&
         entry->inode->inode.metadata.fops->read != NULL) {
         return entry->inode->inode.metadata.fops->read(entry, buf, n);
     }
     return 0;
+}
+
+int default_open(struct oft_entry *entry) {
+    if (entry == NULL || entry->inode == NULL) {
+        return INVALID_ARGS;
+    }
+
+    if (entry->mode & O_TRUNC) {
+        err_t err = clear_blocks_of_file(entry);
+        if (err != SUCCESS) {
+            return err;
+        }
+        entry->mode &= ~O_TRUNC;
+    }
+
+    return SUCCESS;
 }
 
 int default_read(struct oft_entry *entry, char *buf, size_t n) {
@@ -252,7 +246,6 @@ int k_file_add_reference(int fd) {
         return err;
     }
 
-    repair_default_fops(entry);
     if (entry->inode->inode.metadata.fops != NULL &&
         entry->inode->inode.metadata.fops->open != NULL) {
         return entry->inode->inode.metadata.fops->open(entry);
@@ -272,7 +265,6 @@ int k_write(struct oft_entry *entry, const char *buf, size_t n) {
         return INVALID_PERMISSIONS;
     }
 
-    repair_default_fops(entry);
     if (entry->inode->inode.metadata.fops != NULL && entry->inode->inode.metadata.fops->write != NULL) {
         return entry->inode->inode.metadata.fops->write(entry, buf, n);
     }
@@ -684,10 +676,22 @@ int k_exec_process(int pid, const char *path, char *const argv[]) {
     }
 
     tcb_t *main_thread = get_curr_thread();
-    uint64_t kernel_stack_page_va = PROC_KERNEL_STACK_TOP - PAGE_SIZE;
+    if (main_thread == NULL || main_thread->pcb != pcb) {
+        if (vec_len(&pcb->tids) == 0) {
+            return INVALID_ARGS;
+        }
+        main_thread = thread_get_by_tid((tid_t)(uintptr_t)vec_get(&pcb->tids, 0));
+        if (main_thread == NULL) {
+            return INVALID_ARGS;
+        }
+    }
+
     uint64_t frame_va = main_thread->ctx.x19;
+    uint64_t kernel_stack_base = PROC_KERNEL_STACK_TOP - PROC_KERNEL_STACK_SIZE;
+    uint64_t kernel_stack_page_va = frame_va & ~(PAGE_SIZE - 1);
     uint64_t frame_offset = frame_va - kernel_stack_page_va;
-    if (frame_offset >= PAGE_SIZE) {
+    if (frame_va < kernel_stack_base || frame_va >= PROC_KERNEL_STACK_TOP ||
+        frame_offset >= PAGE_SIZE) {
         return INVALID_ARGS;
     }
 

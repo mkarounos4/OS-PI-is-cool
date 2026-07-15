@@ -41,6 +41,7 @@ struct sigaction {
 
 void SIG_IGN(int signum);
 void SIG_DFL(int signum);
+void user_def_sig_handler(int signum);
 int s_kill(pid_t pid, int signal);
 int pthread_kill(tid_t tid, int signal);
 long send_sigchld(pid_t child);

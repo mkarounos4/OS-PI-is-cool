@@ -112,13 +112,26 @@ static long sys_write_console_impl(const char *s, uint64_t len) {
 
 static void __attribute__((noreturn)) s_exit_impl(int code) {
     pcb_t *curr_proc = get_curr_process();
+    tcb_t *curr_tcb = get_curr_thread();
     if (curr_proc != NULL) {
-        curr_proc->state = PROC_ZOMBIE_STATE;
         curr_proc->exit_code = code;
-        send_sigchld(curr_proc->pid);
-    }    
+        for (size_t i = 0; i < vec_len(&curr_proc->tids); i++) {
+            tid_t tid = (tid_t)(uintptr_t)vec_get(&curr_proc->tids, i);
+            tcb_t *tcb = thread_get_by_tid(tid);
+            if (tcb != NULL && tcb != curr_tcb) {
+                terminate_thread(tcb);
+            }
+        }
+    }
 
-    schedule_yield();
+    if (curr_tcb != NULL) {
+        terminate_thread(curr_tcb);
+    } else if (curr_proc != NULL) {
+        curr_proc->state = PROC_ZOMBIE_STATE;
+        send_sigchld(curr_proc->pid);
+        schedule_yield();
+    }
+
     while (1) {
         asm volatile("wfe");
     }

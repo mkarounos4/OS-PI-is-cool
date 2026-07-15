@@ -3,9 +3,25 @@
 #include "disk/block.h"
 #include "timer/timer.h"
 #include "devices/devices.h"
-#include "procfs.h"
+#include "virtual_fs.h"
 
 #define MKFS_FILL_CHUNK_BLOCKS 32u
+
+struct file_operations *get_default_fops(void);
+struct file_operations *get_default_dir_fops(void);
+
+static void normalize_default_inode_fops(struct inode_st *node) {
+    if (node == NULL) {
+        return;
+    }
+
+    if (node->metadata.type == DIRECTORY_TYPE) {
+        node->metadata.fops = get_default_dir_fops();
+    } else if (node->metadata.type == FILE_TYPE ||
+               node->metadata.type == SYMLINK_TYPE) {
+        node->metadata.fops = get_default_fops();
+    }
+}
 
 static void set_bitmap_bit_in_memory(unsigned char *data, uint32_t bit_idx) {
     data[bit_idx / 8u] |= (unsigned char)(1u << (7u - (bit_idx % 8u)));
@@ -343,6 +359,7 @@ err_t get_inode_raw(struct inode_st *node, ino_id_t id) {
 
     struct inode_st *inodes = (struct inode_st*) data;
     *node = inodes[inode_num_in_block];
+    normalize_default_inode_fops(node);
     
     kfree(data);
     return SUCCESS;
@@ -354,22 +371,7 @@ err_t get_inode(struct cached_inode_st** node, ino_id_t id) {
 }
 
 err_t get_inode_metadata(ino_id_t id, attributes_t *metadata) {
-    if (metadata == NULL || id == 0) {
-        return INVALID_ARGS;
-    }
-    if (procfs_is_virtual_inode(id)) {
-        return procfs_get_metadata(id, metadata);
-    }
-
-    struct cached_inode_st *node;
-    err_t err = get_inode(&node, id);
-    if (err != SUCCESS) {
-        return err;
-    }
-
-    *metadata = node->inode.metadata;
-    remove_ref_from_cache(id);
-    return SUCCESS;
+    return vfs_get_metadata(id, metadata);
 }
 
 err_t update_inode_metadata(ino_id_t id, int flags, uint8_t type, uint8_t perm) {
@@ -420,11 +422,6 @@ err_t set_inode_metadata(ino_id_t id, attributes_t *metadata) {
 }
 
 err_t write_inode(struct inode_st *node, ino_id_t id) {
-    if (procfs_is_virtual_inode(id)) {
-        (void)node;
-        return SUCCESS;
-    }
-
     block_no_t block_with_inode =
         (id - 1) / INODES_PER_BLOCK + get_inode_table_start();
 
@@ -876,12 +873,23 @@ int free_from_triple_ptr(block_no_t triple_block, struct inode_st *inode, int *t
     return SUCCESS;
 }
 
+static int clamp_kept_blocks(struct inode_st *inode, int keep_blocks) {
+    int total_blocks = (int)inode->metadata.i_blocks;
+    if (keep_blocks > total_blocks) {
+        keep_blocks = total_blocks;
+    }
+    while (keep_blocks > 0 && inode->blocks[keep_blocks - 1] == 0) {
+        keep_blocks--;
+    }
+    return keep_blocks;
+}
+
 err_t clear_blocks_of_inode(struct inode_st *inode, int skip_first) {
     // Remove all single blocks
     int total_removed = skip_first;
     int total_blocks = (int)inode->metadata.i_blocks;
     if (total_removed >= total_blocks) {
-        inode->metadata.i_blocks = skip_first;
+        inode->metadata.i_blocks = clamp_kept_blocks(inode, skip_first);
         inode->metadata.i_size = 0;
         return SUCCESS;
     }
@@ -894,7 +902,7 @@ err_t clear_blocks_of_inode(struct inode_st *inode, int skip_first) {
         }
         total_removed++;
         if (total_removed == total_blocks) {
-            inode->metadata.i_blocks = skip_first;
+            inode->metadata.i_blocks = clamp_kept_blocks(inode, skip_first);
             inode->metadata.i_size = 0;
             return SUCCESS;
         }
@@ -903,7 +911,7 @@ err_t clear_blocks_of_inode(struct inode_st *inode, int skip_first) {
     // Remove all blocks in single pointer from bitmap
     int ret_val = free_from_single_ptr(inode->blocks[12], inode, &total_removed);
     if (ret_val == -1) {
-        inode->metadata.i_blocks = skip_first;
+        inode->metadata.i_blocks = clamp_kept_blocks(inode, skip_first);
         inode->metadata.i_size = 0;
         return SUCCESS;
     } else if (ret_val != SUCCESS) {
@@ -913,7 +921,7 @@ err_t clear_blocks_of_inode(struct inode_st *inode, int skip_first) {
     // Remove all blocks in double pointer from bitmap
     ret_val = free_from_double_ptr(inode->blocks[13], inode, &total_removed);
     if (ret_val == -1) {
-        inode->metadata.i_blocks = skip_first;
+        inode->metadata.i_blocks = clamp_kept_blocks(inode, skip_first);
         inode->metadata.i_size = 0;
         return SUCCESS;
     } else if (ret_val != SUCCESS) {
@@ -922,14 +930,14 @@ err_t clear_blocks_of_inode(struct inode_st *inode, int skip_first) {
     
     ret_val = free_from_triple_ptr(inode->blocks[14], inode, &total_removed);
     if (ret_val == -1) {
-        inode->metadata.i_blocks = skip_first;
+        inode->metadata.i_blocks = clamp_kept_blocks(inode, skip_first);
         inode->metadata.i_size = 0;
         return SUCCESS;
     } else if (ret_val != SUCCESS) {
         return ret_val;
     }
 
-    inode->metadata.i_blocks = skip_first;
+    inode->metadata.i_blocks = clamp_kept_blocks(inode, skip_first);
     inode->metadata.i_size = 0;
     return SUCCESS;
 }
@@ -973,10 +981,12 @@ err_t add_new_file_inode(ino_id_t *inode_num, int file_type, uint8_t perm, struc
 
     // Update new inode with given data
     struct inode_st *new_node = &data[inode_idx_in_block];
+    memset(new_node, 0, sizeof(*new_node));
     new_node->metadata.i_links_count = 0;
     new_node->metadata.type = file_type;
     new_node->metadata.perm = perm;
     new_node->metadata.i_blocks = 0;
+    new_node->metadata.i_size = 0;
     new_node->metadata.mtime = timer_get_ticks();
     new_node->metadata.fops = fops;
     new_node->metadata.i_pipe = NULL;

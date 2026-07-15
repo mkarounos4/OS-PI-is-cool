@@ -17,6 +17,7 @@
 #include "traps/traps.h"
 #include "tty.h"
 #include "uart/uart.h"
+#include "virtual_fs.h"
 
 #define PROC_KIND_ROOT_DIR 1
 #define PROC_KIND_PID_DIR 2
@@ -40,6 +41,7 @@
 #define PROC_FILE_PID_THREADS 16
 
 #define PROC_READ_BUFFER_SIZE 4096
+#define PROC_INO_ROOT_DIR PROCFS_INO_BASE
 #define PROC_INO_ROOT_FILE_BASE (PROCFS_INO_BASE + UINT32_C(0x1000))
 #define PROC_INO_PID_DIR_BASE (PROCFS_INO_BASE + UINT32_C(0x2000))
 #define PROC_INO_PID_FILE_BASE (PROCFS_INO_BASE + UINT32_C(0x3000))
@@ -71,7 +73,7 @@ static const struct proc_file_def proc_pid_files[] = {
     {"threads", PROC_FILE_PID_THREADS},
 };
 
-static ino_id_t proc_root_ino = 0;
+static ino_id_t proc_root_ino = PROC_INO_ROOT_DIR;
 static struct proc_st *proc_root_node;
 static struct proc_st *proc_root_file_nodes[sizeof(proc_root_files) /
                                             sizeof(proc_root_files[0])];
@@ -107,6 +109,13 @@ static struct file_operations proc_file_ops = {
     .lookup = NULL,
     .readdir = NULL,
     .getattr = NULL,
+};
+
+static const struct virtual_fs_ops procfs_vfs_ops = {
+    .is_inode = procfs_is_virtual_inode,
+    .get_metadata = procfs_get_metadata,
+    .alloc_cached_inode = procfs_alloc_cached_inode,
+    .free_cached_inode = procfs_free_cached_inode,
 };
 
 static int proc_file_count(const struct proc_file_def *files, size_t bytes) {
@@ -261,24 +270,6 @@ static void proc_free_open_buffer(struct proc_st *proc) {
     proc->size = 0;
 }
 
-static err_t proc_set_inode_node(ino_id_t ino, struct proc_st *proc,
-                                 struct file_operations *fops,
-                                 uint8_t type, uint8_t perm) {
-    attributes_t metadata;
-    err_t err = get_inode_metadata(ino, &metadata);
-    if (err != SUCCESS) {
-        return err;
-    }
-
-    metadata.type = type;
-    metadata.perm = perm;
-    metadata.fops = fops;
-    metadata.i_proc = proc;
-    metadata.i_links_count = 1;
-    metadata.i_blocks = 0;
-    return set_inode_metadata(ino, &metadata);
-}
-
 static err_t proc_prepare_node(struct proc_st **slot, uint8_t kind,
                                pid_t pid, uint8_t file_id,
                                struct proc_st **proc_out) {
@@ -305,19 +296,6 @@ static err_t proc_prepare_node(struct proc_st **slot, uint8_t kind,
     return SUCCESS;
 }
 
-static err_t proc_refresh_inode(ino_id_t ino, struct proc_st **slot,
-                                uint8_t kind, pid_t pid, uint8_t file_id,
-                                struct file_operations *fops,
-                                uint8_t type, uint8_t perm) {
-    struct proc_st *proc;
-    err_t err = proc_prepare_node(slot, kind, pid, file_id, &proc);
-    if (err != SUCCESS) {
-        return err;
-    }
-
-    return proc_set_inode_node(ino, proc, fops, type, perm);
-}
-
 static void proc_fill_metadata(attributes_t *metadata, struct proc_st *proc,
                                struct file_operations *fops,
                                uint8_t type, uint8_t perm) {
@@ -328,31 +306,6 @@ static void proc_fill_metadata(attributes_t *metadata, struct proc_st *proc,
     metadata->mtime = timer_get_ticks();
     metadata->fops = fops;
     metadata->i_proc = proc;
-}
-
-static err_t proc_ensure_root(void) {
-    struct fs_dirent dirent;
-    err_t err = get_dirent_by_path("/proc", &dirent, 1, NULL, NULL);
-    if (err == SUCCESS) {
-        proc_root_ino = dirent.ino_id;
-    } else if (err == FILE_NOT_FOUND || err == FILE_NOT_CREATED) {
-        err = add_new_file_with_id(&proc_root_ino, DIRECTORY_TYPE, 0x5,
-                                   &proc_dir_ops);
-        if (err != SUCCESS) {
-            return err;
-        }
-
-        err = add_dirent("proc", proc_root_ino, ROOT_INO);
-        if (err != SUCCESS) {
-            return err;
-        }
-    } else {
-        return err;
-    }
-
-    return proc_refresh_inode(proc_root_ino, &proc_root_node,
-                              PROC_KIND_ROOT_DIR, -1, 0,
-                              &proc_dir_ops, DIRECTORY_TYPE, 0x5);
 }
 
 err_t procfs_init(void) {
@@ -367,7 +320,13 @@ err_t procfs_init(void) {
         }
     }
 
-    return proc_ensure_root();
+    err_t err = proc_prepare_node(&proc_root_node, PROC_KIND_ROOT_DIR,
+                                  -1, 0, NULL);
+    if (err != SUCCESS) {
+        return err;
+    }
+
+    return vfs_register_root_mount("proc", proc_root_ino, &procfs_vfs_ops);
 }
 
 static err_t proc_ensure_root_file(int index, ino_id_t *ino) {
@@ -425,6 +384,9 @@ static err_t proc_ensure_pid_file(pid_t pid, int index, ino_id_t *ino) {
 }
 
 int procfs_is_virtual_inode(ino_id_t ino) {
+    if (ino == PROC_INO_ROOT_DIR) {
+        return 1;
+    }
     if (ino >= PROC_INO_ROOT_FILE_BASE &&
         ino < PROC_INO_ROOT_FILE_BASE + (ino_id_t)proc_root_file_count()) {
         return 1;
@@ -443,6 +405,18 @@ int procfs_is_virtual_inode(ino_id_t ino) {
 err_t procfs_get_metadata(ino_id_t ino, attributes_t *metadata) {
     if (metadata == NULL || !procfs_is_virtual_inode(ino)) {
         return INVALID_ARGS;
+    }
+
+    if (ino == PROC_INO_ROOT_DIR) {
+        struct proc_st *proc;
+        err_t err = proc_prepare_node(&proc_root_node, PROC_KIND_ROOT_DIR,
+                                      -1, 0, &proc);
+        if (err != SUCCESS) {
+            return err;
+        }
+
+        proc_fill_metadata(metadata, proc, &proc_dir_ops, DIRECTORY_TYPE, 0x5);
+        return SUCCESS;
     }
 
     if (ino >= PROC_INO_ROOT_FILE_BASE &&

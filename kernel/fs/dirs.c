@@ -1,6 +1,6 @@
 #include "dirs.h"
 #include "devices.h"
-#include "procfs.h"
+#include "virtual_fs.h"
 
 err_t add_dirent(const char* name, ino_id_t ino_id, ino_id_t curr_dir) {
     struct fs_dirent *dir = kmalloc(get_bytes_per_block());
@@ -137,6 +137,22 @@ err_t get_dirent_by_path(const char* f_path, struct fs_dirent* dirent, int is_di
     if (f_path == 0 || f_path[0] == 0) {
         return INVALID_FILE_NAME;
     }
+
+    if (f_path[0] == '/' && f_path[1] == '\0') {
+        if (!is_dir_type) {
+            return FILE_NOT_FOUND;
+        }
+        if (dirent != NULL) {
+            memset(dirent, 0, sizeof(*dirent));
+            strcpy(dirent->name, "/");
+            dirent->ino_id = ROOT_INO;
+        }
+        if (parent_dir != NULL) {
+            *parent_dir = ROOT_INO;
+        }
+        return SUCCESS;
+    }
+
     char *path_cpy = kmalloc((strlen(f_path) + 1) * sizeof(char));
     strcpy(path_cpy, f_path);
     path_cpy[strlen(f_path)] = '\0';
@@ -216,6 +232,9 @@ int dir_lookup(const char* f_name, uint8_t is_dir_type,
         while (i < (int) (get_bytes_per_block() / sizeof(struct fs_dirent))) {
             if (!strcmp(dir[i].name, "\0")) {
                 kfree(dir);
+                if (curr_dir == ROOT_INO) {
+                    return vfs_lookup_root_mount(f_name, is_dir_type, dirent);
+                }
                 return FILE_NOT_FOUND;
             }
             
@@ -238,6 +257,9 @@ int dir_lookup(const char* f_name, uint8_t is_dir_type,
         curr_block_no = get_ith_block_of_file_by_id(curr_dir, ++index);
     }
     kfree(dir);
+    if (curr_dir == ROOT_INO) {
+        return vfs_lookup_root_mount(f_name, is_dir_type, dirent);
+    }
     return FILE_NOT_FOUND;
 }
 
@@ -249,12 +271,6 @@ err_t get_dirent_by_f_name(const char* f_name, uint8_t is_dir_type, struct fs_di
     }
     if (metadata.type != DIRECTORY_TYPE) {
         return INVALID_ARGS;
-    }
-
-    metadata.fops = get_default_dir_fops();
-    err = set_inode_metadata(curr_dir, &metadata);
-    if (err != SUCCESS) {
-        return err;
     }
 
     if (metadata.fops->lookup == NULL) {
@@ -323,6 +339,63 @@ int dir_close(struct oft_entry *entry) {
     return closedir(entry->ino_id);
 }
 
+static err_t dir_physical_entry_count(ino_id_t ino, uint32_t *count) {
+    if (count == NULL) {
+        return INVALID_ARGS;
+    }
+
+    *count = 0;
+    int entries_per_block = get_bytes_per_block() / (int)sizeof(struct fs_dirent);
+    if (entries_per_block <= 0) {
+        return INVALID_ARGS;
+    }
+
+    struct fs_dirent *dir = kmalloc(get_bytes_per_block());
+    if (dir == NULL) {
+        return NO_FREE_BLOCKS;
+    }
+
+    unsigned int block_index = 0;
+    block_no_t block_no;
+    while ((block_no = get_ith_block_of_file_by_id(ino, block_index)) != 0) {
+        err_t err = read_block(dir, block_no);
+        if (err != SUCCESS) {
+            kfree(dir);
+            return err;
+        }
+
+        for (int i = 0; i < entries_per_block; i++) {
+            if (!strcmp(dir[i].name, "\0")) {
+                kfree(dir);
+                return SUCCESS;
+            }
+            (*count)++;
+        }
+        block_index++;
+    }
+
+    kfree(dir);
+    return SUCCESS;
+}
+
+static err_t root_mount_readdir_after_physical(ino_id_t ino,
+                                               uint32_t offset,
+                                               fs_dirent *out) {
+    if (ino != ROOT_INO) {
+        return FILE_NOT_FOUND;
+    }
+
+    uint32_t physical_entries = 0;
+    err_t err = dir_physical_entry_count(ino, &physical_entries);
+    if (err != SUCCESS) {
+        return err;
+    }
+    if (offset < physical_entries) {
+        return FILE_NOT_FOUND;
+    }
+    return vfs_root_mount_readdir(offset - physical_entries, out);
+}
+
 err_t readdir(ino_id_t ino, fs_dirent *out) {
     if (out == NULL) {
         return INVALID_ARGS;
@@ -357,7 +430,12 @@ err_t readdir(ino_id_t ino, fs_dirent *out) {
     int entry_index = (int)(offset % (uint32_t)entries_per_block);
     block_no_t block_no = get_ith_block_of_file_by_id(ino, block_index);
     if (block_no == 0) {
-        return FILE_NOT_FOUND;
+        err = root_mount_readdir_after_physical(ino, offset, out);
+        if (err == SUCCESS) {
+            metadata.i_dir->offset++;
+            return set_inode_metadata(ino, &metadata);
+        }
+        return err;
     }
 
     struct fs_dirent *dir = kmalloc(get_bytes_per_block());
@@ -373,7 +451,12 @@ err_t readdir(ino_id_t ino, fs_dirent *out) {
 
     if (!strcmp(dir[entry_index].name, "\0")) {
         kfree(dir);
-        return FILE_NOT_FOUND;
+        err = root_mount_readdir_after_physical(ino, offset, out);
+        if (err == SUCCESS) {
+            metadata.i_dir->offset++;
+            return set_inode_metadata(ino, &metadata);
+        }
+        return err;
     }
 
     *out = dir[entry_index];
@@ -391,41 +474,41 @@ int dir_readdir(struct oft_entry *dir, struct fs_dirent *out) {
     return readdir(dir->ino_id, out);
 }
 
+static err_t list_one_dirent(int out_fd, const fs_dirent *dirent) {
+    attributes_t metadata;
+    err_t err = get_inode_metadata(dirent->ino_id, &metadata);
+    if (err != SUCCESS) {
+        return err;
+    }
+
+    char perm_str[4];
+    format_chmod_str(metadata.perm, perm_str);
+    int size = (int)metadata.i_size;
+    err = fprintf(out_fd, "%u %s %u tick=%u %s\n",
+                  dirent->ino_id,
+                  perm_str,
+                  size,
+                  (unsigned int)metadata.mtime,
+                  dirent->name);
+    return err < 0 ? err : SUCCESS;
+}
+
 err_t list_dirents(ino_id_t ino_id, int out_fd) {
     struct cached_inode_st *inode;
-    int procfs_inode = procfs_is_virtual_inode(ino_id);
-    if (procfs_inode) {
-        err_t err = procfs_alloc_cached_inode(ino_id, &inode);
-        if (err != SUCCESS) {
-            return err;
-        }
-    } else {
-        inode = get_inode_from_cache(ino_id);
-        if (inode == NULL) {
-            return FILE_READ_ERROR;
-        }
+    err_t err = vfs_get_inode(ino_id, &inode);
+    if (err != SUCCESS) {
+        return err;
     }
 
     if (inode->inode.metadata.type != DIRECTORY_TYPE) {
-        if (procfs_inode) {
-            procfs_free_cached_inode(inode);
-        } else {
-            remove_ref_from_cache(ino_id);
-        }
+        vfs_put_inode(inode);
         return INVALID_ARGS;
     }
-
-    inode->inode.metadata.fops = get_default_dir_fops();
-    inode->dirty = 1;
 
     struct file_operations *fops = inode->inode.metadata.fops;
     if (fops == NULL || fops->open == NULL || fops->close == NULL ||
         fops->readdir == NULL) {
-        if (procfs_inode) {
-            procfs_free_cached_inode(inode);
-        } else {
-            remove_ref_from_cache(ino_id);
-        }
+        vfs_put_inode(inode);
         return INVALID_ARGS;
     }
 
@@ -437,62 +520,24 @@ err_t list_dirents(ino_id_t ino_id, int out_fd) {
         .inode = inode,
     };
 
-    err_t err = fops->open(&dir_entry);
+    err = fops->open(&dir_entry);
     if (err != SUCCESS) {
-        if (procfs_inode) {
-            procfs_free_cached_inode(inode);
-        } else {
-            remove_ref_from_cache(ino_id);
-        }
+        vfs_put_inode(inode);
         return err;
     }
 
     fs_dirent dirent;
     while ((err = fops->readdir(&dir_entry, &dirent)) == SUCCESS) {
-        attributes_t metadata;
-        if (procfs_is_virtual_inode(dirent.ino_id)) {
-            err = procfs_get_metadata(dirent.ino_id, &metadata);
-        } else {
-            err = get_inode_metadata(dirent.ino_id, &metadata);
-        }
+        err = list_one_dirent(out_fd, &dirent);
         if (err != SUCCESS) {
             fops->close(&dir_entry);
-            if (procfs_inode) {
-                procfs_free_cached_inode(inode);
-            } else {
-                remove_ref_from_cache(ino_id);
-            }
-            return err;
-        }
-
-        char perm_str[4];
-        format_chmod_str(metadata.perm, perm_str);
-        int size = dirent.ino_id == 0 || procfs_is_virtual_inode(dirent.ino_id)
-                   ? (int)metadata.i_size
-                   : get_file_size_by_id(dirent.ino_id);
-        err = fprintf(out_fd, "%u %s %u tick=%u %s\n",
-                      dirent.ino_id,
-                      perm_str,
-                      size,
-                      (unsigned int)metadata.mtime,
-                      dirent.name);
-        if (err < 0) {
-            fops->close(&dir_entry);
-            if (procfs_inode) {
-                procfs_free_cached_inode(inode);
-            } else {
-                remove_ref_from_cache(ino_id);
-            }
+            vfs_put_inode(inode);
             return err;
         }
     }
 
     err_t close_err = fops->close(&dir_entry);
-    if (procfs_inode) {
-        procfs_free_cached_inode(inode);
-    } else {
-        remove_ref_from_cache(ino_id);
-    }
+    vfs_put_inode(inode);
     if (err != FILE_NOT_FOUND) {
         return err;
     }

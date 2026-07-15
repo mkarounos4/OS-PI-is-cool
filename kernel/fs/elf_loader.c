@@ -293,15 +293,24 @@ int elf_exec_process(pcb_t *pcb, const char *path, char *const argv[],
         return INVALID_ARGS;
     }
 
+    tcb_t *exec_thread = get_curr_thread();
+    if (exec_thread == NULL || exec_thread->pcb != pcb) {
+        if (vec_len(&pcb->tids) == 0) {
+            return INVALID_ARGS;
+        }
+        exec_thread = thread_get_by_tid((tid_t)(uintptr_t)vec_get(&pcb->tids, 0));
+        if (exec_thread == NULL) {
+            return INVALID_ARGS;
+        }
+    }
     // kill all threads other than myself
     for (size_t i = 0; i < vec_len(&pcb->tids); i++) {
         tcb_t *tcb = thread_get_by_tid((tid_t)(uintptr_t)vec_get(&pcb->tids, i));
-        if (tcb == get_curr_thread())  continue;
+        if (tcb == NULL || tcb == exec_thread)  continue;
 
         thread_detach(tcb->tid);
         terminate_thread(tcb);
     }
-
     char *args[EXEC_MAX_ARGS];
     int argc = 0;
     int err = copy_exec_args(argv, args, &argc);
@@ -474,11 +483,10 @@ int elf_exec_process(pcb_t *pcb, const char *path, char *const argv[],
     new_frame->regs[0] = (uint64_t)argc;
     new_frame->regs[1] = user_argv;
 
-    tcb_t *tcb = get_curr_thread();
-    tcb->ctx.x19 = new_frame_va;
-    tcb->ctx.sp = new_frame_va;
-    tcb->ctx.ttbr0_el1 = kernel_phys_addr((uint64_t)(uintptr_t)new_table);
-    tcb->ctx.ttbr0_el1_va = (uint64_t)(uintptr_t)new_table;
+    exec_thread->ctx.x19 = new_frame_va;
+    exec_thread->ctx.sp = new_frame_va;
+    exec_thread->ctx.ttbr0_el1 = kernel_phys_addr((uint64_t)(uintptr_t)new_table);
+    exec_thread->ctx.ttbr0_el1_va = (uint64_t)(uintptr_t)new_table;
     pcb->ttbr0_el1 = kernel_phys_addr((uint64_t)(uintptr_t)new_table);
     pcb->ttbr0_el1_va = (uint64_t)(uintptr_t)new_table;
 
@@ -488,7 +496,11 @@ int elf_exec_process(pcb_t *pcb, const char *path, char *const argv[],
     if (next_frame != NULL) {
         *next_frame = (struct trap_frame *)(uintptr_t)new_frame_va;
     }
-    destroy_page_table(old_table);
+    if (install_table) {
+        destroy_page_table(old_table);
+    }
+    vec_clear(&pcb->tids);
+    vec_push_back(&pcb->tids, (ptr_t)(uintptr_t)exec_thread->tid);
     set_process_name_for_pid(pcb->pid, exec_name);
     reset_exec_signal_dispositions(pcb);
     free_exec_args(args, argc);

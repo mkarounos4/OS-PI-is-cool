@@ -53,6 +53,7 @@ void scheduler_init(void) {
         pri_counters[i] = 0;
     }
 
+    threads_init();
     processes_init();
 
     idle_ctx.x19 = 0;
@@ -142,9 +143,9 @@ void scheduler_tick(void *ctx) {
     timer_schedule_interrupt_ms(SCHEDULER_QUANTUM_MS, set_ready_to_schedule, 0);
     context_switch(old_ctx, &next_thread->ctx);
 
-    // Handle queue'd process level signals
-    pcb_t *curr_proc = curr_thread->pcb;
     if (curr_thread != NULL) {
+        // Handle queue'd process level signals
+        pcb_t *curr_proc = curr_thread->pcb;
         if ((curr_proc->pending_signals & (1 << SIGKILL)) &&
             curr_proc->sigactions[SIGKILL].sa_handler == SIG_DFL) {
             curr_proc->pending_signals &= ~(1 << SIGKILL);
@@ -162,14 +163,17 @@ void scheduler_tick(void *ctx) {
                 curr_proc->pending_signals &= ~(1 << curr);
                 if (handler == SIG_DFL || handler == SIG_IGN) {
                     handler(curr);
+                } else {
+                    user_def_sig_handler(curr);
                 }
             }
             curr++;
         }
     }
 
-    // Handle queue'd thread level signals
     if (curr_thread != NULL) {
+        pcb_t *curr_proc = curr_thread->pcb;
+        // Handle queue'd thread level signals
         if ((curr_thread->pending_signals & (1 << SIGKILL)) &&
             curr_proc->sigactions[SIGKILL].sa_handler == SIG_DFL) {
             curr_thread->pending_signals &= ~(1 << SIGKILL);
@@ -187,6 +191,8 @@ void scheduler_tick(void *ctx) {
                 curr_thread->pending_signals &= ~(1 << curr);
                 if (handler == SIG_DFL || handler == SIG_IGN) {
                     handler(curr);
+                } else {
+                    user_def_sig_handler(curr);
                 }
             }
             curr++;

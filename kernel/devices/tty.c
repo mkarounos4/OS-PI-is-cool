@@ -238,7 +238,11 @@ int tty_write(struct oft_entry *entry, const char *buffer, size_t count) {
 
     ssize_t num_written = 0;
     while(num_written < count) {
+#ifdef UART_OUT
+        printf("%c", *buffer);
+#else
         tty_gui_write_char_for_tty(minor, *buffer);
+#endif
         buffer++;
         num_written++;
     }
@@ -592,13 +596,12 @@ int tcsetpgrp(int fd, int pgid) {
     if (pcb == NULL) {
         return -1;
     }
-
     if (pgid == 0) {
         pgid = pcb->pgid;
     }
 
-    if (tty_state.devices[fd]->fg_pgid != pcb->pgid) {
-        s_kill(pcb->pid, SIGTTOU);
+    if (tty_state.devices[fd]->fg_pgid != pcb->pgid && pgid != pcb->pgid) {
+        s_kill(-pcb->pgid, SIGTTOU);
     }
     tty_state.devices[fd]->fg_pgid = pgid;
     return 0;

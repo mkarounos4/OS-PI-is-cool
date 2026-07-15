@@ -6,6 +6,7 @@ NM      = $(CROSS)nm
 BOOTDIR = /run/media/veerkakar/bootfs
 QEMU_SD_IMG ?= build/qemu/sd.img
 QEMU_SD_SIZE ?= 1G
+UART_OUT ?= 0
 
 PLATFORM ?= rpi
 
@@ -48,6 +49,10 @@ LDFLAGS = -nostdlib -nostartfiles -nodefaultlibs -static -no-pie \
 
 USER_LDFLAGS = -nostdlib -nostartfiles -nodefaultlibs -static -no-pie \
                -Wl,--build-id=none
+
+ifeq ($(UART_OUT),1)
+    CFLAGS += -DUART_OUT
+endif
 
 ifeq ($(PLATFORM),rpi)
     CFLAGS += -DPLATFORM_RPI -DPLATFORM_RPI5 -mcpu=cortex-a76
@@ -160,7 +165,7 @@ $(USER_BINS_C_OBJ): $(USER_BINS_C) $(USER_DIR)/user_bins.h
 all: rpi install
 
 rpi:
-	$(MAKE) PLATFORM=rpi build
+	$(MAKE) PLATFORM=rpi UART_OUT=$(UART_OUT) build
 
 install:
 	cp kernel8.img $(BOOTDIR)
@@ -173,7 +178,7 @@ install:
 
 # quit qemu with Ctrl+A X
 qemu:
-	$(MAKE) PLATFORM=qemu build
+	$(MAKE) PLATFORM=qemu UART_OUT=$(UART_OUT) build
 	@mkdir -p $(dir $(QEMU_SD_IMG))
 	@test -f $(QEMU_SD_IMG) || truncate -s $(QEMU_SD_SIZE) $(QEMU_SD_IMG)
 	qemu-system-aarch64 \
