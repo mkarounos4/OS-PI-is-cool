@@ -74,25 +74,40 @@ void initialize_signals() {
 
 static void handle_interruptable_signal(tcb_t *tcb, int signum) {
     pcb_t *pcb = tcb->pcb;
-    int terminating = pcb->sigactions[signum].sa_handler == SIG_TERM;
-    int continuing = pcb->sigactions[signum].sa_handler == SIG_CONT;
+    void (*handler)(int) = pcb->sigactions[signum].sa_handler;
+    void (*default_handler)(int) = handler == SIG_DFL ? def_signal_handlers[signum] : handler;
+    int terminating = default_handler == SIG_TERM;
+    int continuing = default_handler == SIG_CONT;
 
     if (signum == SIGKILL) {
+        tcb->pending_signals &= ~(1 << signum);
         terminate_thread(tcb);
         return;
     }
 
     if (tcb->state == THREAD_BLOCKED_INTERRUPTABLE) {
+        if (terminating) {
+            tcb->pending_signals &= ~(1 << signum);
+            terminate_thread(tcb);
+            return;
+        }
+        if (default_handler == SIG_STOP) {
+            tcb->pending_signals &= ~(1 << signum);
+            stop_thread(tcb);
+            return;
+        }
         if (!continuing) {
             unblock_thread(tcb);
             return;
         }
     } else if (tcb->state == THREAD_BLOCKED_KILLABLE) {
         if (terminating) {
+            tcb->pending_signals &= ~(1 << signum);
             terminate_thread(tcb);
         }
     } else if (tcb->state == THREAD_STOPPED) {
         if (continuing) {
+            tcb->pending_signals &= ~(1 << signum);
             continue_thread(tcb);
             return;
         }

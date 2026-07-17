@@ -276,6 +276,14 @@ static void timer_wake_thread(void *ctx) {
     tcb_t *tcb = thread_get_by_tid(tid);
 
     if (tcb != NULL) {
+        if (tcb->state == THREAD_STOPPED &&
+            (tcb->stopped_state == THREAD_BLOCKED_INTERRUPTABLE ||
+             tcb->stopped_state == THREAD_BLOCKED_UNINTERUPTABLE ||
+             tcb->stopped_state == THREAD_BLOCKED_KILLABLE) &&
+            (tcb->blocked_until & BLOCK_UNTIL_TIMER)) {
+            tcb->blocked_until &= ~BLOCK_UNTIL_TIMER;
+            return;
+        }
         unblock_thread(tcb);
     }
 }

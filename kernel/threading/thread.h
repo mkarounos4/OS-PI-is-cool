@@ -32,6 +32,7 @@ enum thread_state {
 typedef struct thread_st {
     tid_t tid;
     enum thread_state state;
+    enum thread_state stopped_state;
     struct cpu_context ctx;
     struct pcb_st *pcb;
     uint8_t *kernel_stack;

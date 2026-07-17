@@ -62,6 +62,7 @@ tid_t thread_create(pcb_t *parent_pcb, void *(*start_routine)(void*), void *arg)
     // initialize thread control block
     new_thread->tid = tid;
     new_thread->state = THREAD_READY;
+    new_thread->stopped_state = THREAD_READY;
     new_thread->pcb = parent_pcb;
     new_thread->return_value = NULL;
     new_thread->is_joinable = 1;
@@ -214,6 +215,7 @@ void stop_thread(tcb_t *tcb) {
         return;
     }
 
+    tcb->stopped_state = tcb->state;
     pcb_thread_change_state(tcb->pcb, tcb->state, THREAD_STOPPED);
     tcb->state = THREAD_STOPPED;
     if (get_curr_thread() == tcb) {
@@ -268,9 +270,23 @@ void continue_thread(tcb_t *tcb) {
         return;
     }
 
-    pcb_thread_change_state(tcb->pcb, tcb->state, THREAD_READY);
-    tcb->state = THREAD_READY;
-    add_thread_to_scheduler(tcb);
+    enum thread_state next_state = tcb->stopped_state;
+    if (next_state == THREAD_RUNNING) {
+        next_state = THREAD_READY;
+    }
+    if ((next_state == THREAD_BLOCKED_INTERRUPTABLE ||
+         next_state == THREAD_BLOCKED_UNINTERUPTABLE ||
+         next_state == THREAD_BLOCKED_KILLABLE) &&
+        tcb->blocked_until == 0) {
+        next_state = THREAD_READY;
+    }
+
+    pcb_thread_change_state(tcb->pcb, tcb->state, next_state);
+    tcb->state = next_state;
+    tcb->stopped_state = THREAD_READY;
+    if (next_state == THREAD_READY) {
+        add_thread_to_scheduler(tcb);
+    }
 }
 
 
