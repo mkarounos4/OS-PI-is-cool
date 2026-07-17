@@ -190,7 +190,10 @@ int tty_read(struct oft_entry *entry, char *buffer, size_t count) {
         if (!read_char) {
             vec_push_back(&curr_tty->rx_wait_queue, (ptr_t)(uintptr_t)curr_thd->tid);
             block_thread(curr_thd, THREAD_BLOCKED_INTERRUPTABLE);
-            continue;
+            read_char = consume_ring_buffer(&curr_tty->rx, &char_void);
+            if (!read_char) {
+                return num_read;
+            }
         }
 
         if (char_void == 0x04) {
@@ -547,12 +550,12 @@ void tty_send_input(int minor, const char *buffer, size_t count) {
         char to_write = ch;
         if (*buffer == 0x03) {
             s_kill(-tty_state.devices[minor]->fg_pgid, SIGINT);
-            tty_write(NULL, "^C", 2);
+            tty_write(NULL, "^C\n", 3);
             tty_clear_input_line(tty);
-            to_write = 0x04;
+            to_write = 0;
         } else if (*buffer == 0x1A) {
             s_kill(-tty_state.devices[minor]->fg_pgid, SIGTSTP);
-            tty_write(NULL, "^Z", 2);
+            tty_write(NULL, "^Z\n", 3);
             tty_clear_input_line(tty);
             to_write = 0;
         } else if (*buffer == 0x7F) {
@@ -582,7 +585,7 @@ void tty_send_input(int minor, const char *buffer, size_t count) {
             }
         }
 
-        if (to_write == 0x04 || to_write == 0x0C) {
+        if (ch == 0x04 || ch == 0x0C) {
             wake_up_readers(minor);
         }
 

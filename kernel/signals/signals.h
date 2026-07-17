@@ -51,3 +51,4 @@ int sigaddset(signalset_t *set, int signum);
 int sigfillset(signalset_t *set);
 int sigsuspend(const signalset_t *mask);
 int sigaction(int signum, struct sigaction *sa, struct sigaction *old);
+void initialize_signals();

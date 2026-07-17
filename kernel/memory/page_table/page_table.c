@@ -37,8 +37,9 @@
 #define ATTR_KERNEL_RW                                                         \
   (ATTR_NORMAL | PTE_AP_EL1_RW | PTE_SH_INNER | PTE_AF | PTE_PXN | PTE_UXN)
 #define ATTR_USER_RX                                                           \
-  (ATTR_NORMAL | PTE_AP_EL0_RO | PTE_SH_INNER | PTE_AF | PTE_PXN)
-#define ATTR_USER_RO (ATTR_USER_RX | PTE_UXN)
+  (ATTR_NORMAL | PTE_AP_EL0_RO | PTE_SH_INNER | PTE_AF)
+#define ATTR_USER_RO                                                           \
+  (ATTR_NORMAL | PTE_AP_EL0_RO | PTE_SH_INNER | PTE_AF | PTE_PXN | PTE_UXN)
 #define ATTR_USER_RW                                                           \
   (ATTR_NORMAL | PTE_AP_EL0_RW | PTE_SH_INNER | PTE_AF | PTE_PXN | PTE_UXN)
 #define ATTR_DEVICE                                                            \

@@ -9,7 +9,6 @@ Vec stopped_background_jobs;
 
 void ctrCHandler(int signum) {
     (void)signum;
-    printf("\n");
     wasInterrupted = 1;
 }
 
@@ -221,14 +220,18 @@ char *get_input(int *nextAddNewLine) {
 
     do {
         int num_read = read(0, buffer, BUF_SIZE);
+        printf("read done\n");
         if (wasInterrupted) {
+            printf("was in fact interrupts\n");
             free(cmd);
             return NULL;
         }
+        printf("continuing)\n");
 
         // Handle error or first char EOF
         if (num_read == -1) { free(cmd); return NULL; }
         if (num_read == 0) {
+            printf("read 0\n");
             if (cmd == buffer) {
                 write(1, "\n", 1);
                 free(cmd);
@@ -258,6 +261,7 @@ char *get_input(int *nextAddNewLine) {
 
         // Handle partially full buffer
         if (num_read < BUF_SIZE) {
+            printf("had a bit\n");
             if (buffer[num_read-1] == '\n') { buffer[num_read-1] = '\0'; }
             else { *nextAddNewLine = 1; }
 

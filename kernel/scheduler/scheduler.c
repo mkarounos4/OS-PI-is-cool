@@ -113,36 +113,7 @@ static void __attribute__((unused)) scheduler_print_tick(unsigned int tid1, unsi
     uart_puts("\n");
 }
 
-// Timer interrupt handler which performs actual scheduling
-void scheduler_tick(void *ctx) {
-    (void)ctx;
-    
-    // Save current thread context
-    if (curr_thread != NULL) {
-        if (curr_thread->state == THREAD_RUNNING) {
-            curr_thread->state = THREAD_READY;
-            add_thread_to_scheduler(curr_thread);
-        }
-    }
-
-    // Get next thread from any process
-    tcb_t *next_thread = get_next_thread();
-
-    if (next_thread == NULL) {
-        struct cpu_context *old_ctx = curr_thread ? &curr_thread->ctx : &idle_ctx;
-        curr_thread = NULL;
-        timer_schedule_interrupt_ms(SCHEDULER_QUANTUM_MS, set_ready_to_schedule, 0);
-        context_switch(old_ctx, &idle_ctx);
-        return;
-    }
-
-    struct cpu_context *old_ctx = curr_thread ? &curr_thread->ctx : &idle_ctx;
-    curr_thread = next_thread;
-    next_thread->state = THREAD_RUNNING;
-
-    timer_schedule_interrupt_ms(SCHEDULER_QUANTUM_MS, set_ready_to_schedule, 0);
-    context_switch(old_ctx, &next_thread->ctx);
-
+static void scheduler_handle_pending_signals(void) {
     if (curr_thread != NULL) {
         // Handle queue'd process level signals
         pcb_t *curr_proc = curr_thread->pcb;
@@ -198,6 +169,40 @@ void scheduler_tick(void *ctx) {
             curr++;
         }
     }
+}
+
+// Timer interrupt handler which performs actual scheduling
+void scheduler_tick(void *ctx) {
+    (void)ctx;
+    
+    // Save current thread context
+    if (curr_thread != NULL) {
+        if (curr_thread->state == THREAD_RUNNING) {
+            curr_thread->state = THREAD_READY;
+            add_thread_to_scheduler(curr_thread);
+        }
+    }
+
+    // Get next thread from any process
+    tcb_t *next_thread = get_next_thread();
+
+    if (next_thread == NULL) {
+        struct cpu_context *old_ctx = curr_thread ? &curr_thread->ctx : &idle_ctx;
+        curr_thread = NULL;
+        timer_schedule_interrupt_ms(SCHEDULER_QUANTUM_MS, set_ready_to_schedule, 0);
+        context_switch(old_ctx, &idle_ctx);
+        scheduler_handle_pending_signals();
+        return;
+    }
+
+    struct cpu_context *old_ctx = curr_thread ? &curr_thread->ctx : &idle_ctx;
+    curr_thread = next_thread;
+    next_thread->state = THREAD_RUNNING;
+
+    timer_schedule_interrupt_ms(SCHEDULER_QUANTUM_MS, set_ready_to_schedule, 0);
+    context_switch(old_ctx, &next_thread->ctx);
+
+    scheduler_handle_pending_signals();
 }
 
 pcb_t *get_curr_process(void) {

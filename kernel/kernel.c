@@ -112,6 +112,8 @@ void kernel_main(void) {
         printf("[tty] Created terminal");
     }
 
+    initialize_signals();
+
     scheduler_init();
     scheduler_start();
 

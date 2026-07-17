@@ -72,7 +72,6 @@ void initialize_signals() {
     def_signal_handlers[SIGCHLD] = SIG_IGN;
 }
 
-
 static void handle_interruptable_signal(tcb_t *tcb, int signum) {
     pcb_t *pcb = tcb->pcb;
     int terminating = pcb->sigactions[signum].sa_handler == SIG_TERM;
@@ -147,16 +146,21 @@ int s_kill(pid_t pid, int signal) {
         return sent ? 0 : (int)SYS_ESRCH;
     }
 
+    if (default_handler == SIG_IGN) {
+        return 0;
+    }
+
     // otherwise send process wide (only one thread).
-    // If someone needs it to wake up, do that first, otherwise process pending stack
     for (size_t i = 0; i < vec_len(&pcb->tids); i++) {
         tid_t member_tid = (tid_t)(uintptr_t)vec_get(&pcb->tids, i);
-        int unblocked = send_unblock_event(member_tid, BLOCK_UNTIL_SIGNAL);
-        if (unblocked) {
-            tcb_t *tcb = thread_get_by_tid(member_tid);
-            tcb->pending_signals |= (1 << signal);
-            return 0;
+        tcb_t *tcb = thread_get_by_tid(member_tid);
+        if (tcb == NULL || (tcb->mask & (1 << signal))) {
+            continue;
         }
+
+        tcb->pending_signals |= (1 << signal);
+        handle_interruptable_signal(tcb, signal);
+        return 0;
     }
 
     pcb->pending_signals |= (1 << signal);
