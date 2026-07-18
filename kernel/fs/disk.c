@@ -26,6 +26,16 @@ static uint32_t inode_table_start = 3;
 static uint32_t data_start_block = 4;
 static unsigned char mount_block_buffer[FS_MOUNT_BLOCK_BUFFER_SIZE] __attribute__((aligned(16)));
 
+static err_t mark_user_bin_executable(const char *path) {
+    struct fs_dirent dirent;
+    err_t err = get_dirent_by_path(path, &dirent, 0, NULL, NULL);
+    if (err != SUCCESS) {
+        return err;
+    }
+
+    return update_inode_metadata(dirent.ino_id, INODE_EDIT_PERM, 0, 0x1);
+}
+
 static err_t seed_user_bin_file(const user_bin_t *bin) {
     if (bin == NULL || bin->path == NULL || bin->start == NULL ||
         bin->end < bin->start) {
@@ -33,7 +43,7 @@ static err_t seed_user_bin_file(const user_bin_t *bin) {
     }
 
     if (k_check_if_exists(bin->path)) {
-        return SUCCESS;
+        return mark_user_bin_executable(bin->path);
     }
 
     size_t size = (size_t)(bin->end - bin->start);
@@ -63,7 +73,12 @@ static err_t seed_user_bin_file(const user_bin_t *bin) {
         written += (size_t)chunk;
     }
 
-    return k_close(entry);
+    err = k_close(entry);
+    if (err != SUCCESS) {
+        return err;
+    }
+
+    return mark_user_bin_executable(bin->path);
 }
 
 static err_t seed_user_bins(void) {
@@ -607,6 +622,14 @@ err_t mount(void) {
     err_code = initialize_oft();
     if (err_code != SUCCESS) {
         is_mounted = 0;
+        unmount_inode();
+        return err_code;
+    }
+
+    err_code = seed_user_bins();
+    if (err_code != SUCCESS) {
+        is_mounted = 0;
+        empty_oft();
         unmount_inode();
         return err_code;
     }

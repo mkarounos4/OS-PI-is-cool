@@ -334,6 +334,12 @@ int elf_exec_process(pcb_t *pcb, const char *path, char *const argv[],
         return err;
     }
 
+    if (!(entry->inode->inode.metadata.perm & 0x1)) {
+        free_exec_args(args, argc);
+        k_close(entry);
+        return INVALID_PERMISSIONS;
+    }
+
     int file_size = get_file_size(entry);
     if (file_size <= 0) {
         free_exec_args(args, argc);

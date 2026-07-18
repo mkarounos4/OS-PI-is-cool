@@ -44,6 +44,9 @@ struct parsed_command {
     // ignore this value when stdout_file is NULL
     bool is_file_append;
 
+    // indicates if stdin_file is a here-document delimiter
+    bool is_here_document;
+
     // filename for redirecting input from
     const char *stdin_file;
 
@@ -93,4 +96,3 @@ void print_parsed_command(const struct parsed_command *cmd);
 void print_parser_errcode(int err_code);
 
 #endif
-

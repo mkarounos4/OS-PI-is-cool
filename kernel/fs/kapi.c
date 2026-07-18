@@ -278,7 +278,7 @@ int default_write(struct oft_entry *entry, const char *buf, size_t n) {
     // Move real cursor to correct position in binary file, do special math for first offset.
     int size = get_file_size(entry);
     uint32_t offset;
-    if (entry->mode == F_APPEND) {
+    if (entry->mode & O_APPEND) {
         offset = size;
     } else {
         offset = entry->cursor;
@@ -455,14 +455,6 @@ int k_chmod(const char *file_name, uint8_t new_perms, int flag) {
         return FS_NOT_MOUNTED;
     }
 
-    int new_flag = EDIT_PERM;
-    if (flag == 0) {
-        new_flag |= AND_PERM;
-    } else if (flag == 1) {
-        new_perms = ~new_perms;
-        new_flag |= AND_PERM;
-    }
-
     char *actual_name;
     struct fs_dirent dirent;
     ino_id_t parent_dir;
@@ -471,7 +463,25 @@ int k_chmod(const char *file_name, uint8_t new_perms, int flag) {
         return err;
     }
 
-    err = update_inode_metadata(dirent.ino_id, EDIT_PERM, 0, new_perms);
+    if (flag == 0) {
+        err = update_inode_metadata(dirent.ino_id,
+                                    INODE_EDIT_PERM | INODE_AND_PERM,
+                                    0, 0);
+        if (err == SUCCESS) {
+            err = update_inode_metadata(dirent.ino_id, INODE_EDIT_PERM,
+                                        0, new_perms);
+        }
+    } else if (flag == 1) {
+        err = update_inode_metadata(dirent.ino_id,
+                                    INODE_EDIT_PERM | INODE_AND_PERM,
+                                    0, (uint8_t)~new_perms);
+    } else if (flag == 2) {
+        err = update_inode_metadata(dirent.ino_id, INODE_EDIT_PERM,
+                                    0, new_perms);
+    } else {
+        err = INVALID_ARGS;
+    }
+
     kfree(actual_name);
     return err;
 }

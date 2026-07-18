@@ -53,9 +53,13 @@ int parse_command(const char *const cmd_line, struct parsed_command **const resu
                     if (pcmd->num_commands > 0 || has_file_input) JUMP_OUT(UNEXPECTED_FILE_INPUT);
 
                     ++cur; // skip '<'
+                    if (cur < end && cur[0] == '<') {
+                        pcmd->is_here_document = true;
+                        ++cur;
+                    }
                     skip_space(&cur, end);
 
-                    // test if we indeed have a filename following '<'
+                    // test if we indeed have a filename or delimiter following '<'
                     skipped = cur;
                     skip_word(&skipped, end);
                     if (skipped <= cur) JUMP_OUT(EXPECT_INPUT_FILENAME);
@@ -160,8 +164,9 @@ int parse_command(const char *const cmd_line, struct parsed_command **const resu
         switch (cur[0]) {
             case '<':
                 ++cur;
+                if (pcmd->is_here_document) ++cur;
                 skip_space(&cur, end);
-                // store input file name into `stdin_file`
+                // Store either the input filename or here-document delimiter.
                 pcmd->stdin_file = new_start + (cur - start);
                 skip_word(&cur, end);
                 // at end of the input file name
@@ -212,7 +217,7 @@ void print_parsed_command(const struct parsed_command *const cmd) {
             printf("%s ", *arguments);
 
         if (i == 0 && cmd->stdin_file != NULL)
-            printf("< %s ", cmd->stdin_file);
+            printf(cmd->is_here_document ? "<< %s " : "< %s ", cmd->stdin_file);
 
         if (i == cmd->num_commands - 1) {
             if (cmd->stdout_file != NULL)

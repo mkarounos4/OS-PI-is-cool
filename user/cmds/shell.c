@@ -6,6 +6,7 @@ Vec background_status_updates;
 jid_t curr_job_id = 0;
 Vec background_jobs;
 Vec stopped_background_jobs;
+static int running_script = 0;
 
 void ctrCHandler(int signum) {
     (void)signum;
@@ -24,6 +25,75 @@ int handle_builtins(struct parsed_command *parsed_cmd);
 char *get_input(int *nextAddNewLine);
 void print_status_updates();
 void print_prompt();
+
+static int append_here_document(char **data, size_t *length, size_t *capacity,
+                                 const char *line) {
+    size_t line_length = strlen(line);
+    size_t needed = *length + line_length + 1;
+
+    if (needed > *capacity) {
+        size_t new_capacity = *capacity == 0 ? BUF_SIZE : *capacity;
+        while (new_capacity < needed) {
+            new_capacity *= 2;
+        }
+
+        char *new_data = realloc(*data, new_capacity);
+        if (new_data == NULL) {
+            return -1;
+        }
+        *data = new_data;
+        *capacity = new_capacity;
+    }
+
+    memcpy(*data + *length, line, line_length);
+    *length += line_length;
+    (*data)[(*length)++] = '\n';
+    return 0;
+}
+
+static int read_here_document(const char *delimiter, char **data,
+                              size_t *length) {
+    size_t capacity = 0;
+    *data = NULL;
+    *length = 0;
+
+    while (1) {
+        int next_add_newline;
+        char *line = get_input(&next_add_newline);
+        (void)next_add_newline;
+        if (line == NULL) {
+            free(*data);
+            *data = NULL;
+            *length = 0;
+            return -1;
+        }
+
+        if (strcmp(line, delimiter) == 0) {
+            free(line);
+            return 0;
+        }
+
+        int err = append_here_document(data, length, &capacity, line);
+        free(line);
+        if (err != 0) {
+            free(*data);
+            *data = NULL;
+            *length = 0;
+            return -1;
+        }
+    }
+}
+
+static void write_here_document(int fd, const char *data, size_t length) {
+    size_t written = 0;
+    while (written < length) {
+        int count = write(fd, data + written, (int)(length - written));
+        if (count <= 0) {
+            break;
+        }
+        written += (size_t)count;
+    }
+}
 
 int main(int argc, char **argv) {
     int shell_num = 0;
@@ -220,18 +290,14 @@ char *get_input(int *nextAddNewLine) {
 
     do {
         int num_read = read(0, buffer, BUF_SIZE);
-        printf("read done\n");
         if (wasInterrupted) {
-            printf("was in fact interrupts\n");
             free(cmd);
             return NULL;
         }
-        printf("continuing)\n");
 
         // Handle error or first char EOF
         if (num_read == -1) { free(cmd); return NULL; }
         if (num_read == 0) {
-            printf("read 0\n");
             if (cmd == buffer) {
                 write(1, "\n", 1);
                 free(cmd);
@@ -261,7 +327,6 @@ char *get_input(int *nextAddNewLine) {
 
         // Handle partially full buffer
         if (num_read < BUF_SIZE) {
-            printf("had a bit\n");
             if (buffer[num_read-1] == '\n') { buffer[num_read-1] = '\0'; }
             else { *nextAddNewLine = 1; }
 
@@ -329,6 +394,140 @@ static int command_has_slash(const char *command) {
     return 0;
 }
 
+static void report_exec_error(const char *path, const char *reason) {
+    write(STDERR_FILENO, "exec: ", 6);
+    write(STDERR_FILENO, path, (int)strlen(path));
+    write(STDERR_FILENO, ": ", 2);
+    write(STDERR_FILENO, reason, (int)strlen(reason));
+    write(STDERR_FILENO, "\n", 1);
+}
+
+static int has_elf_magic(const char *header, int length) {
+    return length >= 4 && header[0] == 0x7f && header[1] == 'E' &&
+           header[2] == 'L' && header[3] == 'F';
+}
+
+static int has_shell_shebang(const char *header, int length) {
+    static const char shell_shebang[] = "#!/bin/sh";
+
+    if (length < (int)(sizeof(shell_shebang) - 1)) {
+        return 0;
+    }
+
+    for (size_t i = 0; i < sizeof(shell_shebang) - 1; i++) {
+        if (header[i] != shell_shebang[i]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int execute_script_line(char *line) {
+    struct parsed_command *parsed_cmd;
+    int parse_res = parse_command(line, &parsed_cmd);
+    if (parse_res != 0) {
+        report_exec_error("script", "invalid command");
+        return 0;
+    }
+
+    running_script = 1;
+    execute_commands(parsed_cmd, line);
+    running_script = 0;
+    return 0;
+}
+
+static int execute_shell_file(const char *path) {
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) {
+        report_exec_error(path, "cannot read file");
+        return -1;
+    }
+
+    enum { SCRIPT_LINE_MAX = 1024 };
+    char *line = malloc(SCRIPT_LINE_MAX);
+    if (line == NULL) {
+        close(fd);
+        report_exec_error(path, "out of memory");
+        return -1;
+    }
+
+    char buffer[256];
+    size_t line_length = 0;
+    int result = 0;
+    int bytes_read;
+    while ((bytes_read = read(fd, buffer, sizeof(buffer))) > 0) {
+        for (int i = 0; i < bytes_read; i++) {
+            if (buffer[i] == '\n') {
+                line[line_length] = '\0';
+                execute_script_line(line);
+                line_length = 0;
+                continue;
+            }
+
+            if (line_length + 1 >= SCRIPT_LINE_MAX) {
+                report_exec_error(path, "script line too long");
+                result = -1;
+                goto done;
+            }
+            line[line_length++] = buffer[i];
+        }
+    }
+
+    if (bytes_read < 0) {
+        report_exec_error(path, "cannot read file");
+        result = -1;
+    } else if (line_length > 0) {
+        line[line_length] = '\0';
+        execute_script_line(line);
+    }
+
+done:
+    close(fd);
+    free(line);
+    return result;
+}
+
+// Returns 1 when the path does not exist, 0 after running a valid file,
+// and -1 after reporting an invalid or failed executable.
+static int run_executable_path(const char *path, char **argv) {
+    struct fs_stat_st metadata;
+    if (stat(path, &metadata) < 0) {
+        return 1;
+    }
+    if (!(metadata.perm & 0x1)) {
+        report_exec_error(path, "permission denied");
+        return -1;
+    }
+
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) {
+        report_exec_error(path, "cannot read file");
+        return -1;
+    }
+
+    char header[9];
+    int header_length = read(fd, header, sizeof(header));
+    close(fd);
+    if (header_length < 0) {
+        report_exec_error(path, "cannot read file");
+        return -1;
+    }
+
+    if (has_elf_magic(header, header_length)) {
+        int err = exec(path, argv);
+        (void)err;
+        report_exec_error(path, "invalid ELF executable");
+        return -1;
+    }
+
+    if (has_shell_shebang(header, header_length)) {
+        return execute_shell_file(path);
+    }
+
+    report_exec_error(path, "not an ELF executable or #!/bin/sh script");
+    return -1;
+}
+
 void exec_shell_command(char **argv) {
     if (argv == NULL || argv[0] == NULL) {
         exit(EXIT_FAILURE);
@@ -337,12 +536,16 @@ void exec_shell_command(char **argv) {
     if (!command_has_slash(argv[0])) {
         char *bin_path = str_concat("/bin/", argv[0]);
         if (bin_path != NULL) {
-            exec(bin_path, argv);
+            int result = run_executable_path(bin_path, argv);
             free(bin_path);
+            if (result <= 0) {
+                exit(result == 0 ? EXIT_SUCCESS : EXIT_FAILURE);
+            }
         }
     }
 
-    exec(argv[0], argv);
+    int result = run_executable_path(argv[0], argv);
+    exit(result == 0 ? EXIT_SUCCESS : EXIT_FAILURE);
 }
 
 void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
@@ -372,16 +575,34 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
     newJob->status = RUNNING_STATE;
 	newJob->num_procs_stopped = 0;
 
+    char *here_document = NULL;
+    size_t here_document_length = 0;
+    int here_pipe[2] = {-1, -1};
+    if (parsed_cmd->is_here_document) {
+        if (read_here_document(parsed_cmd->stdin_file, &here_document,
+                               &here_document_length) != 0 ||
+            pipe(here_pipe) < 0) {
+            free(here_document);
+            free(newJob->pids);
+            free(newJob->full_cmd);
+            free(newJob);
+            free(parsed_cmd);
+            return;
+        }
+    }
+
     if (parsed_cmd->num_commands == 1) {
         // if only one command, fork and exec
         pid_t pid = fork();
 
         // Exec child
         if (pid == 0) {
-            setpgid(0, 0);
+            setpgid(0, running_script ? getpgrp() : 0);
             prepare_child_process(parsed_cmd);
 
-            if (parsed_cmd->stdin_file != NULL) {
+            if (parsed_cmd->is_here_document) {
+                dup2(here_pipe[READ_END], STDIN_FILENO);
+            } else if (parsed_cmd->stdin_file != NULL) {
                 int fd = open(parsed_cmd->stdin_file, O_RDONLY);
                 if (fd < 0) {
                     perror("failed to open file.");
@@ -411,13 +632,18 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
 
             }
 
+            if (parsed_cmd->is_here_document) {
+                close(here_pipe[READ_END]);
+                close(here_pipe[WRITE_END]);
+            }
+
             exec_shell_command(parsed_cmd->commands[0]);
             perror("exec");
             exit(EXIT_FAILURE);
         }
 
         // Set child to new process group
-        if (setpgid(pid, pid) == -1) {
+        if (setpgid(pid, running_script ? getpgrp() : pid) == -1) {
             perror("setpgid of child error\n");
             exit(EXIT_FAILURE);
         }
@@ -429,7 +655,7 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
         // if more than one child, handle pipes
         int (*all_pipes)[2] = calloc((parsed_cmd->num_commands - 1), sizeof(*all_pipes));
 
-        int pgid = 0;
+        int pgid = running_script ? getpgrp() : 0;
         for (size_t i = 0; i < parsed_cmd->num_commands; i++) {
             // We don't need a pipe for the last command
             if (i != parsed_cmd->num_commands - 1) {
@@ -454,7 +680,9 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
                 if (i != 0) {
                     dup2(all_pipes[i-1][READ_END], STDIN_FILENO);
                 } else {
-                    if (parsed_cmd->stdin_file != NULL) {
+                    if (parsed_cmd->is_here_document) {
+                        dup2(here_pipe[READ_END], STDIN_FILENO);
+                    } else if (parsed_cmd->stdin_file != NULL) {
                         int fd = open(parsed_cmd->stdin_file, O_RDONLY);
                         if (fd < 0) {
                             perror("failed to open file.");
@@ -490,6 +718,10 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
                 for (size_t j = 0; j < parsed_cmd->num_commands - 1; j++) {
                     close_pipe(all_pipes[j]);
                 }
+                if (parsed_cmd->is_here_document) {
+                    close(here_pipe[READ_END]);
+                    close(here_pipe[WRITE_END]);
+                }
 
                 exec_shell_command(parsed_cmd->commands[i]);
                 exit(EXIT_FAILURE);
@@ -509,6 +741,14 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
             close_pipe(all_pipes[i]);
         }
         free(all_pipes);
+    }
+
+    if (parsed_cmd->is_here_document) {
+        close(here_pipe[READ_END]);
+        write_here_document(here_pipe[WRITE_END], here_document,
+                            here_document_length);
+        close(here_pipe[WRITE_END]);
+        free(here_document);
     }
 
     vec_push_back(&background_jobs, newJob);
@@ -540,10 +780,10 @@ void start_fg_job(job *newJob) {
 	// Declare as foreground job and get pgid
     newJob->cmd->is_background = 0;
     newJob->num_procs_stopped = 0;
-    int pgid = newJob->pids[0];
+    int pgid = running_script ? getpgrp() : newJob->pids[0];
 
 	// Give job terminal control
-    if (tcsetpgrp(STDIN_FILENO, pgid)) {
+	if (!running_script && tcsetpgrp(STDIN_FILENO, pgid)) {
         perror("tcsetpgrp");
     }
 
@@ -585,7 +825,9 @@ void start_fg_job(job *newJob) {
 	}
 
 	// Give terminal control back to shell
-    tcsetpgrp(STDIN_FILENO, shell_pgid);
+	if (!running_script) {
+		tcsetpgrp(STDIN_FILENO, shell_pgid);
+	}
 }
 
 int handle_builtins(struct parsed_command *parsed_cmd) {
