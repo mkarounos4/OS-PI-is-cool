@@ -189,11 +189,6 @@ int pthread_kill(tid_t tid, int signal) {
     }
     pcb_t *pcb = tcb->pcb;
 
-    if (tcb == get_curr_thread() && !(tcb->mask & (1 << signal))) {
-        pcb->sigactions[signal].sa_handler(signal);
-        return 0;
-    }
-
     if (signal == SIGCONT) {
         int curr = 0;
         while (pcb->pending_signals >> curr) {

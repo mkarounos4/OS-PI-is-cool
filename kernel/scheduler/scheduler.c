@@ -38,6 +38,7 @@ static void set_ready_to_schedule(void *ctx) {
 
 void idle_task_fn(void* args) {
     (void)args;
+    irq_enable();
     while (1) {
         asm volatile ("wfe");
     }
@@ -218,21 +219,47 @@ tcb_t *get_curr_thread(void) {
 }
 
 void add_thread_to_scheduler(tcb_t *thread) {
-    if (thread == NULL) {
+    if (thread == NULL || thread->state != THREAD_READY) {
         return;
     }
+
+    for (int priority = 0; priority < 3; priority++) {
+        for (size_t i = 0; i < vec_len(&thread_ready_queues[priority]); i++) {
+            if (vec_get(&thread_ready_queues[priority], i) == thread) {
+                return;
+            }
+        }
+    }
+
     vec_insert(&thread_ready_queues[thread->priority], 0, (ptr_t*)thread);
 }
 
+void remove_thread_from_scheduler(tcb_t *thread) {
+    if (thread == NULL) {
+        return;
+    }
+
+    for (int priority = 0; priority < 3; priority++) {
+        size_t i = 0;
+        while (i < vec_len(&thread_ready_queues[priority])) {
+            if (vec_get(&thread_ready_queues[priority], i) == thread) {
+                vec_erase(&thread_ready_queues[priority], i);
+            } else {
+                i++;
+            }
+        }
+    }
+}
+
 tcb_t *get_next_thread(void) {
-    for (int i = 0; i < 3; i++) {
-        if (!vec_is_empty(&thread_ready_queues[curr_pri])) {
+    for (int priorities_checked = 0; priorities_checked < 3; priorities_checked++) {
+        while (!vec_is_empty(&thread_ready_queues[curr_pri])) {
             ptr_t to_return;
             vec_pop_back(&thread_ready_queues[curr_pri], &to_return);
-            tcb_t *thread = (tcb_t*)to_return;
+            tcb_t *thread = (tcb_t *)to_return;
 
-            if (thread->state != THREAD_READY) {
-                return get_next_thread();
+            if (thread == NULL || thread->state != THREAD_READY) {
+                continue;
             }
 
             pri_counters[curr_pri]++;
@@ -242,13 +269,14 @@ tcb_t *get_next_thread(void) {
             }
             return thread;
         }
+
         curr_pri = (curr_pri + 1) % 3;
     }
+
     return NULL;
 }
 
 void schedule_yield() {
-    irq_enable();
     scheduler_tick(NULL);
 }
 

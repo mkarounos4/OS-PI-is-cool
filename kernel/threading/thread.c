@@ -192,6 +192,7 @@ int thread_detach(tid_t tid) {
 
 void thread_cleanup(tcb_t *target) {
     pcb_t *pcb = target->pcb;
+    remove_thread_from_scheduler(target);
     vec_destroy(&target->waiting_on_this);
     target->state = THREAD_UNUSED;
     

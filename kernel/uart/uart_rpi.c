@@ -40,7 +40,7 @@
 
 #define UART_IFLS_RX_1_8 0u
 #define RP1_INT_UART0    25u
-#define UART_RX_BUFFER_SIZE 256u
+#define UART_RX_BUFFER_SIZE 4096u
 
 #define GIC_SPI_INTID(spi)          (32u + (spi))
 #define RPI5_MIP0_GIC_SPI_BASE      128u

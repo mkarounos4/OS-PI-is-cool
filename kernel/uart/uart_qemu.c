@@ -36,7 +36,7 @@
 
 #define UART_IFLS_RX_1_8 0u
 #define QEMU_RPI3_UART0_INTID 57u
-#define UART_RX_BUFFER_SIZE 256u
+#define UART_RX_BUFFER_SIZE 4096u
 
 static unsigned char uart_rx_buffer[UART_RX_BUFFER_SIZE];
 

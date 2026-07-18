@@ -14,6 +14,7 @@ void scheduler_start(void) __attribute__((noreturn));
 
 /* Threading */
 void add_thread_to_scheduler(tcb_t *thread);
+void remove_thread_from_scheduler(tcb_t *thread);
 tcb_t *get_next_thread(void);
 
 pcb_t *get_curr_process();
