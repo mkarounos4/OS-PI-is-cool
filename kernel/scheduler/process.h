@@ -95,3 +95,4 @@ int print_processes(int fd);
 int set_process_name(const char *name);
 int set_process_name_for_pid(pid_t pid, const char *name);
 void pcb_thread_change_state(pcb_t *pcb, int old_state, int new_state);
+void process_change_priority(pid_t pid, int new_priority);

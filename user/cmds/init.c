@@ -24,6 +24,8 @@ static void spawn_shell_for_tty(const char *tty_arg) {
         int err = exec("/bin/shell", argv);
         print_errno("init", "exec /bin/shell", err);
         exit(err < 0 ? err : -EIO);
+    } else {
+        proc_change_priority(pid, 0);
     }
 }
 

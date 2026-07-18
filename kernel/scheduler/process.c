@@ -9,6 +9,7 @@
 #include "uart/uart.h"
 #include "signals/signals.h"
 #include "user_image.h"
+#include "devices/tty.h"
 
 #define PA_MASK UINT64_C(0x0000ffffffffffff)
 
@@ -454,6 +455,7 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
 }
 
 void proc_destroy(pcb_t *p) {
+    tty_session_process_exit(p->pid);
     uart_puts("Cleaning up ");
     uart_puthex(p->pid);
     uart_puts("\n");
@@ -822,5 +824,23 @@ void pcb_thread_change_state(pcb_t *pcb, int old_state, int new_state) {
 
     pcb->state = PROC_ZOMBIE_STATE;
     send_sigchld(pcb->pid);
+    return;
+}
+
+void process_change_priority(pid_t pid, int new_priority) {
+    pcb_t *pcb;
+    if (pid == 0) {
+        pcb = get_curr_process();
+    } else {
+        pcb = get_pcb_by_pid(pid);
+    }
+
+    if (pcb == NULL || new_priority < 0 || new_priority > 2) {
+        return;
+    }
+
+    for (size_t i = 0; i < vec_len(&pcb->tids); i++) {
+        thread_change_priority((tid_t)(uintptr_t)vec_get(&pcb->tids, i), new_priority);
+    }
     return;
 }

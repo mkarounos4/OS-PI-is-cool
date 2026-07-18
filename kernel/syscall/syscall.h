@@ -55,6 +55,13 @@ enum syscall_type {
     S_SLEEP = 45,
     S_STAT = 46,
     S_TTY_NEXT_REQUEST = 47,
+    S_TTY_GET_MODE = 48,
+    S_TTY_SET_MODE = 49,
+    S_TTY_GET_SIZE = 50,
+    S_TTY_SCREEN_ENTER = 51,
+    S_TTY_SCREEN_LEAVE = 52,
+    S_TTY_SCREEN_PRESENT = 53,
+    S_PROC_CHANGE_PRIORITY = 54,
 };
 
 struct trap_frame *syscall_dispatch(struct trap_frame *frame);

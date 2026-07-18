@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stddef.h>
+
 void init_tty_gui(void);
 void tty_gui_write_char(const char c);
 void tty_gui_write_char_for_tty(int terminal, const char c);
@@ -14,3 +16,10 @@ int tty_gui_get_rows(void);
 int tty_gui_get_cols(void);
 int tty_gui_get_cursor_row(void);
 int tty_gui_get_cursor_col(void);
+size_t tty_gui_screen_size(void);
+int tty_gui_copy_screen(int terminal, char *cells, size_t count,
+                        int *cursor_row, int *cursor_col);
+int tty_gui_restore_screen(int terminal, const char *cells, size_t count,
+                           int cursor_row, int cursor_col);
+int tty_gui_present_screen(int terminal, const char *cells, size_t count,
+                           int cursor_row, int cursor_col);

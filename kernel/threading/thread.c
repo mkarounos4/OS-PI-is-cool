@@ -4,6 +4,7 @@
 #include "memory/kmalloc.h"
 #include "memory/page_table/page_table.h"
 #include "uart/uart.h"
+#include "devices/tty.h"
 
 static Vec threads;
 
@@ -24,12 +25,13 @@ tcb_t *thread_get_by_tid(tid_t tid) {
     if (tid < 0 || tid >= vec_len(&threads)) {
         return NULL;
     }
- 
-    if (((tcb_t*) vec_get(&threads, tid))->state == THREAD_UNUSED) {
+
+    tcb_t *thread = (tcb_t *)vec_get(&threads, tid);
+    if (thread == NULL || thread->state == THREAD_UNUSED) {
         return NULL;
     }
- 
-    return vec_get(&threads, tid);
+
+    return thread;
 }
 
 tid_t thread_create(pcb_t *parent_pcb, void *(*start_routine)(void*), void *arg) {
@@ -215,6 +217,7 @@ void stop_thread(tcb_t *tcb) {
         return;
     }
 
+    tty_session_process_stop(tcb->pcb->pid);
     tcb->stopped_state = tcb->state;
     pcb_thread_change_state(tcb->pcb, tcb->state, THREAD_STOPPED);
     tcb->state = THREAD_STOPPED;
@@ -228,6 +231,7 @@ void terminate_thread(tcb_t *tcb) {
         return;
     }
 
+    tty_session_process_exit(tcb->pcb->pid);
     pcb_thread_change_state(tcb->pcb, tcb->state, THREAD_ZOMBIE);
     tcb->state = THREAD_ZOMBIE;
 
@@ -281,6 +285,7 @@ void continue_thread(tcb_t *tcb) {
         next_state = THREAD_READY;
     }
 
+    tty_session_process_continue(tcb->pcb->pid);
     pcb_thread_change_state(tcb->pcb, tcb->state, next_state);
     tcb->state = next_state;
     tcb->stopped_state = THREAD_READY;
@@ -302,4 +307,13 @@ int send_unblock_event(tid_t tid, uint32_t event) {
     }
 
     return 0;
+}
+
+void thread_change_priority(tid_t tid, int new_priority) {
+    tcb_t *tcb = thread_get_by_tid(tid);
+    if (tcb == NULL || new_priority < 0 || new_priority > 2) {
+        return;
+    }
+
+    tcb->priority = new_priority;
 }

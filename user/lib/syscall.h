@@ -71,6 +71,13 @@ enum syscall_type {
     S_SLEEP = 45,
     S_STAT = 46,
     S_TTY_NEXT_REQUEST = 47,
+    S_TTY_GET_MODE = 48,
+    S_TTY_SET_MODE = 49,
+    S_TTY_GET_SIZE = 50,
+    S_TTY_SCREEN_ENTER = 51,
+    S_TTY_SCREEN_LEAVE = 52,
+    S_TTY_SCREEN_PRESENT = 53,
+    S_PROC_CHANGE_PRIORITY = 54,
 };
 
 long write_console(const char *s, uint64_t len);
@@ -170,4 +177,8 @@ static inline int ps(void) {
 
 static inline int exec(const char *path, char *const argv[]) {
     return sys_call2(S_EXEC, (long)(uintptr_t)path, (long)(uintptr_t)argv);
+}
+
+static inline int proc_change_priority(pid_t pid, int new_priority) {
+    return sys_call2(S_PROC_CHANGE_PRIORITY, (long)(uintptr_t)pid, (long)(uintptr_t)new_priority);
 }

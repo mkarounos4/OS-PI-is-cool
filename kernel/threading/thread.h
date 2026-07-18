@@ -118,3 +118,5 @@ void unblock_thread(tcb_t *tcb);
 void continue_thread(tcb_t *tcb);
 int send_unblock_event(tid_t tid, uint32_t event);
 int threading_format_locks(char *buf, size_t size);
+
+void thread_change_priority(tid_t tcb, int new_priority);

@@ -3,8 +3,12 @@
 #include "scheduler.h"
 #include "threading/thread.h"
 #include "uart/uart.h"
+#include "fs/kapi.h"
+#include "fs/disk.h"
 
 #define TTY_MAJOR 0
+
+static struct tty_driver_state tty_state;
 
 int tty_open(struct oft_entry *entry);
 int tty_close(struct oft_entry *entry);
@@ -12,7 +16,76 @@ int tty_read(struct oft_entry *entry, char *buffer, size_t count);
 static void tty_clear_input_line(struct tty_device *tty);
 void wake_up_readers(int minor);
 
-static struct tty_driver_state tty_state;
+static int tty_minor_from_fd(int fd) {
+    pcb_t *pcb = get_curr_process();
+    if (pcb == NULL || fd < 0 || (size_t)fd >= vec_len(&pcb->file_descriptors)) {
+        return -1;
+    }
+
+    int kernel_fd = (int)(uintptr_t)vec_get(&pcb->file_descriptors, fd);
+    if (kernel_fd < 0) {
+        return -1;
+    }
+
+    struct oft_entry *entry;
+    if (get_oft_entry_by_fd(kernel_fd, &entry) != SUCCESS ||
+        entry == NULL || entry->inode == NULL ||
+        entry->inode->inode.metadata.type != CHAR_DRIVER_TYPE) {
+        return -1;
+    }
+
+    return entry->inode->inode.metadata.i_rdev.minor;
+}
+
+static struct tty_device *tty_from_fd(int fd, int *minor_out) {
+    int minor = tty_minor_from_fd(fd);
+    if (minor < 0 || minor >= MAX_TTY_DEVICES ||
+        tty_state.devices[minor] == NULL || !tty_state.devices[minor]->active) {
+        return NULL;
+    }
+
+    if (minor_out != NULL) {
+        *minor_out = minor;
+    }
+    return tty_state.devices[minor];
+}
+
+static int tty_session_owned_by_current(struct tty_device *tty) {
+    pcb_t *pcb = get_curr_process();
+    return pcb != NULL && tty->session_active &&
+           tty->session_owner_pid == pcb->pid;
+}
+
+static void tty_session_free(struct tty_device *tty) {
+    if (tty->session_saved_cells != NULL) {
+        kfree(tty->session_saved_cells);
+    }
+    if (tty->session_suspended_cells != NULL) {
+        kfree(tty->session_suspended_cells);
+    }
+    tty->session_saved_cells = NULL;
+    tty->session_suspended_cells = NULL;
+    tty->session_active = 0;
+    tty->session_suspended = 0;
+    tty->session_owner_pid = -1;
+    tty->session_owner_pgid = -1;
+}
+
+static void tty_session_restore_shell(struct tty_device *tty) {
+    if (!tty->session_active || tty->session_saved_cells == NULL) {
+        return;
+    }
+
+    tty_gui_restore_screen((int)tty->minor, tty->session_saved_cells,
+                           tty_gui_screen_size(), tty->session_saved_cursor_row,
+                           tty->session_saved_cursor_col);
+    tty->mode = tty->session_saved_mode;
+    tty->fg_pgid = tty->session_saved_fg_pgid;
+    if (tty->session_saved_active_terminal >= 0) {
+        tty_gui_activate_terminal(tty->session_saved_active_terminal);
+    }
+}
+
 static int pending_shell_ttys[MAX_TTY_DEVICES];
 static int pending_shell_count;
 static int pending_terminal_creates;
@@ -125,6 +198,8 @@ int tty_create() {
 
     new_tty->fg_pgid = 0;
     new_tty->active = 0;
+    new_tty->mode = TTY_MODE_CANONICAL;
+    tty_session_free(new_tty);
     new_tty->input_len = 0;
     new_tty->input_cursor = 0;
     new_tty->escape_state = 0;
@@ -142,6 +217,9 @@ int tty_create() {
 }
 
 int tty_open(struct oft_entry *entry) {
+    if (entry == NULL || entry->inode == NULL) {
+        return -1;
+    }
     uint16_t minor = entry->inode->inode.metadata.i_rdev.minor;
     if (minor >= MAX_TTY_DEVICES || tty_state.devices[minor] == NULL ||
         !tty_state.devices[minor]->active) {
@@ -152,6 +230,9 @@ int tty_open(struct oft_entry *entry) {
 }
 
 int tty_close(struct oft_entry *entry) {
+    if (entry == NULL || entry->inode == NULL) {
+        return -1;
+    }
     uint16_t minor = entry->inode->inode.metadata.i_rdev.minor;
     if (minor >= MAX_TTY_DEVICES || tty_state.devices[minor] == NULL) {
         return -1;
@@ -165,10 +246,19 @@ int tty_close(struct oft_entry *entry) {
 }
 
 int tty_read(struct oft_entry *entry, char *buffer, size_t count) {
+    if (entry == NULL || entry->inode == NULL ||
+        (buffer == NULL && count != 0)) {
+        return -1;
+    }
+
     uint16_t minor = entry->inode->inode.metadata.i_rdev.minor;
 
+    if (minor >= MAX_TTY_DEVICES) {
+        return -1;
+    }
+
     struct tty_device *curr_tty = tty_state.devices[minor];
-    if (minor >= MAX_TTY_DEVICES || curr_tty == NULL || !curr_tty->active) {
+    if (curr_tty == NULL || !curr_tty->active) {
         return 0;
     }
 
@@ -179,16 +269,28 @@ int tty_read(struct oft_entry *entry, char *buffer, size_t count) {
     if (curr_pcb->pgid != curr_tty->fg_pgid) {
         s_kill(-curr_pcb->pgid, SIGTTIN);
     }
-    
-
     tcb_t *curr_thd = get_curr_thread();
+    if (curr_thd == NULL) {
+        return -1;
+    }
 
     ssize_t num_read = 0;
     while (num_read < count) {
         char char_void;
         bool read_char = consume_ring_buffer(&curr_tty->rx, &char_void);
         if (!read_char) {
-            vec_push_back(&curr_tty->rx_wait_queue, (ptr_t)(uintptr_t)curr_thd->tid);
+            int already_waiting = 0;
+            for (size_t i = 0; i < vec_len(&curr_tty->rx_wait_queue); i++) {
+                if ((tid_t)(uintptr_t)vec_get(&curr_tty->rx_wait_queue, i) ==
+                    curr_thd->tid) {
+                    already_waiting = 1;
+                    break;
+                }
+            }
+            if (!already_waiting) {
+                vec_push_back(&curr_tty->rx_wait_queue,
+                              (ptr_t)(uintptr_t)curr_thd->tid);
+            }
             block_thread(curr_thd, THREAD_BLOCKED_INTERRUPTABLE);
             read_char = consume_ring_buffer(&curr_tty->rx, &char_void);
             if (!read_char) {
@@ -213,9 +315,153 @@ int tty_read(struct oft_entry *entry, char *buffer, size_t count) {
     return num_read;
 }
 
+int tty_set_mode(int fd, int mode) {
+    struct tty_device *tty = tty_from_fd(fd, NULL);
+    if (tty == NULL || (mode != TTY_MODE_CANONICAL && mode != TTY_MODE_RAW)) {
+        return -1;
+    }
+    if (tty->session_active && !tty_session_owned_by_current(tty)) {
+        return -1;
+    }
+
+    tty->mode = (uint8_t)mode;
+    if (tty_session_owned_by_current(tty) && !tty->session_suspended) {
+        tty->session_resume_mode = (uint8_t)mode;
+    }
+    return 0;
+}
+
+int tty_get_mode(int fd) {
+    struct tty_device *tty = tty_from_fd(fd, NULL);
+    return tty == NULL ? -1 : tty->mode;
+}
+
+int tty_get_screen_size(int fd, int *rows, int *cols) {
+    if (tty_from_fd(fd, NULL) == NULL || rows == NULL || cols == NULL) {
+        return -1;
+    }
+    *rows = tty_gui_get_rows();
+    *cols = tty_gui_get_cols();
+    return (*rows > 0 && *cols > 0) ? 0 : -1;
+}
+
+int tty_screen_enter(int fd) {
+    int minor;
+    struct tty_device *tty = tty_from_fd(fd, &minor);
+    pcb_t *pcb = get_curr_process();
+    if (tty == NULL || pcb == NULL || tty->session_active) {
+        return -1;
+    }
+
+    size_t screen_size = tty_gui_screen_size();
+    tty->session_saved_cells = kmalloc(screen_size);
+    tty->session_suspended_cells = kmalloc(screen_size);
+    if (tty->session_saved_cells == NULL || tty->session_suspended_cells == NULL ||
+        tty_gui_copy_screen(minor, tty->session_saved_cells, screen_size,
+                            &tty->session_saved_cursor_row,
+                            &tty->session_saved_cursor_col) != 0) {
+        tty_session_free(tty);
+        return -1;
+    }
+
+    tty->session_active = 1;
+    tty->session_suspended = 0;
+    tty->session_owner_pid = pcb->pid;
+    tty->session_owner_pgid = pcb->pgid;
+    tty->session_saved_fg_pgid = tty->fg_pgid;
+    tty->session_saved_mode = tty->mode;
+    tty->session_resume_mode = tty->mode;
+    tty->session_saved_active_terminal = tty_gui_get_active_terminal();
+    tty->fg_pgid = pcb->pgid;
+    tty_gui_activate_terminal(minor);
+    return 0;
+}
+
+int tty_screen_leave(int fd) {
+    struct tty_device *tty = tty_from_fd(fd, NULL);
+    if (tty == NULL || !tty_session_owned_by_current(tty)) {
+        return -1;
+    }
+
+    tty_session_restore_shell(tty);
+    tty_session_free(tty);
+    return 0;
+}
+
+int tty_screen_present(int fd, const char *cells, size_t count,
+                       int cursor_row, int cursor_col) {
+    int minor;
+    struct tty_device *tty = tty_from_fd(fd, &minor);
+    if (tty == NULL || !tty_session_owned_by_current(tty) ||
+        tty->session_suspended) {
+        return -1;
+    }
+
+    return tty_gui_present_screen(minor, cells, count, cursor_row, cursor_col);
+}
+
+void tty_session_process_exit(pid_t pid) {
+    for (int i = 0; i < MAX_TTY_DEVICES; i++) {
+        struct tty_device *tty = tty_state.devices[i];
+        if (tty == NULL || !tty->active || !tty->session_active ||
+            tty->session_owner_pid != pid) {
+            continue;
+        }
+
+        tty_session_restore_shell(tty);
+        tty_session_free(tty);
+    }
+}
+
+void tty_session_process_stop(pid_t pid) {
+    for (int i = 0; i < MAX_TTY_DEVICES; i++) {
+        struct tty_device *tty = tty_state.devices[i];
+        if (tty == NULL || !tty->active || !tty->session_active ||
+            tty->session_owner_pid != pid || tty->session_suspended) {
+            continue;
+        }
+
+        if (tty_gui_copy_screen((int)tty->minor, tty->session_suspended_cells,
+                                tty_gui_screen_size(),
+                                &tty->session_suspended_cursor_row,
+                                &tty->session_suspended_cursor_col) != 0) {
+            continue;
+        }
+        tty->session_suspended = 1;
+        tty_session_restore_shell(tty);
+    }
+}
+
+void tty_session_process_continue(pid_t pid) {
+    for (int i = 0; i < MAX_TTY_DEVICES; i++) {
+        struct tty_device *tty = tty_state.devices[i];
+        if (tty == NULL || !tty->active || !tty->session_active ||
+            tty->session_owner_pid != pid || !tty->session_suspended ||
+            tty->fg_pgid != tty->session_owner_pgid) {
+            continue;
+        }
+
+        tty_gui_activate_terminal((int)tty->minor);
+        tty_gui_present_screen((int)tty->minor, tty->session_suspended_cells,
+                               tty_gui_screen_size(),
+                               tty->session_suspended_cursor_row,
+                               tty->session_suspended_cursor_col);
+        tty->mode = tty->session_resume_mode;
+        tty->fg_pgid = tty->session_owner_pgid;
+        tty->session_suspended = 0;
+    }
+}
+
 int tty_write(struct oft_entry *entry, const char *buffer, size_t count) {
+    if (buffer == NULL && count != 0) {
+        return -1;
+    }
+
     uint16_t minor = (uint16_t)tty_gui_get_active_terminal();
     if (entry != NULL) {
+        if (entry->inode == NULL) {
+            return -1;
+        }
         minor = entry->inode->inode.metadata.i_rdev.minor;
     }
     if (minor >= MAX_TTY_DEVICES || tty_state.devices[minor] == NULL ||
@@ -297,13 +543,21 @@ int tty_format_proc(char *buf, size_t size) {
 }
 
 void wake_up_readers(int minor) {
+    if (minor < 0 || minor >= MAX_TTY_DEVICES ||
+        tty_state.devices[minor] == NULL) {
+        return;
+    }
+
     while (!vec_is_empty(&tty_state.devices[minor]->rx_wait_queue)) {
         void *tid;
         int removed = (int)(uintptr_t)vec_pop_back(&tty_state.devices[minor]->rx_wait_queue, &tid);
         if (!removed) {
             continue;
         }
-        unblock_thread(thread_get_by_tid((int)(uintptr_t)tid));
+        tcb_t *thread = thread_get_by_tid((tid_t)(uintptr_t)tid);
+        if (thread != NULL) {
+            unblock_thread(thread);
+        }
     }
 }
 
@@ -475,6 +729,26 @@ static int tty_handle_escape_char(struct tty_device *tty, char ch) {
     return 1;
 }
 
+static void tty_send_raw_char(int minor, struct tty_device *tty, char ch) {
+    if (ch == 0x03) {
+        if (tty->fg_pgid > 0) {
+            s_kill(-tty->fg_pgid, SIGINT);
+        }
+        return;
+    }
+
+    if (ch == 0x1A) {
+        if (tty->fg_pgid > 0) {
+            s_kill(-tty->fg_pgid, SIGTSTP);
+        }
+        return;
+    }
+
+    if (produce_ring_buffer(&tty->rx, &ch)) {
+        wake_up_readers(minor);
+    }
+}
+
 void tty_send_input(int minor, const char *buffer, size_t count) {
     if (buffer == NULL) {
         return;
@@ -482,16 +756,22 @@ void tty_send_input(int minor, const char *buffer, size_t count) {
 
     while (count > 0) {
         minor = tty_gui_get_active_terminal();
-        if (tty_state.num_ttys <= minor) {
+        if (minor < 0 || minor >= MAX_TTY_DEVICES ||
+            tty_state.devices[minor] == NULL ||
+            !tty_state.devices[minor]->active) {
             return;
         }
 
         struct tty_device *tty = tty_state.devices[minor];
-        if (tty == NULL) {
-            return;
-        }
 
         char ch = *buffer;
+
+        if (tty->mode == TTY_MODE_RAW) {
+            tty_send_raw_char(minor, tty, ch);
+            buffer++;
+            count--;
+            continue;
+        }
 
         if (ch == 0x14) {
             int restored = tty_show_hidden_terminal();
@@ -549,12 +829,16 @@ void tty_send_input(int minor, const char *buffer, size_t count) {
 
         char to_write = ch;
         if (*buffer == 0x03) {
-            s_kill(-tty_state.devices[minor]->fg_pgid, SIGINT);
+            if (tty->fg_pgid > 0) {
+                s_kill(-tty->fg_pgid, SIGINT);
+            }
             tty_write(NULL, "^C\n", 3);
             tty_clear_input_line(tty);
             to_write = 0;
         } else if (*buffer == 0x1A) {
-            s_kill(-tty_state.devices[minor]->fg_pgid, SIGTSTP);
+            if (tty->fg_pgid > 0) {
+                s_kill(-tty->fg_pgid, SIGTSTP);
+            }
             tty_write(NULL, "^Z\n", 3);
             tty_clear_input_line(tty);
             to_write = 0;
@@ -580,7 +864,7 @@ void tty_send_input(int minor, const char *buffer, size_t count) {
         }
 
         if (to_write) {
-            if (!produce_ring_buffer(&tty_state.devices[minor]->rx, &to_write)) {
+            if (!produce_ring_buffer(&tty->rx, &to_write)) {
                 return;
             }
         }
@@ -599,13 +883,17 @@ int tcsetpgrp(int fd, int pgid) {
     if (pcb == NULL) {
         return -1;
     }
+    struct tty_device *tty = tty_from_fd(fd, NULL);
+    if (tty == NULL) {
+        return -1;
+    }
     if (pgid == 0) {
         pgid = pcb->pgid;
     }
 
-    if (tty_state.devices[fd]->fg_pgid != pcb->pgid && pgid != pcb->pgid) {
+    if (tty->fg_pgid != pcb->pgid && pgid != pcb->pgid) {
         s_kill(-pcb->pgid, SIGTTOU);
     }
-    tty_state.devices[fd]->fg_pgid = pgid;
+    tty->fg_pgid = pgid;
     return 0;
 }
