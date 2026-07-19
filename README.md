@@ -20,14 +20,12 @@
 |---|---|
 | [Quickstart Guide](docs/quickstart.md) | Build, rebuild, Raspberry Pi 5 boot, and QEMU boot instructions. |
 | [Demo Guide](docs/demo.md) | Demo workflow and commands to show the OS running. |
-| [Architecture](docs/architecture/architecture.md) | Hardware and System architecture, IRQ, Timers, and Traps. |
+| [Architecture](docs/architecture/architecture.md) | Boot flow, linker layout, platform split, EL1/EL0 boundary, IRQs, timers, traps, and syscalls. |
 | [Filesystem Architecture](docs/architecture/filesystem.md) | Inode filesystem, VFS, open-file table, caches, permissions, and disk layout. |
-| [Processes Architecture](docs/architecture/processes.md) | Scheduler, fork, exec, progress groups, zombies/orphans, waitpid, multithreading, synchronization, isolation. |
-| [Signals Architecture](docs/architecture/signals.md) | add stuff when do this doc. |
-| [System Calls Architecture](docs/architecture/system-calls.md) | Syscall API, dispatcher structure, and kernel/userspace boundary. |
-| [Userspace Architecture](docs/architecture/userspace.md) | Userspace binaries, shell, command loading, and user library structure. |
+| [Processes Architecture](docs/architecture/processes.md) | Scheduler, fork, exec, process groups, zombies/orphans, waitpid, multithreading, synchronization, isolation. |
+| [Userspace Architecture](docs/architecture/userspace.md) | Userspace build pipeline, linker scripts, embedded ELF blobs, EL0 isolation, init, shell, and user libraries. |
 | [Memory Architecture](docs/architecture/memory.md) | Virtual Memory, per-process page tables, lazy allocation, demand paging, page fault handling, copy-on-write, malloc |
-| [Device Drivers Architecture](docs/architecture/device-drivers.md) | Add list of stuff here when we do doc |
+| [Device Drivers Architecture](docs/architecture/device-drivers.md) | Block devices, SDHCI, UART, char devices, TTY backends, framebuffer terminal, pipes, fan, and driver init order. |
 | [Syscall API Reference](docs/api-docs/syscall-table.md) | Raw syscall table with SVC numbers and brief syscall notes. |
 | [Userspace API Reference](docs/api-docs/user-api.md) | Userspace library functions, shell helpers, and command mini man pages. |
 | [Signals API Reference](docs/api-docs/signals-api.md) | Signals ids, default dispositions, usage. |
@@ -357,9 +355,15 @@ Every subsystem has a dedicated design document located in `docs/`.
 └── docs
     ├── quickstart.md              -- Build and boot instructions
     ├── demo.md                    -- Demo workflow notes
-    ├── architecture.md            -- High-level architecture overview
     ├── architecture               -- Subsystem architecture documents
+    │   ├── architecture.md        -- Hardware, boot, linker layout, traps, IRQs, timers, and syscalls
+    │   ├── device-drivers.md      -- Block devices, char drivers, UART, TTY, TTYGUI, pipes, and fan
+    │   ├── filesystem.md          -- Inodes, VFS, mkfs, mount, caches, permissions, and dev nodes
+    │   ├── memory.md              -- MMU, page tables, page faults, COW, and allocators
+    │   ├── processes.md           -- Process architecture placeholder
+    │   └── userspace.md           -- Userspace build, linker scripts, ELF embedding, init, shell, and libs
     └── api-docs
+        ├── signals-api.md         -- Signal ids, defaults, masks, sigaction, and signal helpers
         ├── syscall-table.md       -- Raw syscall/SVC reference
         └── user-api.md            -- Userspace library and command reference
 ```

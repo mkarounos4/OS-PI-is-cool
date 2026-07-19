@@ -82,7 +82,7 @@ KAPI Specifications:
 - `k_change_directory(char *f_path)`: Update the current process's `cwd` to the specified path. If no leading `/`, searches for path starting from curr `cwd`.
 - `k_check_if_executable(char *f_name)`: Helper function to check if the file has execution permissions.
 - `k_stat(const char *path, struct fs_stat_st *stat)`: Gets current filesystem stats for `/proc` metadata printing.
-- `k_exec` and `k_exec_process`. As the design of these is primarily process-focused, the explanation is included in [process.md](docs/process.md).
+- `k_exec` and `k_exec_process`. As the design of these is primarily process-focused, the explanation is included in [processes.md](processes.md).
 
 This level also contains the default file operations for files and directories, which are documented in more detail in [Virtual Filesystem](#virtual-filesystem) section.
 
@@ -124,7 +124,7 @@ This is implemented with several helper functions to manage the linked list that
 - `lru_cache_update_data` which writes the data given to the instance in the cache with this block, and adds it to the front of the cache (creating if doesn't exist)
 - `lru_cache_empty` which is called on unmounting or closing the shell, which removes everything from cache to prevent data loss.
 
-Interally, we stores a [MAX_SIZE] which is defined to be 12 arbitrarily. This is how many blocks we can have in the cache at once. If we add more blocks than this, then we will remove the tail (which is our Least Recently Used block in our cache). When removing, we check if it was dirty and write to the disk if so, so we only update disk when we need to.
+Internally, we store a `MAX_SIZE` which is defined to be 12 arbitrarily. This is how many blocks we can have in the cache at once. If we add more blocks than this, then we will remove the tail (which is our Least Recently Used block in our cache). When removing, we check if it was dirty and write to the disk if so, so we only update disk when we need to.
 
 ## Disk
 
@@ -154,10 +154,128 @@ For mounting and unmount, we created a `Superblock` struct which is written into
 - `root_inode_id`: inode number of the root directory. Generally set to `1`.
 
 ### Making new Filesystem (mkfs)
-WIP I'll add this later lol
+
+`mkfs` creates a fresh filesystem in the OS-owned portion of the block device.
+It is called from `kernel_main` when `mount` returns `FS_INVALID`, which means
+there is no valid superblock in the selected filesystem region or the metadata
+failed validation.
+
+The important design point is that `mkfs` does not blindly format block 0 on
+real Raspberry Pi media. An SD card used to boot the board already has firmware
+and boot files at the beginning of the disk. If the kernel wrote its superblock
+there, it would destroy the boot partition and the board would no longer load
+the OS. Instead, the disk layer first chooses a filesystem region and only then
+formats block 0 relative to that region.
+
+The mkfs path starts by validating its requested layout inputs:
+- `inode_table_blocks` must be positive.
+- `block_size_config` must map to one of the supported block sizes: 256, 512,
+  1024, 2048, or 4096 bytes.
+- The selected block size must match the underlying block driver sector size
+  returned by `block_get_size()`.
+- The block device must report a nonzero block count and a block size that fits
+  the temporary mount buffer used while inspecting partition metadata.
+
+After that validation, `mkfs` calls `configure_default_fs_region()`. This
+function decides what part of the device belongs to our filesystem:
+
+```
+QEMU disk image:
+  [ custom filesystem spans the full block device ]
+
+Raspberry Pi SD card:
+  [ firmware / boot partition ][ custom filesystem region ]
+```
+
+On QEMU, there is no Raspberry Pi firmware partition to preserve, so the region
+starts at physical block 0 and spans the whole block device.
+
+On Raspberry Pi hardware, `configure_default_fs_region()` reads physical block
+0 as an MBR and verifies the `0x55AA` boot signature. It then walks the four MBR
+partition entries at byte offset 446. The code treats FAT and EFI-style
+partition types as boot partitions: `0x01`, `0x04`, `0x06`, `0x0B`, `0x0C`,
+`0x0E`, and `0xEF`. When one of these is found, the filesystem base is computed
+as:
+
+```
+fs_base_block = partition_start + partition_block_count
+fs_block_count = device_block_count - fs_base_block
+```
+
+This makes our filesystem start immediately after the original partition that
+the card was already using for boot files. The helper that sets this region
+checks for empty partitions, integer wraparound, empty devices, and bases that
+would land at or beyond the end of the block device. Those checks prevent a bad
+partition table from making the filesystem overlap the boot partition or point
+outside the disk.
+
+If the MBR contains a protective GPT partition (`0xEE`), the disk layer switches
+to GPT parsing. It reads the GPT header from LBA 1, verifies the `EFI PART`
+signature, and uses the header fields for the partition-entry LBA, entry count,
+and entry size. GPT entries are ranked so the region is anchored after the most
+likely original boot/data partition:
+- EFI System Partition GUID is preferred first.
+- Microsoft Basic Data GUID is preferred second.
+- Any other non-empty GPT entry is accepted as a last fallback.
+- Unused entries are ignored.
+
+If multiple entries have the same rank, the earliest one on disk wins. Once the
+best GPT entry is selected, the filesystem starts after that entry's last LBA.
+This mirrors the MBR behavior: the kernel preserves the partition that existed
+before our filesystem and claims the remaining space after it.
+
+If the disk has a valid MBR but no recognized boot partition type, the first
+non-empty MBR partition is used as a fallback anchor. This is less specific than
+the FAT/EFI cases, but it is still safer than formatting from block 0 because it
+keeps the original partition intact.
+
+Once the region is known, all filesystem block numbers become relative to that
+region. The superblock is filesystem block 0, but physically it is written at
+`fs_base_block`. All later block reads and writes go through the disk layer, so
+the offset is applied consistently instead of being reimplemented in each inode
+or directory function.
+
+The on-disk layout inside the selected region is:
+- Superblock at filesystem-relative block 0.
+- Block bitmap starting at block 1.
+- Inode bitmap after the block bitmap.
+- Inode table after the inode bitmap.
+- Data blocks after the inode table.
+
+The bitmap sizes are computed from the chosen region rather than hardcoded. The
+block bitmap is sized from the total filesystem block count and the number of
+bits that fit in one block. The inode bitmap is sized from the number of inodes
+available in the requested inode table. This keeps the same mkfs code usable
+across different disk sizes and block sizes.
+
+`fs_set_layout()` stores the computed layout in the static disk-layer fields.
+Then `mkfs_inode()` writes the superblock, bitmaps, root inode, and root
+directory contents. The root directory is created as inode `ROOT_INO` and
+contains `.` and `..` entries pointing back to itself.
+
+After the core filesystem exists, `seed_user_bins_for_mkfs()` writes the
+embedded userspace binaries into the new filesystem image. Finally,
+`lru_cache_empty()` flushes dirty cached blocks so the just-created filesystem
+is durable before the kernel mounts and uses it.
 
 ### Mounting
-Theres some initial stuff I gotta add here too first lol bc partitions and all
+
+Mounting starts before any filesystem metadata is trusted. The first step is to
+choose the filesystem region on the block device with
+`configure_default_fs_region()`.
+
+The region-selection logic differs by platform:
+- On QEMU, the whole block device is treated as the filesystem.
+- On Raspberry Pi hardware, block 0 is read as an MBR. If it contains a GPT
+  protective partition (`0xEE`), GPT logic chooses the filesystem region. If it
+  contains a boot-style MBR partition, the filesystem region is placed after
+  that partition. If no boot partition is found, the first non-empty partition
+  is used as the fallback anchor.
+
+This design lets the same filesystem code run in two environments: a simple
+QEMU disk image and a real Raspberry Pi SD card with boot firmware files stored
+outside the OS filesystem region.
+For RPI hardware, this also lets us preserve the FAT32 Boot partition containing BCM_2712 firmware, while still treating the rest of the disk as our own custom Filesystem.
 
 After that initial setup, we then read in the `superblock` and validate that it has a proper signature and all other metadata is correct. If it's not, then this returns back to `kernel_main` entrypoint and triggers us to `mkfs` and make a new filesystem. We then read in the superblock itself to load all the metadata into the static fields in `disk.c`.
 
@@ -178,13 +296,13 @@ Since each block can contain `BYTES_PER_BLOCK*8` bits corresponding to individua
 ## Directories
 
 ### Directory Structure and Dirents
-The core of our directory structure is a file type called `Directory` which stores in it's file data in blocks a list of `dirents` which contain the following:
+The core of our directory structure is a file type called `Directory` which stores a list of `dirents` in its file data blocks. These contain the following:
 - `name`: max 32 char file name
 - `ino_id`: inode id of this file
 
-Each of these directory entries references an inode/file, which allows our heirarchical directory structure to store a list of files of any type, including nested subdirectories. All metadata for these dirents are stores in the inode themselves to allow for symlinks to sync up data among themselves.
+Each of these directory entries references an inode/file, which allows our hierarchical directory structure to store a list of files of any type, including nested subdirectories. All metadata for these dirents is stored in the inodes themselves to allow for symlinks to sync up data among themselves.
 
-Our directories also stores, in the inode's `Union` field, an `i_dir` struct pointer to metadata. This metadata contains only an `offset`, which is the index of the next dirent we are reading. This is set to 0 when we `opendir` and cleared when we `closedir`. We can then, each time we `readdir`, read the dirent at `offset` and increment our `offset` to allow for reading directory entries one at a time.
+Our directories also store, in the inode's `Union` field, an `i_dir` struct pointer to metadata. This metadata contains only an `offset`, which is the index of the next dirent we are reading. This is set to 0 when we `opendir` and cleared when we `closedir`. We can then, each time we `readdir`, read the dirent at `offset` and increment our `offset` to allow for reading directory entries one at a time.
 
 ### Dirent fops
 To support our VFS implementation, we have a list of directory file operations stores in each inode's fops with default operations declared for directories. This is documented in more detail in [Virtual Filesystem](#virtual-filesystem).
@@ -227,12 +345,211 @@ They contain the following data:
 - `empty_oft`: clears all `OFT entries` for flushing when unmounting.
 
 ## Virtual Filesystem
-this is a big section, may justify its own doc. Will fill in later.
+
+### Overview
+
+The Virtual Filesystem layer is the routing layer between path-based kernel API
+calls and the concrete object that actually serves the operation. The rest of
+the kernel should be able to open a path, get an `oft_entry`, and call `read`,
+`write`, `lookup`, or `readdir` without caring whether the target is a normal
+disk file, a directory, a character device, a pipe, or a generated virtual file.
+
+The shape of the stack is:
+
+```
+userspace syscall wrapper
+  -> fs/cmds.c process-fd wrapper
+  -> kapi.c kernel filesystem API
+  -> oft.c open-file table
+  -> inode metadata fops
+  -> disk inode, character driver, pipe, or virtual filesystem provider
+```
+
+This design keeps policy at the high level and implementation-specific behavior
+at the inode level. Permission checks, path handling, file descriptor ownership,
+and OFT reference counting stay shared. The operation itself is dispatched
+through the inode's `struct file_operations`.
+
+### File Operation Table
+
+The main VFS abstraction is `struct file_operations`. It contains optional
+handlers for:
+- `open`: prepare a file after it has an OFT entry.
+- `close`: release per-open or per-inode state.
+- `read`: copy data from the file object into the caller's buffer.
+- `write`: copy data from the caller into the file object.
+- `lookup`: resolve a child name inside a directory.
+- `readdir`: return one directory entry at a time.
+- `getattr`: return file metadata when the provider cannot use the normal disk
+  inode metadata directly.
+
+The handlers are intentionally small and UNIX-like. The KAPI layer performs the
+common checks first, then calls the operation stored in the inode. For example,
+`k_read` verifies that the open mode allows reading before calling
+`entry->inode->inode.metadata.fops->read`. `k_write` does the same for write
+permissions. `k_close` calls the file-specific close operation before dropping
+the OFT reference.
+
+### Default File and Directory Operations
+
+The KAPI layer defines two default fops tables for the normal inode filesystem:
+- `default_ops` for regular files.
+- `default_dir_ops` for directories.
+
+Regular files support `open`, `read`, and `write`. The default open handler is
+also where `O_TRUNC` is applied. If a file is opened with truncation, the file's
+existing blocks are released, its size is reset, and the `O_TRUNC` bit is
+cleared from the live open mode so later reads and writes are normal operations.
+
+Directories use a separate fops table because directory behavior is not byte
+stream behavior at the lookup layer. A directory supports:
+- `open`: initialize directory iteration state.
+- `close`: clear directory iteration state.
+- `lookup`: map a child name and expected type to a dirent.
+- `readdir`: return directory entries sequentially.
+
+This is why `get_dirent_by_f_name` can resolve children by calling
+`metadata.fops->lookup` instead of directly scanning disk blocks itself. A
+disk-backed directory and a virtual directory can both present the same lookup
+interface.
+
+### Path Lookup Flow
+
+Path lookup starts in `get_dirent_by_path`. Absolute paths begin at `ROOT_INO`;
+relative paths begin at the current process's `cwd`. The path is split on `/`,
+and each component is resolved by `get_dirent_by_f_name`.
+
+`get_dirent_by_f_name` first obtains metadata for the current directory inode
+through `vfs_get_metadata`. It verifies that the current inode is a directory
+and that the directory has a `lookup` operation. It then calls that lookup
+operation to resolve the next path component.
+
+For normal disk directories, `dir_lookup` scans the directory's on-disk dirent
+array. This keeps normal files and directories persistent. The VFS extension is
+added at the root directory boundary: if lookup in `ROOT_INO` reaches the end of
+the disk directory without finding the requested name, `dir_lookup` calls
+`vfs_lookup_root_mount`. That makes virtual root mounts such as `/proc` visible
+without storing a `/proc` dirent on disk.
+
+Disk root entries take precedence because the virtual lookup only happens after
+the real root directory lookup fails. In practice, virtual filesystem names
+should be reserved names so the disk root and VFS root table do not disagree.
+
+### Root Virtual Mounts
+
+The current VFS supports root-level virtual mounts. This is deliberately smaller
+than a full mount namespace, but it is enough for generated kernel filesystems
+such as `/proc`.
+
+`virtual_fs.c` stores a fixed-size root mount table. Each entry contains:
+- `name`: the root-level path component, such as `proc`.
+- `root_ino`: the synthetic inode number of the virtual filesystem root.
+- `ops`: provider callbacks for that virtual filesystem.
+
+`vfs_register_root_mount(name, root_ino, ops)` validates the name, root inode,
+and operation table. If the name already exists, the existing mount is updated.
+Otherwise, a new slot is allocated from the fixed table. The table currently
+supports up to eight root mounts.
+
+`vfs_lookup_root_mount(name, is_dir_type, dirent)` is called by root directory
+lookup. It only returns virtual mount entries for directory lookups, because a
+root mount behaves like a directory. When a match is found, it fills a normal
+`dirent` with the mount name and synthetic root inode. The caller can then open,
+stat, or continue walking the virtual directory using the same code path as any
+other directory.
+
+`vfs_root_mount_readdir(offset, dirent)` exposes registered virtual mounts while
+listing `/`. This is what lets `ls /` show virtual mount points even though they
+are not backed by persistent dirents.
+
+### Virtual Inode Ownership
+
+Disk inodes live in the inode table and are cached through the inode cache.
+Virtual inodes do not have records on disk, so the VFS needs a second dispatch
+point after path lookup: inode ownership.
+
+Each virtual filesystem provides `struct virtual_fs_ops`:
+- `is_inode(ino)`: returns whether this provider owns a synthetic inode number.
+- `get_metadata(ino, metadata)`: fills an `attributes_t` for a virtual inode.
+- `alloc_cached_inode(ino, node)`: creates a `cached_inode_st` shaped object for
+  the OFT and KAPI layers to hold.
+- `free_cached_inode(node)`: releases the virtual cached inode.
+- `format_path(ino, path, size)`: formats a path for a synthetic inode.
+
+The dispatch helpers are:
+- `vfs_get_inode(ino, node)`: routes to a virtual provider if `is_inode`
+  matches, otherwise falls back to `get_inode_from_cache`.
+- `vfs_put_inode(node)`: routes virtual nodes to `free_cached_inode`, otherwise
+  removes a reference from the disk inode cache.
+- `vfs_get_metadata(ino, metadata)`: asks the virtual provider for generated
+  metadata, otherwise reads disk inode metadata.
+- `vfs_format_path(ino, path, size)`: lets a virtual filesystem render paths
+  that do not exist as disk dirents.
+
+The common carrier is still `struct cached_inode_st`. Virtual providers allocate
+objects with the same outer shape so the OFT layer does not need separate code
+for disk and virtual files. The provider is responsible for making the embedded
+metadata accurate, including file type, permissions, size, and fops.
+
+### Procfs Example
+
+`procfs` is the main virtual filesystem using this layer. During mount,
+`procfs_init()` resets its internal node tables, prepares the proc root node,
+and registers the root mount named `proc`.
+
+After registration, `/proc` is resolved like this:
+- Lookup starts at the disk root inode.
+- Normal root dirents are scanned first.
+- If no disk dirent named `proc` exists, root lookup asks the VFS root mount
+  table.
+- The VFS returns a dirent named `proc` with procfs's synthetic root inode.
+- Later inode operations are routed back to procfs because its `is_inode`
+  callback owns that inode range.
+
+Procfs then generates directory and file contents from kernel state. Its root
+directory can expose static files and live process directories. PID directories
+are generated from the process table rather than stored on disk. Per-process
+files are represented by synthetic inodes whose read fops format current
+process metadata into a buffer.
+
+This is the main reason VFS routing exists in the filesystem: tools such as
+`ls`, `cat`, `stat`, and future shell code can use the same userspace API for
+real files and kernel-generated information.
+
+### Interaction with Character Devices
+
+Character devices also use inode fops, but they are not root virtual
+filesystems. They are disk-visible `/dev` inodes with `CHAR_DRIVER_TYPE` and an
+`i_rdev` major/minor number. Opening `/dev/tty0`, `/dev/uart0`, or
+`/dev/ttygui0` still goes through path lookup, KAPI, and the OFT. Once the inode
+is open, its fops dispatch to the registered character driver instead of normal
+file block I/O.
+
+This reuse is intentional. The VFS layer is both the mechanism for generated
+filesystems like `/proc` and the mechanism for special inode types that need to
+override ordinary file behavior while preserving one user-facing file
+descriptor API.
+
+### VFS Invariants and Limits
+
+The VFS is intentionally simple:
+- Virtual mounts currently exist only at the filesystem root.
+- The root mount table is fixed-size rather than dynamically allocated.
+- Virtual providers must use stable synthetic inode ranges and implement
+  `is_inode` correctly so inode ownership is unambiguous.
+- Virtual inode metadata must provide the correct file type and fops table.
+- Disk-backed files remain the default path; VFS dispatch only takes over when
+  a provider explicitly owns an inode.
+
+These limits keep the implementation small while still creating the important
+abstraction boundary. The kernel gets a single file descriptor and path API, but
+new file-like systems can be added without rewriting `open`, `read`, `write`,
+`stat`, `ls`, or the open-file table.
 
 ## Character Devices
 
 ### Overview
-`Character devices` correpspond to a special file type `CHAR_DRIVER_TYPE`. This type defines special `fops` file operations at the VFS level to give special behavior for reading and writing to files.
+`Character devices` correspond to a special file type `CHAR_DRIVER_TYPE`. This type defines special `fops` file operations at the VFS level to give special behavior for reading and writing to files.
 
 When using a `CHAR_DRIVER_TYPE`, we also use the `i_dev` field in `inode metadata` which stores the char device `major` and `minor` number.
 The `major` number here is an identifier corresponding to the specific type of `char driver` (ex. a `tty` driver), and the `minor` number corresponds to the instance of that driver this inode is associated with (ex. 0 for `tty0`).
@@ -255,7 +572,7 @@ This then creates a new inode for this char driver, setting the `major` and `min
 For any `char device` instance specific metadata, this can be stored in the `char_device_registry`'s `data` field, with it using a struct containing an array of per-instance data.
 
 ### More Info
-You can find more details about specific device implementations, like `pipes` and `ttys` in [devices.md](devices.md).
+You can find more details about specific device implementations, like `pipes` and `ttys` in [device-drivers.md](device-drivers.md).
 
 ## Permission Handling
 For permission handling, each inode has a `permissions` metadata field which stores bitwise indicators for `read`, `write`, and `exec`. When opening a file with a specified mode, we check that the inode has the specified permissions enabled, or else the call fails.

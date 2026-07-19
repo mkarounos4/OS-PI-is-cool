@@ -73,14 +73,14 @@ Key configuration:
 - **Heap**: 0xffff800000000000 (with 1MB limit)
 - **Stack**: 0x900000 (per-process kernel stack of 8KB)
 - Features: Direct mapping of physical RAM, device memory, and kernel data structures
-- Accessed only when CPU is in EL1 (kernel mode)
+- Accessed when the Virtual Address has the prefix 0xffff. Throws permission error if CPU is in EL0 (user mode).
 
 #### User Address Space (TTBR0_EL1)
 - **Base**: 0x10000
 - **Heap**: 0x400000 (16KB limit)
 - **Stack**: 0x800000 - 0x1000 (8KB, grows downward)
 - Features: Contains process code, data, heap, and stack
-- Accessed only when CPU is in EL0 (user mode)
+- Accessed when Virtual Address has the prefix 0x0000.
 
 ### Page Table Structure
 
