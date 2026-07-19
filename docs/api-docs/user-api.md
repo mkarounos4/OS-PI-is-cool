@@ -135,6 +135,9 @@ file-descriptor API. `touch`, `mv`, `rm`, `cat`, `cp`, `fs_chmod`, `ls`,
 
 Open flags are `O_RDONLY`, `O_WRONLY`, `O_RDWR`, `O_TRUNC`, `O_CREAT`, and
 `O_APPEND`. Seek modes are `F_SEEK_SET`, `F_SEEK_CUR`, and `F_SEEK_END`.
+TTY devices are exposed as `/dev/ttyN`; backend devices are exposed as
+`/dev/uart0` and `/dev/ttyguiN` for direct testing. Normal programs should use
+`/dev/ttyN` unless they intentionally want backend-level I/O.
 
 ### TTY helpers
 

@@ -10,6 +10,8 @@
 
 #define MAX_TTY_DEVICES 8
 #define TTY_INPUT_BUFFER_SIZE 4096
+#define TTY_COMMAND_HISTORY_DEPTH 16
+#define TTY_COMMAND_HISTORY_LINE_SIZE 256
 
 #define TTY_MODE_CANONICAL 0
 #define TTY_MODE_RAW       1
@@ -18,6 +20,8 @@ struct tty_device {
     uint32_t minor;
     char name[32];
     struct dev_st device_number;
+    struct dev_st input_backend;
+    struct dev_st output_backend;
 
     struct RingBuffer rx;
     struct RingBuffer tx;
@@ -50,6 +54,12 @@ struct tty_device {
     size_t input_len;
     size_t input_cursor;
     uint8_t escape_state;
+    char command_history[TTY_COMMAND_HISTORY_DEPTH][TTY_COMMAND_HISTORY_LINE_SIZE];
+    size_t command_history_len[TTY_COMMAND_HISTORY_DEPTH];
+    int command_history_count;
+    int command_history_cursor;
+    char command_history_scratch[TTY_INPUT_BUFFER_SIZE];
+    size_t command_history_scratch_len;
 };
 
 struct tty_driver_state {
@@ -59,6 +69,7 @@ struct tty_driver_state {
 };
 
 void tty_send_input(int minor, const char *buffer, size_t count);
+void tty_receive_input_from_device(struct dev_st input_backend, size_t count);
 int tty_drivers_init(void);
 int tty_create_device_nodes(void);
 int tty_create();

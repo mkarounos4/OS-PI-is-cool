@@ -3,6 +3,8 @@
 #include <stddef.h>
 
 void init_tty_gui(void);
+int tty_gui_create_terminal(int terminal);
+void tty_gui_destroy_terminal(int terminal);
 void tty_gui_write_char(const char c);
 void tty_gui_write_char_for_tty(int terminal, const char c);
 void tty_gui_activate_terminal(int terminal);

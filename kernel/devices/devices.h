@@ -8,6 +8,10 @@
 typedef __SIZE_TYPE__ size_t;
 typedef __SIZE_TYPE__ ssize_t;
 
+#define TTY_MAJOR 0
+#define UART_MAJOR 1
+#define TTY_GUI_MAJOR 2
+
 struct file_operations {
     int (*open)(struct oft_entry *entry);
     int (*close)(struct oft_entry *entry);
@@ -38,3 +42,5 @@ void destroy_char_device_registry();
 int register_char_driver(struct char_driver *driver);
 int devfs_create_char_device(struct dev_st rdev);
 struct char_driver *get_char_device(uint16_t major);
+int char_device_read(struct dev_st rdev, char *buffer, size_t count);
+int char_device_write(struct dev_st rdev, const char *buffer, size_t count);

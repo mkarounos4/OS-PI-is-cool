@@ -21,6 +21,8 @@
 #include "fs/kapi.h"
 #include "fan/fan.h"
 #include "gui/gui.h"
+#include "gui/tty_gui_device.h"
+#include "uart/uart_device.h"
 
 #define FS_DEFAULT_INODE_TABLE_BLOCKS 64
 #define FS_DEFAULT_BLOCK_SIZE_CONFIG 1
@@ -95,11 +97,27 @@ void kernel_main(void) {
 
     initialize_char_device_registry();
     printf("[tty] Intialized char device registry.");
+    err = uart_char_driver_init();
+    if (err) {
+        printf("[tty] ERROR: failed to init uart char driver\n");
+    }
+    err = tty_gui_char_driver_init();
+    if (err) {
+        printf("[tty] ERROR: failed to init tty gui char driver\n");
+    }
     err = tty_drivers_init();
     if (err) {
         printf("[tty] ERROR: failed to init tty driver\n");
     } else {
         printf("[tty] Initialized tty driver.");
+    }
+    err = uart_create_device_nodes();
+    if (err) {
+        printf("[tty] ERROR: failed to create uart device node\n");
+    }
+    err = tty_gui_create_device_nodes();
+    if (err) {
+        printf("[tty] ERROR: failed to create tty gui device nodes\n");
     }
     err = tty_create_device_nodes();
     if (err) {

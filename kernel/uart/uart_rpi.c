@@ -1,6 +1,6 @@
 #include "rpi5_addresses.h"
 #include "uart.h"
-#include "devices/tty.h"
+#include "uart_device.h"
 
 #include <stddef.h>
 
@@ -543,7 +543,7 @@ void uart_rx_interrupt_hook(void) {
     }
 
     if (size > 0) {
-        tty_send_input(0, (const char *)uart_rx_buffer, size);
+        uart_char_device_receive((const char *)uart_rx_buffer, size);
     }
 
     uart_rx_buffer_clear();

@@ -34,7 +34,9 @@ typedef struct tty_gui_terminal_st {
 } tty_gui_terminal_t;
 
 static tty_gui_terminal_t terminals[TTY_GUI_TERMINALS];
-static int active_terminal;
+static int active_terminal = -1;
+
+void toggle_cursor(void);
 
 static uint32_t row_to_px(int row) {
     return TAB_BAR_HEIGHT + HEIGHT_BUFFER + row * (CHAR_HEIGHT + HEIGHT_BUFFER);
@@ -53,6 +55,10 @@ static tty_gui_terminal_t *terminal_for_index(int terminal) {
 }
 
 static tty_gui_terminal_t *active_state(void) {
+    if (active_terminal < 0 || active_terminal >= TTY_GUI_TERMINALS ||
+        !terminals[active_terminal].visible) {
+        return NULL;
+    }
     return &terminals[active_terminal];
 }
 
@@ -215,21 +221,56 @@ void init_tty_gui(void) {
         MAX_ROWS = TTY_GUI_MAX_ROWS;
     }
 
-    active_terminal = 0;
+    active_terminal = -1;
     for (int i = 0; i < TTY_GUI_TERMINALS; i++) {
         terminals[i].cursor_row = 0;
         terminals[i].cursor_col = 0;
         terminals[i].visible = 0;
-        if (terminals[i].cells == NULL) {
-            terminals[i].cells = kmalloc(TTY_GUI_MAX_ROWS * TTY_GUI_MAX_COLS);
-        }
-        if (terminals[i].cells != NULL) {
-            memset(terminals[i].cells, ' ', TTY_GUI_MAX_ROWS * TTY_GUI_MAX_COLS);
-        }
+        terminals[i].cells = NULL;
     }
 
     gui_framebuffer_clear(0x18, 0, 0x32);
     draw_tab_bar();
+}
+
+int tty_gui_create_terminal(int terminal) {
+    if (terminal < 0 || terminal >= TTY_GUI_TERMINALS) {
+        return -1;
+    }
+
+    if (terminals[terminal].cells == NULL) {
+        terminals[terminal].cells = kmalloc(TTY_GUI_MAX_ROWS * TTY_GUI_MAX_COLS);
+        if (terminals[terminal].cells == NULL) {
+            return -1;
+        }
+    }
+
+    terminals[terminal].cursor_row = 0;
+    terminals[terminal].cursor_col = 0;
+    terminals[terminal].visible = 1;
+    memset(terminals[terminal].cells, ' ', TTY_GUI_MAX_ROWS * TTY_GUI_MAX_COLS);
+    if (!active_terminal_is_valid()) {
+        active_terminal = terminal;
+    }
+    redraw_active_terminal();
+    toggle_cursor();
+    return 0;
+}
+
+void tty_gui_destroy_terminal(int terminal) {
+    if (terminal < 0 || terminal >= TTY_GUI_TERMINALS) {
+        return;
+    }
+
+    if (terminals[terminal].visible) {
+        tty_gui_set_terminal_visible(terminal, 0);
+    }
+    if (terminals[terminal].cells != NULL) {
+        kfree(terminals[terminal].cells);
+        terminals[terminal].cells = NULL;
+    }
+    terminals[terminal].cursor_row = 0;
+    terminals[terminal].cursor_col = 0;
 }
 
 void toggle_cursor(void) {
@@ -342,6 +383,9 @@ void backtrack_cursor(void) {
 
 static void clear_screen(void) {
     tty_gui_terminal_t *tty = active_state();
+    if (tty == NULL) {
+        return;
+    }
 
     tty->cursor_row = 0;
     tty->cursor_col = 0;
@@ -354,6 +398,9 @@ static void clear_screen(void) {
 
 static void write_tab(void) {
     tty_gui_terminal_t *tty = active_state();
+    if (tty == NULL) {
+        return;
+    }
     int target_col = ((tty->cursor_col / 8) + 1) * 8;
     do {
         tty_gui_write_char(' ');
@@ -442,6 +489,11 @@ void tty_gui_set_terminal_visible(int terminal, int visible) {
         return;
     }
 
+    if (visible && terminals[terminal].cells == NULL) {
+        tty_gui_create_terminal(terminal);
+        return;
+    }
+
     terminals[terminal].visible = visible ? 1 : 0;
     if (visible) {
         if (!active_terminal_is_valid()) {
@@ -497,11 +549,13 @@ int tty_gui_get_cols(void) {
 }
 
 int tty_gui_get_cursor_row(void) {
-    return active_state()->cursor_row;
+    tty_gui_terminal_t *tty = active_state();
+    return tty == NULL ? 0 : tty->cursor_row;
 }
 
 int tty_gui_get_cursor_col(void) {
-    return active_state()->cursor_col;
+    tty_gui_terminal_t *tty = active_state();
+    return tty == NULL ? 0 : tty->cursor_col;
 }
 
 size_t tty_gui_screen_size(void) {

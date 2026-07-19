@@ -357,6 +357,7 @@ For implementation details, see the individual design documents in `docs/`, incl
 │   │   ├── types.h                -- Filesystem types
 │   │   └── virtual_fs.c/h         -- Virtual filesystem routing
 │   ├── gui                        -- Framebuffer GUI and terminal rendering
+│   │   └── tty_gui_device.c/h     -- Registered framebuffer TTY backend char driver
 │   ├── irq                        -- Interrupt controller logic
 │   ├── memory                     -- MMU, kmalloc, user allocator, and page tables
 │   │   └── page_table             -- Page-table construction and lookup helpers
@@ -368,6 +369,7 @@ For implementation details, see the individual design documents in `docs/`, incl
 │   ├── timer                      -- Timer ticks, sleeps, and delays
 │   ├── traps                      -- Exception vectors and trap handling
 │   └── uart                       -- UART drivers and kernel printf
+│       └── uart_device.c/h        -- Registered UART backend char driver
 └── docs
     ├── quickstart.md              -- Build and boot instructions
     ├── demo.md                    -- Demo workflow notes
