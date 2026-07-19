@@ -1,3 +1,32 @@
+# Table of Contents
+
+- [Overview](#overview)
+- [Project Goals](#project-goals)
+- [Design Philosophy](#design-philosophy)
+- [What Makes It Unix-like](#what-makes-it-unix-like)
+- [What Is Intentionally Simplified](#what-is-intentionally-simplified)
+- [Kernel Space vs User Space](#kernel-space-vs-user-space)
+- [Why Raspberry Pi 5 + QEMU Pi 3B](#why-raspberry-pi-5--qemu-pi-3b)
+- [Major Accomplishments](#major-accomplishments)
+- [Current Feature Status](#current-feature-status)
+- [Future Enhancements](#future-enhancements)
+- [Major Features](#major-features)
+- [Learn More](#learn-more)
+- [Project tree](#project-tree)
+
+## Other Documentation Files
+
+| Document | Scope |
+|---|---|
+| [Quickstart Guide](docs/quickstart.md) | Build, rebuild, Raspberry Pi 5 boot, and QEMU boot instructions. |
+| [Demo Guide](docs/demo.md) | Demo workflow and commands to show the OS running. |
+| [Architecture Overview](docs/architecture.md) | High-level system architecture. |
+| [Filesystem Architecture](docs/architecture/filesystem.md) | Inode filesystem, VFS, open-file table, caches, permissions, and disk layout. |
+| [System Calls Architecture](docs/architecture/system-calls.md) | Syscall ABI, dispatcher structure, and kernel/userspace boundary. |
+| [Userspace Architecture](docs/architecture/userspace.md) | Userspace binaries, shell, command loading, and user library structure. |
+| [Syscall API Reference](docs/api-docs/syscall-table.md) | Raw syscall table with SVC numbers and brief syscall notes. |
+| [Userspace API Reference](docs/api-docs/user-api.md) | Userspace library functions, shell helpers, and command mini man pages. |
+
 # Overview
 
 This project is a Unix-inspired operating system written from scratch for **AArch64**. It runs both on **Raspberry Pi 5 hardware** and under **QEMU's Raspberry Pi 3B emulator**, providing a complete educational operating system with virtual memory, multitasking, a persistent filesystem, and a userspace environment.
@@ -342,6 +371,8 @@ For implementation details, see the individual design documents in `docs/`, incl
 └── docs
     ├── quickstart.md              -- Build and boot instructions
     ├── demo.md                    -- Demo workflow notes
+    ├── architecture.md            -- High-level architecture overview
+    ├── architecture               -- Subsystem architecture documents
     └── api-docs
         ├── syscall-table.md       -- Raw syscall/SVC reference
         └── user-api.md            -- Userspace library and command reference

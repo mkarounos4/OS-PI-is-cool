@@ -10,7 +10,7 @@
 - [Virtual filesystem layer, with `procfs` to demo](#virtual-filesystem)
 - [Character devices](#character-devices)
 - [Permission handling with chmod](#permission-handling)
-- ELF-loading userspace binaries into `bin` (This section is documented in [processes.md](docs/procoesses.md))
+- ELF-loading userspace binaries into `bin` (This section is documented in [processes.md](processes.md))
 - [LRU Block cache and Inode cache](#inode-data-cache)
 - [Kernel API layer](#kernel-api-layer)
 
@@ -63,7 +63,7 @@ This is the PIO drivers that expose `read_block` and `write_block` to `SD` card 
 ## Kernel API Layer
 
 This is the layer that hold the main high-level kernel logic all other kernel operations will call. This is what delegates work to `dirent`, `oft`, and `disk` layers.
-All functions here return an int type which corresponds to an error code from [errors.h](kernel/fs/errors.h), which is converted into a standard UNIX-style error code in a helper in [errors.c](kernel/fs/errors.c).
+All functions here return an int type which corresponds to an error code from [errors.h](../../kernel/fs/errors.h), which is converted into a standard UNIX-style error code in a helper in [errors.c](../../kernel/fs/errors.c).
 
 KAPI Specifications:
 - `k_open(const char*fname, int mode)`: Opens a file given a path, and creates a new `OFT entry` for it, returning it's kernel fd. Takes in flags `O_TRUNC`, `O_CREAT`, `O_APPEND`, `O_RDONLY`, `O_WRONLY`, and `O_RDWR`, following UNIX conventions for each. If file already exists, verifies the permissions match the opening flag permissions, or else it throws `INVALID PERMISSIONS` error. Also verifies there are no invalid characters in the file name. After opening, calls the VFS level `fops->open` if exists.
@@ -131,11 +131,13 @@ Interally, we stores a [MAX_SIZE] which is defined to be 12 arbitrarily. This is
 ### Disk Block Diagram
 Here is an overview of how we formatted our metadata blocks in our disk. Each section here corresponds to multiple blocks, except for the super block.
 
+```
 |*************************************************************************************************************|
 |            |                     |                     |                |                     |             |
 | Superblock | Block Bitmap Blocks | Inode Bitmap Blocks | Root Dir Inode | Inode Table Blocks  | Data Blocks |
 |            |                     |                     |                |                     |             |
 |*************************************************************************************************************|
+```
 
 ### Superblock
 For mounting and unmount, we created a `Superblock` struct which is written into block 0. This is written when `mkfs`, and read in when we `mount` to allow disk-level metadata to persist. Our superblock contains the following:
@@ -194,7 +196,7 @@ Here is a brief list of what we support:
 - `closedir` (set to `fops->close`)
 
 ### Directory API Functions
-All functions here return `err_t`, which is an int type corresponding to error codes from [errors.h](kernel/fs/errors.h).
+All functions here return `err_t`, which is an int type corresponding to error codes from [errors.h](../../kernel/fs/errors.h).
 - `add_dirent`: Creates a new directory entry with the given name in directory `curr_dir`, with the given `ino_id` inode. This iterates through the directory until it reaches the last dirent, adds this file as a new one, and then adds a null terminating dirent at the end.
 - `get_dirent_by_f_name`: Wrapper around the `fops->lookup` VFS file operation.
 - `get_dirent_by_path`: Splits the path by `/` and uses `get_dirent_by_f_name` for each token in the path, and then returns the direct of the final portion.
@@ -235,7 +237,7 @@ this is a big section, may justify its own doc. Will fill in later.
 When using a `CHAR_DRIVER_TYPE`, we also use the `i_dev` field in `inode metadata` which stores the char device `major` and `minor` number.
 The `major` number here is an identifier corresponding to the specific type of `char driver` (ex. a `tty` driver), and the `minor` number corresponds to the instance of that driver this inode is associated with (ex. 0 for `tty0`).
 
-Inside our [devices.c](kernel/devices/devices.c) file, we store an array `char_device_registry` which stores a list of `char_driver` structs. These each store:
+Inside our [devices.c](../../kernel/devices/devices.c) file, we store an array `char_device_registry` which stores a list of `char_driver` structs. These each store:
 - `name`: character driver name
 - `major`: The char driver major number
 - `fops`: The special fops for this file.
@@ -253,7 +255,7 @@ This then creates a new inode for this char driver, setting the `major` and `min
 For any `char device` instance specific metadata, this can be stored in the `char_device_registry`'s `data` field, with it using a struct containing an array of per-instance data.
 
 ### More Info
-You can find more details about specific device implementations, like `pipes` and `ttys` in [devices.md](docs/devices.md).
+You can find more details about specific device implementations, like `pipes` and `ttys` in [devices.md](devices.md).
 
 ## Permission Handling
 For permission handling, each inode has a `permissions` metadata field which stores bitwise indicators for `read`, `write`, and `exec`. When opening a file with a specified mode, we check that the inode has the specified permissions enabled, or else the call fails.
