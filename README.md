@@ -20,12 +20,17 @@
 |---|---|
 | [Quickstart Guide](docs/quickstart.md) | Build, rebuild, Raspberry Pi 5 boot, and QEMU boot instructions. |
 | [Demo Guide](docs/demo.md) | Demo workflow and commands to show the OS running. |
-| [Architecture Overview](docs/architecture.md) | High-level system architecture. |
+| [Architecture](docs/architecture/architecture.md) | Hardware and System architecture, IRQ, Timers, and Traps. |
 | [Filesystem Architecture](docs/architecture/filesystem.md) | Inode filesystem, VFS, open-file table, caches, permissions, and disk layout. |
-| [System Calls Architecture](docs/architecture/system-calls.md) | Syscall ABI, dispatcher structure, and kernel/userspace boundary. |
+| [Processes Architecture](docs/architecture/processes.md) | Scheduler, fork, exec, progress groups, zombies/orphans, waitpid, multithreading, synchronization, isolation. |
+| [Signals Architecture](docs/architecture/signals.md) | add stuff when do this doc. |
+| [System Calls Architecture](docs/architecture/system-calls.md) | Syscall API, dispatcher structure, and kernel/userspace boundary. |
 | [Userspace Architecture](docs/architecture/userspace.md) | Userspace binaries, shell, command loading, and user library structure. |
+| [Memory Architecture](docs/architecture/memory.md) | Virtual Memory, per-process page tables, lazy allocation, demand paging, page fault handling, copy-on-write, malloc |
+| [Device Drivers Architecture](docs/architecture/device-drivers.md) | Add list of stuff here when we do doc |
 | [Syscall API Reference](docs/api-docs/syscall-table.md) | Raw syscall table with SVC numbers and brief syscall notes. |
 | [Userspace API Reference](docs/api-docs/user-api.md) | Userspace library functions, shell helpers, and command mini man pages. |
+| [Signals API Reference](docs/api-docs/signals-api.md) | Signals ids, default dispositions, usage. |
 
 # Overview
 
@@ -210,7 +215,7 @@ The following is a list of Future Enhancements we are in progress of making.
 
 Every subsystem has a dedicated design document located in `docs/`.
 
-## Architecture & Hardware
+## [Architecture & Hardware](docs/architecture/architecture.md)
 
 - Bare-metal AArch64 kernel
 - Raspberry Pi 5 support
@@ -222,7 +227,7 @@ Every subsystem has a dedicated design document located in `docs/`.
 - UART console
 - SD card persistence
 
-## Process Management
+## [Process Management](docs/architecture/processes.md)
 
 - Multi-priority round-robin scheduler
 - `fork()` with Copy-on-Write
@@ -233,7 +238,7 @@ Every subsystem has a dedicated design document located in `docs/`.
 - `waitpid()`
 - Multithreading and Synchronization
 
-## Memory Management
+## [Memory Management](docs/architecture/memory.md)
 
 - Virtual memory
 - Page tables
@@ -246,7 +251,7 @@ Every subsystem has a dedicated design document located in `docs/`.
 - Kernel memory allocator
 - `mmap()`
 
-## [Filesystem](docs/filesystem.md)
+## [Filesystem](docs/architecture/filesystem.md)
 
 - ext2-inspired inode filesystem
 - Directories
@@ -258,7 +263,7 @@ Every subsystem has a dedicated design document located in `docs/`.
 - Inode cache
 - Permissions
 
-## Devices
+## [Devices](docs/architecture/device-drivers.md)
 
 - UART driver
 - Interrupt-driven input
@@ -267,7 +272,7 @@ Every subsystem has a dedicated design document located in `docs/`.
 - Pipes
 - Framebuffer graphical terminal
 
-## Userspace
+## [Userspace](docs/architecture/userspace.md)
 
 - Interactive shell
 - Job control
@@ -282,27 +287,6 @@ Every subsystem has a dedicated design document located in `docs/`.
   - `vim` style text editor
   - `pong`
   - and many others
-
----
-
-# Learn More
-
-For implementation details, see the individual design documents in `docs/`, including:
-
-- API Reference
-- Architecture
-- Scheduler
-- Virtual Memory
-- Filesystem
-- Signals
-- Pipes
-- Terminal
-- ELF Loader
-- Userspace
-- Shell
-- System Calls
-- Device Drivers
-- Future Enhancements
 
 ---
 
