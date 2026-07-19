@@ -39,21 +39,21 @@ Most of these functions are wrappers for the KAPI level, and they take in per-pr
 Example functions here include `open`, `close`, `read`, `write`, etc.
 
 ### Kernel API Layer
-This is the main high kernel FS logic. These take in file paths or OFT entries, and handle the actual core logic for the functions.
+This layer contains the main high-level filesystem logic. These take in file paths or OFT entries, and handle the actual core logic for the functions.
 As this is still at a high level, most of these functions delegate work down to the `OFT` layer, `dirent` layer, and occasional `disk` layer depending on the desired functionality.
 Example functions include `k_open`, `k_close`, `k_read`, `k_write`, etc.
 
 ### OFT Layer
-This is the Kernel level Open File Table, which contains a list of OFT entries, which contain a cached `inode` and open file metadata such as cursor position and permissions. This is our internal implementation to mimic `FILE` structs in `Unix`.
+This is the Kernel level Open File Table, which contains a list of OFT entries, which each contain a cached `inode` and open-file metadata such as cursor position and permissions. This is our internal implementation to mimic `FILE` structs in `Unix`.
 
 ### Dirent Layer
 These are the directory entries stored directly on the SD disk inside of directories. These contain just file name and inode number, as most of the metadata is handled at the inode level. 
 
 ### Disk Layer
-This primarily consists of wrappers for the `Inode` layer to allow for easy access to the raw inode disk operations without needing to worry about the specific inode implementation. This consists of all disk operations such as `mount`, `unmount`, `get_ith_block_of_file`, etc.
+This primarily consists of wrappers for the `Inode` layer to allow for easy access to the raw inode disk operations without needing to worry about the specific inode implementation. This layer provides all disk operations such as `mount`, `unmount`, `get_ith_block_of_file`, etc.
 
 ### Inode Layer
-This is our real `Inode` structure mimicing the linux `ext2` filesystem. This stores block pointers with singly, doubly, and triply indirect block pointers. This is where all the real file logic happens, and directly calls the hardware for writing and reading blocks to SD hardware for persistence.
+This is our real `Inode` structure mimicking the linux `ext2` filesystem. This stores block pointers with singly, doubly, and triply indirect block pointers. This is where all the real file logic happens, and directly calls the hardware for writing and reading blocks to SD hardware for persistence.
 
 ### Hardware Drivers
 This is the PIO drivers that expose `read_block` and `write_block` to `SD` card disk, which the `Inode` layer uses to write/read data to disk, allowing for data persistence across restarts.
@@ -62,7 +62,7 @@ This is the PIO drivers that expose `read_block` and `write_block` to `SD` card 
 
 ## Kernel API Layer
 
-This is the layer that hold the main high-level kernel logic all other kernel operations will call. This is what delegates work to `dirent`, `oft`, and `disk` layers.
+This layer contains the main high-level kernel logic that all other kernel operations will call. This is what delegates work to `dirent`, `oft`, and `disk` layers.
 All functions here return an int type which corresponds to an error code from [errors.h](../../kernel/fs/errors.h), which is converted into a standard UNIX-style error code in a helper in [errors.c](../../kernel/fs/errors.c).
 
 KAPI Specifications:
@@ -88,7 +88,7 @@ This level also contains the default file operations for files and directories, 
 
 ## Inodes
 
-Our filesystem uses an Inode structure mimicing Linux's `ext2` filesystem. These inodes use a struct containing the following metadata:\\
+Our filesystem uses an Inode structure mimicking Linux's `ext2` filesystem. These inodes use a struct containing the following metadata
 - `i_links_count`: refcount
 - `type`: int representing file type, such as `file`, `directory`, `pipe`, etc.
 - `perm`: int for permissions, with bit flag for `read`, `write`, and `execute`.
@@ -109,7 +109,7 @@ By having these indirect block pointers, we are able to store significantly more
 To prevent reading inode data constantly, but still having it be synced between different OFT_entries opening the same file, we created a cache for inodes in `inode_cache.h` and `inode_cache.c`. This is stored with a linked list and has all internals managed with static fields. We have 2 structs made here, one for the linked list nodes themselves, and one for the actual cached_inode data, so we can store its id and if its dirty together with the actual inode. 
 Each cached_inode also stores a `dirty` field so, when clearing inode from the cache, we know if we have to spend time writing back to disk or can discard it.
 
-The main exposed functions are 3:
+The 3 main exposed functions are:
  - `get_inode_from_cache` which finds the inode in our cache if it exists and returns it, or it reads it in from disk and stores it here, before returning. If already exists, it increases the number of references to this cache node by 1.
  - `remove_ref_from_cache` is called everytime we are done using this inode's data. It finds the inode with the given id, decreases num_refs by 1, and if it is 0 removes it from cache. If it is dirty, also writes inode to disk.
  - `empty_inode_cache` which is called during unmounting to flux all dirty inodes to disk to prevent data loss.
