@@ -59,7 +59,7 @@ ifeq ($(PLATFORM),rpi)
     UART_SRC = kernel/uart/uart_rpi.c
     GUI_SRC = kernel/gui/gui_rpi.c
     LINKER = linker.ld
-    TARGET = kernel8.img
+    TARGET = kernel_2712.img
 else ifeq ($(PLATFORM),qemu)
     CFLAGS += -DPLATFORM_QEMU -mcpu=cortex-a53
     UART_SRC = kernel/uart/uart_qemu.c

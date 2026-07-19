@@ -1,112 +1,348 @@
-# OS-PI-is-cool
+# Overview
 
-## Project summary
+This project is a Unix-inspired operating system written from scratch for **AArch64**. It runs both on **Raspberry Pi 5 hardware** and under **QEMU's Raspberry Pi 3B emulator**, providing a complete educational operating system with virtual memory, multitasking, a persistent filesystem, and a userspace environment.
 
-## Feature Overview
-Below is a list of features. Note that each one links to an individual design doc with more information about said feature. You can find all of these in docs/.
+Rather than reproducing every feature of a modern Unix kernel, the project focuses on implementing the core concepts that make Unix systems elegant and understandable, with each subsystem documented in detail throughout `docs/`.
 
-Architecture/Hardware:
-- Bare-metal AArch64 for Raspberry Pi 5 and QEMU emulator Raspberry Pi 3B
-- EL1 kernel / EL0 userspace
-- Hardware level interrupt and exception handling, system calls, timer preemption
-- UART input/output
-- PIO SD Card writing for proper FS persistsence
+---
 
-Processes:
-- Multi-priority Round Robin preemptive scheduler
-- fork() with Copy-On-Write
-- exec() with ELF loading
-- Process groups
-- Signal handling with POSIX-style signal API
-- Orphan and zombie handling
-- Waitpid
+# Project Goals
 
-Memory:
-- Virtual memory
-- Lazy stack and heap page allocation
-- Demand paging for lazy allocationo of instruction memory
-- Mmap
-- Page-fault handling
-- User/kernel and per-process isolation
-- Copy-on-write fork
-- Memory Allocation
+The primary goals of this operating system are:
 
-Filesystem:
-- ext2-style Inode based filesystem
-- Directories/subdirectories
-- Symlinks
-- Open-file table
-- Virtual Filesystem
-- Character device drivers
-- Least Recently Used Block Cache and Inode Cache
-- Permission handling
+- Build a complete Unix-inspired operating system from scratch
+- Develop every major kernel subsystem without relying on an existing OS
+- Emphasize clean architecture and readable code
+- Demonstrate modern operating-system concepts through practical implementation
+- Provide comprehensive documentation for every major subsystem
 
-Devices:
-- UART input (w/ interrupts) and output
-- TTY Terminal
+The result is an educational operating system that implements many of the mechanisms found in traditional Unix kernels while remaining approachable enough to understand as a complete codebase.
+
+---
+
+# Design Philosophy
+
+Several principles guide the design of the project.
+
+- **Keep the architecture modular.** Each subsystem has well-defined responsibilities.
+- **Follow Unix ideas where practical.** Processes, files, permissions, pipes, and signals all follow familiar Unix semantics.
+- **Prefer correctness over optimization.** Clarity and maintainability take precedence over micro-optimizations.
+- **Document every subsystem.** Every major component links to a dedicated design document describing both implementation and rationale.
+- **Develop incrementally.** Features are built one subsystem at a time rather than all at once.
+
+---
+
+# What Makes It Unix-like
+
+The operating system adopts many of the classic Unix abstractions.
+
+- Process-based execution model
+- `fork()` / `exec()` process creation
+- POSIX-style signal handling
+- Hierarchical inode-based filesystem
+- User and kernel privilege separation
+- Virtual memory with process isolation
+- Pipes for interprocess communication
+- Permissions and ownership
+- Shell with job control
+- Small userspace utilities
+
+While not POSIX-complete, the system intentionally mirrors familiar Unix behavior whenever practical.
+
+---
+
+# What Is Intentionally Simplified
+
+Some areas are intentionally reduced in scope to keep the codebase understandable.
+
+Examples include:
+
+- Single-core execution
+- No networking stack
+- Minimal driver framework
+- Limited device support
+- Simplified ext2-inspired filesystem instead of a production filesystem
+- Educational implementations over highly optimized production algorithms
+
+These tradeoffs allow the project to focus on the operating-system fundamentals rather than production-scale complexity.
+
+---
+
+# Kernel Space vs User Space
+
+The operating system follows a traditional split between privileged kernel code and isolated user processes.
+
+## Kernel Space
+
+Kernel responsibilities include:
+
+- Scheduler
+- Virtual memory manager
+- Process management
+- Interrupt and exception handling
+- System call dispatcher
+- Filesystem
+- Device drivers
 - Pipes
-- GUI framebuffer terminal
+- Signal delivery
+- Terminal drivers
+- ELF loading
 
-Shell:
-- Proper shell implementation
-- Userspace commands such as cat, sleep, grep, kill, ls, etc.
+## User Space
+
+User space contains:
+
+- Shell
+- Core command-line utilities
+- User libraries
+- ELF executables
+- Test programs
+
+```
++----------------------------+
+|       User Programs        |
+|  shell • ls • cat • grep   |
++----------------------------+
+|      System Call API       |
++----------------------------+
+|          Kernel            |
+| Scheduler • VM • FS • IPC  |
+| Drivers • Signals • TTY    |
++----------------------------+
+| Raspberry Pi Hardware      |
++----------------------------+
+```
+
+---
+
+# Why Raspberry Pi 5 + QEMU Pi 3B
+
+Development targets two complementary platforms.
+
+## Raspberry Pi 5
+
+The Raspberry Pi 5 provides modern ARM64 hardware for running the operating system on real hardware with full peripheral support.
+
+## QEMU Raspberry Pi 3B
+
+QEMU enables rapid development, debugging, and automated testing without requiring physical hardware.
+
+Supporting both platforms makes development significantly faster while ensuring the kernel also runs correctly on real hardware.
+
+---
+
+# Major Accomplishments
+
+Major completed subsystems include:
+
+- Full virtual memory implementation
+- Copy-on-write `fork()`
+- ELF executable loading
+- Preemptive multitasking
+- Process groups and job control
+- POSIX-style signals
+- Persistent inode-based filesystem
+- Virtual filesystem layer
+- Demand paging
+- Lazy page allocation
+- Graphical framebuffer terminal
+- Interactive shell with userspace commands
+
+---
+
+# Current Feature Status
+
+| Area | Implemented |
+|------|-------------|
+| Processes | `fork`, `exec`, `waitpid`, `exit`, process groups |
+| Virtual Memory | Page tables, Copy-on-Write, lazy allocation, page faults, `mmap` |
+| Filesystem | Inode filesystem, directories, symbolic links, permissions, VFS |
+| IPC | Pipes, signals |
+| Terminal | UART TTY, graphical framebuffer terminal |
+| Userspace | Statically linked ELF executables and shell commands |
+
+---
+
+## Future Enhancements
+
+The following is a list of Future Enhancements we are in progress of making.
+
+- TCP Networking Stack
+- Custom Search Engine
+- Multicore Support
+- Proper GUI Desktop Environment
+- Custom Package Manager
+- On-device C compiler to proogram our OS and make system calls with C
+- More userspace functions and POSIX API calls
+
+---
+
+# Major Features
+
+Every subsystem has a dedicated design document located in `docs/`.
+
+## Architecture & Hardware
+
+- Bare-metal AArch64 kernel
+- Raspberry Pi 5 support
+- QEMU Raspberry Pi 3B support
+- EL1 kernel / EL0 userspace
+- Interrupt and exception handling
+- System calls
+- Timer-driven preemption
+- UART console
+- SD card persistence
+
+## Process Management
+
+- Multi-priority round-robin scheduler
+- `fork()` with Copy-on-Write
+- `exec()` ELF loading
+- Process groups
+- POSIX-style signals
+- Zombie and orphan handling
+- `waitpid()`
+- Multithreading and Synchronization
+
+## Memory Management
+
+- Virtual memory
+- Page tables
+- Lazy stack allocation
+- Lazy heap allocation
+- Demand paging
+- Page fault handling
+- Process isolation
+- Copy-on-Write
+- Kernel memory allocator
+- `mmap()`
+
+## [Filesystem](docs/filesystem.md)
+
+- ext2-inspired inode filesystem
+- Directories
+- Symbolic links
+- Open-file table
+- Virtual filesystem layer
+- Character devices
+- LRU block cache
+- Inode cache
+- Permissions
+
+## Devices
+
+- UART driver
+- Interrupt-driven input
+- TTY terminal, with multi-terminal support
+- Raw vs Canonical terminal mode
+- Pipes
+- Framebuffer graphical terminal
+
+## Userspace
+
+- Interactive shell
 - Job control
+- ELF executable loader
+- Core Unix-style commands including:
+
+  - `cat`
+  - `ls`
+  - `grep`
+  - `kill`
+  - `sleep`
+  - `vim` style text editor
+  - `pong`
+  - and many others
+
+---
+
+# Learn More
+
+For implementation details, see the individual design documents in `docs/`, including:
+
+- API Reference
+- Architecture
+- Scheduler
+- Virtual Memory
+- Filesystem
+- Signals
+- Pipes
+- Terminal
+- ELF Loader
+- Userspace
+- Shell
+- System Calls
+- Device Drivers
+- Future Enhancements
+
+---
 
 ## Project tree
 
 ```text
 .
-├── linker_rpi.ld             -- Linker.ld file for RPI5
-├── linker_qemu.ld            -- Linker.ld file for QEMU RPI3B
-├── user                      -- Userspace code
-│   ├── linker.ld                 -- Userspace linker.ld
-│   ├── user_bins.h               -- Header for user binary files
-│   ├── user_boot.S               -- Assembly bootstrap for userspace ELFs
-│   ├── user_linker.ld            -- Userspace linker.ld
-│   ├── cmds                      -- Shell commands used to generate and load ELFs
-│   └── lib                       -- Common userspace library files
-├── config.txt                -- Configuration file for RPI5
-├── Makefile                  -- Project Makefile
-├── kernel                    -- Code compiled into the kernel image
-│   ├── boot.S                    -- Kernel assembly entry point
-│   ├── disk                      -- Hardware disk access files
-│   ├── fan                       -- RPI5 fan-enabling code
-│   ├── pipe                      -- Pipe implementation
-│   ├── irq                       -- IRQ implementation
-│   ├── memory                    -- Memory-management implementation
-│   │   ├── mmu.c/h                     -- Virtual memory, MMU setup, and helpers
-│   │   ├── mmu.S                       -- Virtual-memory assembly entry point
-│   │   ├── kmalloc.c/h                 -- Kernel-level memory allocator
-│   │   └── page_table                  -- Page-table implementation
-│   ├── signals                   -- Signal implementation
-│   ├── traps                     -- Hardware traps, interrupts, and exception logic
-│   ├── uart                      -- UART, standard I/O, and hardware-address logic
-│   ├── data-structs              -- Kernel data structures: lists, vectors, maps, and ring buffers
-│   ├── timer                     -- Hardware and software timer implementation
-│   ├── devices                   -- Filesystem device drivers and terminal implementation
-│   ├── kernel.c                  -- Kernel entry point
-│   ├── scheduler                 -- Scheduler and process implementation
-│   ├── gui                       -- Graphical terminal GUI implementation
-│   ├── syscall                   -- System-call dispatch and general helpers
-│   ├── fs                        -- Filesystem implementation (ext2 mock)
-│   |   ├── types.h
-│   |   ├── caches                  -- Cache implementations
-│   |   │   ├── inode_cache.c/h         -- Inode-cache implementation
-│   |   │   └── lru_cache.c/h           -- Least-recently-used block-cache implementation
-│   |   ├── dirs.c/h                -- Directory and directory-entry implementation
-│   |   ├── oft.c/h                 -- Open-file table implementation and helpers
-│   |   ├── elf_loader.c/h          -- ELF-loading helpers for userspace exec
-│   |   ├── inodes.c/h              -- Low-level inode implementation
-│   |   ├── kapi.c/h                -- Filesystem kernel API implementations and helpers
-│   |   ├── errors.c/h              -- Filesystem error-handling types
-│   |   ├── disk.c/h                -- Disk wrappers around lower-level inode functions
-│   |   └── cmds.c/h                -- High-level filesystem commands called by syscalls
-|   └── threading
-|   |   ├── thread.c/h              -- Thread objects and helpers
-|   |   ├── cond_var.c              -- Condition variable implementation
-|   |   ├── mutex.c                 -- Mutex implementation
-|   |   └── semaphore.c             -- Semaphore implementation
-└── docs                       -- Markdown documentation
+├── Makefile                       -- Cross-build, userspace ELF, QEMU, and install targets
+├── README.md                      -- Project overview and repository map
+├── build_to_sd                    -- Helper script for SD-card deployment
+├── config.txt                     -- Raspberry Pi boot configuration
+├── linker.ld                      -- Kernel linker script for supported platforms
+├── user
+│   ├── user_boot.S                -- EL0 userspace entry bootstrap
+│   ├── user_bins.h                -- Embedded userspace binary table interface
+│   ├── user_linker.ld             -- Userspace ELF linker script
+│   ├── linker.ld                  -- Alternate userspace linker script
+│   ├── lib                        -- Userspace syscall wrappers and libc-style helpers
+│   │   ├── errno.c/h              -- Errno names, messages, and printing
+│   │   ├── fs_syscall.h           -- Filesystem syscall wrappers and constants
+│   │   ├── malloc.c/h             -- Userspace heap allocator and memory helpers
+│   │   ├── signals.h              -- Signal wrappers, constants, and sigaction types
+│   │   ├── stdio.c/h              -- printf and puts
+│   │   ├── string.c/h             -- Minimal string and parsing helpers
+│   │   ├── syscall.c/h            -- Base syscall wrappers and process helpers
+│   │   ├── tests.c/h              -- Userspace smoke tests
+│   │   └── tty_syscall.h          -- TTY and alternate-screen wrappers
+│   └── cmds                       -- Statically linked userspace commands
+│       ├── shell.c/h              -- Interactive shell
+│       ├── shell                  -- Shell parser, jobs, vectors, and I/O helpers
+│       └── *.c                    -- cat, chmod, clear, cp, echo, grep, ls, vim, wc, etc.
+├── kernel
+│   ├── boot.S                     -- Kernel assembly entry point
+│   ├── kernel.c                   -- Kernel C entry point
+│   ├── errno.h                    -- Kernel errno values
+│   ├── string.c/h                 -- Kernel string helpers
+│   ├── data-structs               -- Hash map, linked list, ring buffer, and vector
+│   ├── devices                    -- Device registry and TTY devices
+│   ├── disk                       -- Block-device and SDHCI support
+│   ├── fan                        -- Raspberry Pi 5 fan support
+│   ├── fs                         -- Filesystem, VFS, procfs, ELF loader, and file table
+│   │   ├── caches                 -- Inode cache and LRU block cache
+│   │   ├── cmds.c/h               -- Filesystem commands called by syscalls
+│   │   ├── dirs.c/h               -- Directory operations
+│   │   ├── disk.c/h               -- Filesystem disk layout and mount support
+│   │   ├── elf_loader.c/h         -- Userspace ELF loading
+│   │   ├── errors.c/h             -- Filesystem error handling
+│   │   ├── inodes.c/h             -- Inode operations
+│   │   ├── kapi.c/h               -- File-descriptor kernel API
+│   │   ├── oft.c/h                -- Open-file table
+│   │   ├── procfs.c/h             -- Procfs virtual files
+│   │   ├── types.h                -- Filesystem types
+│   │   └── virtual_fs.c/h         -- Virtual filesystem routing
+│   ├── gui                        -- Framebuffer GUI and terminal rendering
+│   ├── irq                        -- Interrupt controller logic
+│   ├── memory                     -- MMU, kmalloc, user allocator, and page tables
+│   │   └── page_table             -- Page-table construction and lookup helpers
+│   ├── pipe                       -- Pipe implementation
+│   ├── scheduler                  -- Process, thread scheduling, and context switch
+│   ├── signals                    -- Kernel signal delivery
+│   ├── syscall                    -- Syscall dispatcher and /proc syscall formatting
+│   ├── threading                  -- Threads, mutexes, semaphores, and condition variables
+│   ├── timer                      -- Timer ticks, sleeps, and delays
+│   ├── traps                      -- Exception vectors and trap handling
+│   └── uart                       -- UART drivers and kernel printf
+└── docs
+    ├── quickstart.md              -- Build and boot instructions
+    ├── demo.md                    -- Demo workflow notes
+    └── api-docs
+        ├── syscall-table.md       -- Raw syscall/SVC reference
+        └── user-api.md            -- Userspace library and command reference
 ```
-
-## 
