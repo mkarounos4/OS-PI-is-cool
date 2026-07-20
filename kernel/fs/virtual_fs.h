@@ -22,6 +22,8 @@ err_t vfs_register_root_mount(const char *name, ino_id_t root_ino,
 int vfs_lookup_root_mount(const char *name, uint8_t is_dir_type,
                           struct fs_dirent *dirent);
 int vfs_root_mount_readdir(uint32_t offset, struct fs_dirent *dirent);
+int vfs_root_mount_count(void);
+err_t vfs_format_mounts(char *buf, size_t size);
 err_t vfs_get_inode(ino_id_t ino, struct cached_inode_st **node);
 void vfs_put_inode(struct cached_inode_st *node);
 err_t vfs_get_metadata(ino_id_t ino, attributes_t *metadata);

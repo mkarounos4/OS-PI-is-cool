@@ -232,9 +232,11 @@ and avoids scattering magic offsets through boot, MMU, and page-table code.
 11. `init_tty_gui()` initializes GUI terminal renderer state.
 12. `pt_init()` initializes physical-page metadata.
 13. `block_init()` initializes persistent storage.
-14. `mount()` mounts the filesystem, or `mkfs()` creates it and then mounts.
+14. `mount()` mounts the filesystem, or `mkfs()` creates it and then mounts;
+    this also registers `/proc` and `/dev` virtual root mounts.
 15. Character-device registry and char drivers are initialized.
-16. `/dev/uart0` and the initial `tty0`/`ttygui0` terminal pair are created.
+16. `/dev/uart0` and the initial `tty0`/`ttygui0` terminal pair are populated
+    as devfs nodes.
 17. `initialize_signals()` initializes signal defaults.
 18. `scheduler_init()` creates scheduler/process/thread state.
 19. `scheduler_start()` switches away from boot context and begins scheduling.
@@ -242,7 +244,7 @@ and avoids scattering magic offsets through boot, MMU, and page-table code.
 This order is intentionally strict. UART must work early for diagnostics.
 Exception vectors must exist before IRQs are enabled. The heap and page
 allocator must exist before process creation. The filesystem must be mounted
-before `/bin/init`, `/bin/shell`, and `/dev` nodes can be used. The scheduler is
+before `/bin/init`, `/bin/shell`, and root virtual mounts can be used. The scheduler is
 started only after the kernel has enough infrastructure to run userspace.
 
 ## Platform Split

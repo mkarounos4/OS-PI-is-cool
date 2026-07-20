@@ -36,11 +36,12 @@
 #define PROC_FILE_CPUINFO 11
 #define PROC_FILE_THREADS 12
 #define PROC_FILE_LOCKS 13
-#define PROC_FILE_PID_STATUS 14
-#define PROC_FILE_PID_CWD 15
-#define PROC_FILE_PID_FD 16
-#define PROC_FILE_PID_MAPS 17
-#define PROC_FILE_PID_THREADS 18
+#define PROC_FILE_MOUNTS 14
+#define PROC_FILE_PID_STATUS 15
+#define PROC_FILE_PID_CWD 16
+#define PROC_FILE_PID_FD 17
+#define PROC_FILE_PID_MAPS 18
+#define PROC_FILE_PID_THREADS 19
 
 #define PROC_READ_BUFFER_SIZE 4096
 #define PROC_INO_ROOT_DIR PROCFS_INO_BASE
@@ -67,6 +68,7 @@ static const struct proc_file_def proc_root_files[] = {
     {"cpuinfo", PROC_FILE_CPUINFO},
     {"threads", PROC_FILE_THREADS},
     {"locks", PROC_FILE_LOCKS},
+    {"mounts", PROC_FILE_MOUNTS},
 };
 
 static const struct proc_file_def proc_pid_files[] = {
@@ -1103,6 +1105,8 @@ static int build_proc_file(struct proc_st *proc, char *buf, size_t size) {
         return build_threads(buf, size);
     case PROC_FILE_LOCKS:
         return threading_format_locks(buf, size);
+    case PROC_FILE_MOUNTS:
+        return vfs_format_mounts(buf, size);
     default:
         return FILE_NOT_FOUND;
     }

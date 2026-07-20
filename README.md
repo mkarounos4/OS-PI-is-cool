@@ -28,6 +28,7 @@
 | [Device Drivers Architecture](docs/architecture/device-drivers.md) | Block devices, SDHCI, UART, char devices, TTY backends, framebuffer terminal, pipes, fan, and driver init order. |
 | [Syscall API Reference](docs/api-docs/syscall-table.md) | Raw syscall table with SVC numbers and brief syscall notes. |
 | [Userspace API Reference](docs/api-docs/user-api.md) | Userspace library functions, shell helpers, and command mini man pages. |
+| [Procfs API Reference](docs/api-docs/procfs-api.md) | `/proc` files, generated fields, and mount-table reporting. |
 | [Signals API Reference](docs/api-docs/signals-api.md) | Signals ids, default dispositions, usage. |
 
 # Overview
@@ -256,6 +257,7 @@ Every subsystem has a dedicated design document located in `docs/`.
 - Symbolic links
 - Open-file table
 - Virtual filesystem layer
+- `procfs` and `devfs` root virtual filesystems
 - Character devices
 - LRU block cache
 - Inode cache
@@ -335,6 +337,7 @@ Every subsystem has a dedicated design document located in `docs/`.
 │   │   ├── inodes.c/h             -- Inode operations
 │   │   ├── kapi.c/h               -- File-descriptor kernel API
 │   │   ├── oft.c/h                -- Open-file table
+│   │   ├── devfs.c/h              -- Devfs virtual device nodes
 │   │   ├── procfs.c/h             -- Procfs virtual files
 │   │   ├── types.h                -- Filesystem types
 │   │   └── virtual_fs.c/h         -- Virtual filesystem routing
@@ -363,6 +366,7 @@ Every subsystem has a dedicated design document located in `docs/`.
     │   ├── processes.md           -- Process architecture placeholder
     │   └── userspace.md           -- Userspace build, linker scripts, ELF embedding, init, shell, and libs
     └── api-docs
+        ├── procfs-api.md          -- Procfs file reference and output fields
         ├── signals-api.md         -- Signal ids, defaults, masks, sigaction, and signal helpers
         ├── syscall-table.md       -- Raw syscall/SVC reference
         └── user-api.md            -- Userspace library and command reference

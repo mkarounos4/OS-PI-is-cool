@@ -1,5 +1,6 @@
 #include "disk.h"
 
+#include "devfs.h"
 #include "disk/block.h"
 #include "dirs.h"
 #include "fs_test.h"
@@ -635,6 +636,14 @@ err_t mount(void) {
     }
 
     err_code = procfs_init();
+    if (err_code != SUCCESS) {
+        is_mounted = 0;
+        empty_oft();
+        unmount_inode();
+        return err_code;
+    }
+
+    err_code = devfs_init();
     if (err_code != SUCCESS) {
         is_mounted = 0;
         empty_oft();

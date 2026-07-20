@@ -160,8 +160,8 @@ interrupts. This keeps input delivery serialized around the driver's RX buffer.
 
 ## Character Device Registry
 
-Character devices are special filesystem inodes with type `CHAR_DRIVER_TYPE`.
-Each device inode stores an `i_rdev` pair:
+Character devices are exposed through devfs as virtual inodes with type
+`CHAR_DRIVER_TYPE`. Each device inode stores an `i_rdev` pair:
 
 ```c
 struct dev_st {
@@ -208,26 +208,34 @@ For more information about char drivers with respect to the Filesystem, please c
 
 ## Device Nodes and devfs Creation
 
-`devfs_create_char_device(rdev)` creates or updates the persistent `/dev` inode
-for one major/minor pair. It is not a separate virtual filesystem. Device nodes
-are normal disk dirents under `/dev`, but their inode type and fops are special.
+`/dev` is a root virtual filesystem registered by `devfs_init()` during
+filesystem mount. It uses the same VFS root-mount machinery as `procfs`, with
+the synthetic inode range rooted at `DEVFS_INO_BASE`.
+
+`devfs_create_char_device(rdev)` creates or updates one in-memory devfs entry
+for a major/minor pair. It does not create `/dev`, allocate disk inodes, or
+write persistent dirents. Device nodes are regenerated from registered char
+drivers and live devfs entries each boot.
 
 The creation flow is:
 
 1. Validate that `rdev.major` has a registered char driver.
-2. Look up `/dev`.
-3. If `/dev` does not exist, create it with `fs_mkdir`.
-4. Build the device name from the driver name and minor number, such as
+2. Build the device name from the driver name and minor number, such as
    `tty0`, `uart0`, or `ttygui0`.
-5. If the node already exists, update its inode metadata to
-   `CHAR_DRIVER_TYPE`, set permissions to `0x7`, attach the driver's fops, and
-   write the new `i_rdev`.
-6. If the node does not exist, allocate a new char-device inode and add a dirent
-   under `/dev`.
+3. Reuse an existing devfs slot with the same major/minor or name, if one
+   exists.
+4. Otherwise allocate a free devfs node slot.
+5. Mark the slot active and store the generated name and `i_rdev`.
 
-This means device files survive as filesystem entries, but their behavior is
-defined by the currently registered driver. Recreating a device node is safe:
-the metadata is refreshed rather than creating duplicate dirents.
+Path lookup resolves `/dev` through the VFS root mount table. Lookup then
+continues inside devfs, where names such as `tty0` are mapped to synthetic
+inodes. Metadata for those inodes is generated on demand: type
+`CHAR_DRIVER_TYPE`, permissions `0x7`, `i_rdev`, and fops from the registered
+char driver.
+
+This means device files do not survive as disk entries. Recreating a device
+node is safe because the in-memory devfs slot is refreshed rather than creating
+duplicate dirents.
 
 The helpers `char_device_read(rdev, buffer, count)` and
 `char_device_write(rdev, buffer, count)` let one kernel driver call another char
@@ -416,8 +424,9 @@ The renderer handles:
 
 TTYGUI devices are activated lazily. `tty_gui_char_driver_init()` only clears
 the device table and registers the driver. It does not allocate all terminal
-buffers. `tty_gui_char_device_activate(minor)` creates the `/dev/ttyguiN` node
-and allocates that backend's ring buffers when a terminal is actually created.
+buffers. `tty_gui_char_device_activate(minor)` populates the `/dev/ttyguiN`
+devfs node and allocates that backend's ring buffers when a terminal is
+actually created.
 
 ## Terminal Lifecycle
 
@@ -507,23 +516,26 @@ Driver initialization is ordered around dependency availability:
 4. `irq_init`, `uart_irq_init`, and `timer_init` prepare interrupt-driven input
    and timer events.
 5. `block_init` prepares storage.
-6. `mount` or `mkfs` brings the filesystem online.
+6. `mount` or `mkfs` brings the filesystem online and registers `/proc` and
+   `/dev` virtual root mounts.
 7. `initialize_char_device_registry` clears the char-driver table.
 8. `uart_char_driver_init` registers the UART char driver.
 9. `tty_gui_char_driver_init` registers the TTYGUI char driver.
 10. `tty_drivers_init` registers the TTY char driver.
-11. `uart_create_device_nodes` creates `/dev/uart0`.
+11. `uart_create_device_nodes` populates the `/dev/uart0` devfs node.
 12. `tty_gui_create_device_nodes` completes no eager allocation; TTYGUI nodes
-    are created when terminals are activated.
+    are populated when terminals are activated.
 13. `tty_create_device_nodes` marks the TTY layer ready for runtime node
     creation.
-14. `tty_create` creates the initial `tty0` and `ttygui0` pair.
+14. `tty_create` creates the initial terminal state and populates the
+    `tty0`/`ttygui0` devfs nodes.
 15. The scheduler starts user processes.
 
-The key design choice is that hardware can be initialized before `/dev` exists,
-but user-visible device nodes are only created after the filesystem is mounted.
-This keeps early boot simple while still exposing devices through Unix-style
-files once the filesystem is available.
+The key design choice is that hardware can be initialized before char-device
+nodes exist. The `/dev` mount itself appears when the filesystem is mounted;
+user-visible nodes are populated after char drivers register. This keeps early
+boot simple while still exposing devices through Unix-style files once the VFS
+is available.
 
 ## Error Handling and Limitations
 
@@ -542,10 +554,9 @@ Current limitations include:
 - No dynamic module loading.
 - No device-tree probing layer.
 - No general block-device registry.
-- Root `/dev` entries are persistent filesystem nodes, not a dedicated devfs
-  virtual filesystem.
+- devfs has a fixed-size in-memory node table and no hot-remove API yet.
 
 These are acceptable tradeoffs for the current OS. The driver model stays small
-enough to debug, but it already supports persistent device nodes, VFS fops,
+enough to debug, but it already supports devfs nodes, VFS fops,
 registered char backends, interrupt-driven input, lazy terminal allocation, and
 block storage for the filesystem.

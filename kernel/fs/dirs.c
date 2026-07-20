@@ -214,6 +214,13 @@ err_t get_dirent_by_path(const char* f_path, struct fs_dirent* dirent, int is_di
 
 int dir_lookup(const char* f_name, uint8_t is_dir_type,
                struct fs_dirent* dirent, int curr_dir) {
+    if (curr_dir == ROOT_INO) {
+        err_t mount_err = vfs_lookup_root_mount(f_name, is_dir_type, dirent);
+        if (mount_err == SUCCESS) {
+            return SUCCESS;
+        }
+    }
+
     struct fs_dirent *dir = kmalloc(get_bytes_per_block());
     if (dir == NULL) {
         return NO_FREE_BLOCKS;
@@ -457,6 +464,17 @@ err_t readdir(ino_id_t ino, fs_dirent *out) {
             return set_inode_metadata(ino, &metadata);
         }
         return err;
+    }
+
+    if (ino == ROOT_INO &&
+        vfs_lookup_root_mount(dir[entry_index].name, 1, NULL) == SUCCESS) {
+        kfree(dir);
+        metadata.i_dir->offset++;
+        err = set_inode_metadata(ino, &metadata);
+        if (err != SUCCESS) {
+            return err;
+        }
+        return readdir(ino, out);
     }
 
     *out = dir[entry_index];

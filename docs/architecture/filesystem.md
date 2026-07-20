@@ -426,14 +426,11 @@ operation to resolve the next path component.
 
 For normal disk directories, `dir_lookup` scans the directory's on-disk dirent
 array. This keeps normal files and directories persistent. The VFS extension is
-added at the root directory boundary: if lookup in `ROOT_INO` reaches the end of
-the disk directory without finding the requested name, `dir_lookup` calls
-`vfs_lookup_root_mount`. That makes virtual root mounts such as `/proc` visible
-without storing a `/proc` dirent on disk.
-
-Disk root entries take precedence because the virtual lookup only happens after
-the real root directory lookup fails. In practice, virtual filesystem names
-should be reserved names so the disk root and VFS root table do not disagree.
+added at the root directory boundary: lookup in `ROOT_INO` checks
+`vfs_lookup_root_mount` before scanning disk dirents. That gives registered
+mounts overlay semantics, so virtual roots such as `/proc` and `/dev` are
+visible without storing dirents on disk and are not hidden by stale disk
+entries with the same names.
 
 ### Root Virtual Mounts
 
@@ -493,15 +490,13 @@ metadata accurate, including file type, permissions, size, and fops.
 
 ### Procfs Example
 
-`procfs` is the main virtual filesystem using this layer. During mount,
+`procfs` is one virtual filesystem using this layer. During mount,
 `procfs_init()` resets its internal node tables, prepares the proc root node,
 and registers the root mount named `proc`.
 
 After registration, `/proc` is resolved like this:
 - Lookup starts at the disk root inode.
-- Normal root dirents are scanned first.
-- If no disk dirent named `proc` exists, root lookup asks the VFS root mount
-  table.
+- Root lookup asks the VFS root mount table before scanning disk dirents.
 - The VFS returns a dirent named `proc` with procfs's synthetic root inode.
 - Later inode operations are routed back to procfs because its `is_inode`
   callback owns that inode range.
@@ -516,14 +511,24 @@ This is the main reason VFS routing exists in the filesystem: tools such as
 `ls`, `cat`, `stat`, and future shell code can use the same userspace API for
 real files and kernel-generated information.
 
-### Interaction with Character Devices
+`/proc/mounts` is generated from the VFS root mount table. It lists the
+disk-backed root filesystem plus each registered root virtual mount, currently
+including `/proc` and `/dev`.
 
-Character devices also use inode fops, but they are not root virtual
-filesystems. They are disk-visible `/dev` inodes with `CHAR_DRIVER_TYPE` and an
-`i_rdev` major/minor number. Opening `/dev/tty0`, `/dev/uart0`, or
-`/dev/ttygui0` still goes through path lookup, KAPI, and the OFT. Once the inode
-is open, its fops dispatch to the registered character driver instead of normal
-file block I/O.
+### Devfs and Character Devices
+
+`devfs` is the `/dev` virtual filesystem. During mount, `devfs_init()` clears
+its in-memory node table and registers the root mount named `dev`. Character
+drivers register later in boot; calls to `devfs_create_char_device(rdev)` then
+populate virtual entries such as `/dev/uart0`, `/dev/tty0`, and
+`/dev/ttygui0`.
+
+Device nodes are not disk-visible dirents anymore. Each active devfs node is a
+synthetic inode with `CHAR_DRIVER_TYPE`, an `i_rdev` major/minor number, and fops
+from the currently registered character driver. Opening `/dev/tty0`,
+`/dev/uart0`, or `/dev/ttygui0` still goes through path lookup, KAPI, and the
+OFT. Once the inode is open, its fops dispatch to the registered character
+driver instead of normal file block I/O.
 
 This reuse is intentional. The VFS layer is both the mechanism for generated
 filesystems like `/proc` and the mechanism for special inode types that need to
@@ -561,13 +566,13 @@ Inside our [devices.c](../../kernel/devices/devices.c) file, we store an array `
 - `data`: a void* for the device-specific global data.
 
 ### Registering Char Devices
-When mounting, as part of initialization we go through all our `char drivers` and register them as char devices with `register_char_driver`. This is done to allow for dynamic creation of char devices so, as a future extension, we can create a package manager which can dynamically add and register new drivers.
+After the filesystem mount registers devfs, boot initializes each `char_driver` and registers it with `register_char_driver`. This is done to allow for dynamic creation of char devices so, as a future extension, we can create a package manager which can dynamically add and register new drivers.
 This takes in a `char_driver` struct and registers it in the array at the specified `major` number.
 
 ### Creating new instances of Char Devices
-When creating a new char device (ex. new tty instance), we have a `devfs_create_char_device` which creates a new char driver with the specified `rdev` major and minor number. 
-This fetches the `char_driver` from the `char_device_registry` and creates a new `CHAR_DRIVER_TYPE` file with the specified `name` + `minor` number in the `/dev` folder on disk. If this folder does not exist yet, it creates it.
-This then creates a new inode for this char driver, setting the `major` and `minor` number accordingly and updating all the `fops` to use this custom `char_driver's` fops.
+When creating a new char device (ex. new tty instance), we have a `devfs_create_char_device` which creates a new devfs entry with the specified `rdev` major and minor number.
+This fetches the `char_driver` from the `char_device_registry` and creates a virtual `CHAR_DRIVER_TYPE` node with the specified `name` + `minor` number under `/dev`.
+The generated virtual inode stores the `major` and `minor` number and uses the registered `char_driver` fops.
 
 For any `char device` instance specific metadata, this can be stored in the `char_device_registry`'s `data` field, with it using a struct containing an array of per-instance data.
 

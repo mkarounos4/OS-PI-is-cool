@@ -2,6 +2,7 @@
 
 #include "fs/caches/inode_cache.h"
 #include "string.h"
+#include "uart/uart.h"
 
 #define VFS_MAX_ROOT_MOUNTS 8
 
@@ -71,6 +72,42 @@ int vfs_root_mount_readdir(uint32_t offset, struct fs_dirent *dirent) {
     strcpy(dirent->name, root_mounts[offset].name);
     dirent->ino_id = root_mounts[offset].root_ino;
     return SUCCESS;
+}
+
+int vfs_root_mount_count(void) {
+    return root_mount_count;
+}
+
+err_t vfs_format_mounts(char *buf, size_t size) {
+    if (buf == NULL || size == 0) {
+        return INVALID_ARGS;
+    }
+
+    int len = snprintf(buf, size, "PATH TYPE ROOT_INO\n");
+    if (len < 0) {
+        return len;
+    }
+
+    size_t used = len < (int)size ? (size_t)len : size - 1;
+    int ret = snprintf(buf + used, size - used, "/ rootfs %u\n", ROOT_INO);
+    if (ret < 0) {
+        return ret;
+    }
+    len += ret;
+
+    for (int i = 0; i < root_mount_count; i++) {
+        used = len < (int)size ? (size_t)len : size - 1;
+        ret = snprintf(buf + used, size - used, "/%s %s %u\n",
+                       root_mounts[i].name,
+                       root_mounts[i].name,
+                       root_mounts[i].root_ino);
+        if (ret < 0) {
+            return ret;
+        }
+        len += ret;
+    }
+
+    return len;
 }
 
 static const struct virtual_fs_ops *vfs_ops_for_inode(ino_id_t ino) {

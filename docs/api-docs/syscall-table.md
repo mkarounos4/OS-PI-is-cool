@@ -184,7 +184,8 @@ threads run.
 ### `stat(const char *path, struct fs_stat_st *stat)` - SVC 46
 
 Fills inode id, link count, type, permissions, size, block count, mtime, and
-device numbers for a filesystem path.
+device numbers for a filesystem path. Works for disk files, procfs files, and
+devfs character-device nodes.
 
 ### TTY syscalls - SVC 47 through 53
 
