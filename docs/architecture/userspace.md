@@ -19,6 +19,9 @@ functions and command mini man pages are documented in
 - [Syscall boundary](#syscall-boundary)
 - [Init process](#init-process)
 - [Shell and command execution](#shell-and-command-execution)
+- [Shell job control](#shell-job-control)
+- [Shell job table](#shell-job-table)
+- [Foreground and background jobs](#foreground-and-background-jobs)
 - [Userspace heap](#userspace-heap)
 - [User libraries](#user-libraries)
 - [Design tradeoffs and limits](#design-tradeoffs-and-limits)
@@ -67,6 +70,14 @@ The userspace tree is split into:
 The architectural boundary is simple: userspace owns program logic and libc-like
 helpers; the kernel owns memory mappings, files, devices, scheduling, signals,
 and privileged CPU state.
+
+That split is intentional. Features like command parsing, prompt behavior,
+scripts, redirection syntax, and job-table presentation are policy-heavy and
+easy to change, so they stay in normal ELF programs. The kernel exposes the
+smaller set of durable primitives those programs need: process creation,
+`exec`, files, pipes, signals, process groups, terminal ownership, and blocking
+waits. This keeps the kernel from knowing shell syntax while still forcing
+userspace to use the same interfaces that any other program would use.
 
 ## Build Pipeline
 
@@ -373,23 +384,100 @@ reaped through the normal process model.
 
 ## Shell and Command Execution
 
-The shell is a normal userspace ELF program. It is larger than most commands, so
-the Makefile links it with extra objects from `user/cmds/shell`.
+The shell is deliberately just another userspace ELF. It is larger than most
+commands because it links parser, vector, job-control, and I/O helpers from
+`user/cmds/shell`, but it still has no private kernel entry point. That design
+makes the shell a stress test for the user/kernel contract: every interactive
+feature has to be expressible through ordinary syscalls.
 
-At startup, the shell:
+The prompt loop is organized around stable user-visible moments rather than
+kernel callbacks. Between prompts, the shell polls for child status changes,
+prints deferred status messages, reads one complete command line, parses it
+into a `parsed_command`, and either handles a builtin in the shell process or
+creates child processes for external commands. Keeping those updates at prompt
+boundaries avoids interleaving asynchronous child-status text into the middle of
+line editing.
 
-1. Parses the TTY number from `argv[1]`.
-2. Opens `/dev/ttyN` for stdin, stdout, and stderr.
-3. Installs signal handlers for interactive job control.
-4. Blocks job-control signals that should not stop the shell itself.
-5. Calls `tcsetpgrp` to take foreground control of its TTY.
-6. Enters the prompt loop.
+External commands follow the same model whether they came from a typed prompt
+or a script: the shell resolves executable names, configures any requested file
+descriptor changes, and lets `exec` replace the child image. Redirection,
+here-documents, and pipelines are userspace composition. They are built out of
+`open`, `pipe`, `dup2`, `fork`, and `exec`, so the kernel only needs to provide
+the primitive resource and process operations.
 
-For external commands, the shell searches executable paths, forks child
-processes, sets up pipes/redirection when needed, and calls `exec`. Builtins and
-parser details are shell architecture concerns, but the important OS boundary is
-that commands run as separate userspace processes through the same syscall and
-ELF execution path as `init` and `shell`.
+## Shell Job Control
+
+Interactive job control is implemented by the userspace shell on top of process,
+signal, and TTY syscalls. This keeps terminal policy out of the scheduler. The
+kernel knows about process groups, foreground terminal groups, and signal
+delivery; the shell decides how those mechanisms map to `jobs`, `fg`, `bg`,
+pipelines, scripts, and prompt behavior.
+
+The shell places itself in its own process group and takes foreground ownership
+of its TTY. Foreground commands then temporarily receive that ownership through
+`tcsetpgrp`, which lets terminal-generated signals target the command's process
+group instead of the shell. The shell also blocks stop/output-control signals
+that should not suspend the control process itself, while still installing
+handlers for interactive signals that affect prompt behavior.
+
+Pipelines are treated as one job because users expect `cat file | grep x` to
+move between foreground, background, stopped, and continued states as a unit.
+For prompt-driven commands, the first child becomes the process-group leader and
+later pipeline children join that group. Scripts use a flatter model: children
+remain in the shell's process group so script execution does not repeatedly
+steal foreground terminal ownership from the interactive shell.
+
+## Shell Job Table
+
+The shell tracks jobs in small userspace-owned data structures under
+`user/cmds/shell`. The basic container is `Vec`, a growable array of `void *`
+with a length, capacity, and optional element destructor. This is enough for the
+shell because job-table scans are short and mostly happen around prompt or
+wait-status handling; a hash table would add complexity without improving the
+interactive path much.
+
+Each `job` records:
+
+- a shell job id.
+- the parsed command.
+- the child PIDs that make up the command or pipeline.
+- the original command text.
+- the number of processes still running.
+- whether the job is running or stopped.
+- how many processes in the job are currently stopped.
+
+Three vectors divide ownership from ordering policy:
+
+| Vector | Owns data | Purpose |
+|---|---|---|
+| `background_jobs` | Yes, through `free_job` | Main table of active jobs that can be shown by `jobs`, found by PID, or selected by job id. |
+| `stopped_background_jobs` | No | Stack of stopped job pointers used to choose the default job for `fg` or `bg`. |
+| `background_status_updates` | Yes, through `free_dtor` | Deferred strings printed at prompt boundaries when jobs stop or finish. |
+
+The split avoids duplicating whole job records. A stopped job still lives in the
+main table, while the stopped-job vector only records that it is currently a
+good default target for `fg` or `bg`. Status messages are separate because they
+are presentation state, not process state; they can be drained after wait-status
+polling without changing the ownership of the underlying job.
+
+## Foreground and Background Jobs
+
+Foreground jobs are synchronous from the shell's point of view: terminal
+ownership belongs to the job's process group, and the prompt should not return
+until the group either exits or stops. The shell waits on the process group
+rather than on individual PIDs chosen by command position, which makes a
+pipeline behave like one foreground computation. The `num_procs_running` and
+`num_procs_stopped` counters let the shell summarize mixed child statuses into
+the job-level states users care about.
+
+Background jobs use the same process-group structure but never receive terminal
+ownership. They remain in `background_jobs` so `jobs`, `fg`, and `bg` have a
+stable object to refer to. When a background job stops, the shell adds the same
+job pointer to `stopped_background_jobs`; when it finishes, the shell removes it
+from both vectors and queues a status message. `bg` resumes a stopped process
+group with `SIGCONT` while leaving it in the background. `fg` resumes if needed,
+transfers terminal ownership, and then observes the job through the same
+foreground wait path.
 
 ## Userspace Heap
 

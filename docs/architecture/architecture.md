@@ -646,6 +646,24 @@ No single layer owns that whole flow. The architecture works because each layer
 has a narrow interface and the trap frame provides one common way to return to
 the interrupted context.
 
+This split is one of the main system-design choices in the kernel. Low-level
+subsystems own mechanisms, not user-facing policy. The trap layer preserves CPU
+state and classifies exceptions; it does not know what a shell prompt is. The
+timer layer owns hardware deadlines and deferred callbacks; it does not decide
+which command should be foreground. The TTY layer owns terminal input, output,
+and foreground process-group checks; it does not store shell job ids. Process
+management owns PIDs, process groups, states, wait semantics, and signal
+delivery; it does not parse pipelines.
+
+That separation keeps high-level behavior debuggable without making the kernel
+opaque. A foreground pipeline, for example, is represented at the kernel level
+as a process group, saved trap frames, file descriptors, pending signals, and
+runnable or stopped PCB states. The shell's `job` and `Vec` structures add the
+interactive interpretation of that state: job ids, original command text,
+pipeline membership, and deferred status messages. The kernel provides enough
+low-level structure for correctness and isolation, while userspace owns the
+presentation and command-language rules.
+
 ## Design Tradeoffs and Limits
 
 The architecture favors a small, understandable kernel over a production-style
