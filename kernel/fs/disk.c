@@ -837,7 +837,7 @@ err_t free_file(const char* f_name) {
     struct fs_dirent dirent;
     char *actual_name;
     ino_id_t parent_dir;
-    err_t error = get_dirent_by_path(f_name, &dirent, FILE_TYPE, &parent_dir, &actual_name);
+    err_t error = get_dirent_by_path(f_name, &dirent, 0, &parent_dir, &actual_name);
     if (error == FILE_NOT_FOUND || error == FILE_NOT_CREATED) {
         return FILE_NOT_FOUND;
     } else if (error) {
@@ -859,7 +859,7 @@ err_t free_file(const char* f_name) {
     }
     remove_ref_from_cache(dirent.ino_id);
 
-    error = remove_dirent_by_f_name_and_type(actual_name, metadata.type, parent_dir);
+    error = remove_dirent_by_f_name_and_type(actual_name, metadata.type == DIRECTORY_TYPE, parent_dir);
     return error;
 }
 
