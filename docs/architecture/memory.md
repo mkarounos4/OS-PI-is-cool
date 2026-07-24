@@ -189,8 +189,13 @@ typedef struct mem_segment_st {
 
 #### Segment Loading
 
+Runtime `exec` registers ELF `PT_LOAD` segments with the page-table metadata
+system; the full loader flow is documented in
+[elf-loading.md](elf-loading.md). This section only covers the memory side of
+that contract.
+
 **Function: `load_memory_segment`**
-Loads a segment from disk (ELF file) into memory:
+Registers an ELF-backed segment for later page-fault loading:
 - Parameters: inode ID, file offset, file size, virtual address, physical address, memory size, ELF flags
 - Lazy loads pages when page faults occur (see `load_segment_page_for_fault`)
 

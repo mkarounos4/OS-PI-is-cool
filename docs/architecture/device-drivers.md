@@ -479,19 +479,18 @@ read/write behavior and internal buffering.
 
 The important similarity is that code above the filesystem still calls normal
 `read` and `write`. The inode's fops decide what behavior to use.
-.
 
 Internally, each pipe has the following metadata:
-- `num_reders`: number of threads with this pipe open in `read` mode
+- `num_readers`: number of threads with this pipe open in `read` mode
 - `num_writers`: number of threads with this pipe open in `write`  mode
 - `buffer`: a ring-buffer with max size `4096` storing pipe data
 - `rx_wait_queue`: vec storing tids of all blocked readers waiting for input
 - `tx_wait_queue`: vec storing tids of all blocked writers waiting for room in the buffer
 This metadata is stored in the pipe's `inode` in the `Union` field `i_pipe`.
 
-When writing, bytes are copied over into the `buffer`. Once the buffer is full, if there are more characters too write, this thread adds its `tid` to the `tx_wait_queue` and blocks until the `pipe` wakes it up. When it finishes writing, writes a `EOF`, or closes the file, it adds an `EOF` to the buffer and wakes up all tids in the `rx_wait_queue`.
+When writing, bytes are copied over into the `buffer`. Once the buffer is full, if there are more characters to write, this thread adds its `tid` to the `tx_wait_queue` and blocks until the `pipe` wakes it up. When it finishes writing, writes a `EOF`, or closes the file, it adds an `EOF` to the buffer and wakes up all tids in the `rx_wait_queue`.
 
-When reading, bytes are consumed from the `buffer`. When the buffer is empty, this thread adds its `tid` to the `rx_wait_queue` and blocks until the `pipe` wakes it up, unless there are no readers. in which case it returns. It also returns if it recieves an `EOF`. When the reader finishes reading, blocks itself, or closes the pipe, all threads in the `tx_wait_queue` are woken up and, next time they reach buffer full, return instead of blocking.
+When reading, bytes are consumed from the `buffer`. When the buffer is empty, this thread adds its `tid` to the `rx_wait_queue` and blocks until the `pipe` wakes it up, unless there are no readers, in which case it returns. It also returns if it receives an `EOF`. When the reader finishes reading, blocks itself, or closes the pipe, all threads in the `tx_wait_queue` are woken up and, next time they reach buffer full, return instead of blocking.
 
 ## Fan Driver
 

@@ -169,7 +169,8 @@ Prints or formats process information from the kernel process table. Returns
 ### `exec(const char *path, char *const argv[])` - SVC 43
 
 Loads an ELF image from `path` and replaces the current process image. On
-success it does not return to the old program.
+success it does not return to the old program. The full runtime loader design
+is documented in [ELF Loading and Exec Architecture](../architecture/elf-loading.md).
 
 ### `getcwd(char *path, size_t size)` - SVC 44
 

@@ -2,9 +2,10 @@
 
 This document describes how userspace is built, packaged into the kernel image,
 isolated from kernel space, entered by the scheduler, and connected to kernel
-services. It does not repeat the userspace API reference; individual library
-functions and command mini man pages are documented in
-`docs/api-docs/user-api.md`.
+services. Runtime ELF validation and `exec` replacement are documented in
+[elf-loading.md](elf-loading.md). This file does not repeat the userspace API
+reference; individual library functions and command mini man pages are
+documented in `docs/api-docs/user-api.md`.
 
 ## List of Features
 
@@ -14,6 +15,7 @@ functions and command mini man pages are documented in
 - [Userspace startup code](#userspace-startup-code)
 - [Embedding user programs in the kernel image](#embedding-user-programs-in-the-kernel-image)
 - [Seeding `/bin`](#seeding-bin)
+- [Runtime ELF exec](#runtime-elf-exec)
 - [EL0 isolation](#el0-isolation)
 - [Process address space](#process-address-space)
 - [Syscall boundary](#syscall-boundary)
@@ -278,6 +280,26 @@ validated.
 This design makes userspace reproducible. The kernel image contains the command
 ELFs needed to populate a fresh filesystem, but commands still execute from the
 filesystem after boot.
+
+## Runtime ELF Exec
+
+At runtime, command ELFs are loaded through the filesystem-backed `exec` path,
+not run from the embedded kernel blobs. The shell, init bootstrap, and command
+execution paths all converge on the loader described in
+[elf-loading.md](elf-loading.md).
+
+The important userspace contract is:
+
+- command files are ordinary static AArch64 ELF executables under `/bin`.
+- the kernel validates the ELF header and executable permissions.
+- `argc` and `argv` are reconstructed on the new user stack.
+- successful `exec` enters the ELF entry point and does not return to the old
+  image.
+- failed `exec` returns an errno-style value to the old image.
+
+This separation is intentional. `userspace.md` documents how ELFs are produced
+and packaged; `elf-loading.md` documents how those ELFs become a running
+process image.
 
 ## EL0 Isolation
 

@@ -1,16 +1,17 @@
 # Filesystem Overview
-- 
+
 ## List of Features
 
 - [Proper Inode file system](#inodes)
 - [Disk persistence with mount/unmount](#disk)
 - [Directories with nested subdirectories](#directories)
 - Symbolic links
-- [Open-file table](#oppen-file-table)
+- [Open-file table](#open-file-table)
 - [Virtual filesystem layer, with `procfs` to demo](#virtual-filesystem)
 - [Character devices](#character-devices)
 - [Permission handling with chmod](#permission-handling)
-- ELF-loading userspace binaries into `bin` (This section is documented in [processes.md](processes.md))
+- ELF-loading userspace binaries into `/bin` and runtime `exec` (documented in
+  [elf-loading.md](elf-loading.md))
 - [LRU Block cache and Inode cache](#inode-data-cache)
 - [Kernel API layer](#kernel-api-layer)
 
@@ -82,7 +83,8 @@ KAPI Specifications:
 - `k_change_directory(char *f_path)`: Update the current process's `cwd` to the specified path. If no leading `/`, searches for path starting from curr `cwd`.
 - `k_check_if_executable(char *f_name)`: Helper function to check if the file has execution permissions.
 - `k_stat(const char *path, struct fs_stat_st *stat)`: Gets current filesystem stats for `/proc` metadata printing.
-- `k_exec` and `k_exec_process`. As the design of these is primarily process-focused, the explanation is included in [processes.md](processes.md).
+- `k_exec` and `k_exec_process`: Bridge filesystem paths into the runtime
+  ELF loader; the full design is documented in [elf-loading.md](elf-loading.md).
 
 This level also contains the default file operations for files and directories, which are documented in more detail in [Virtual Filesystem](#virtual-filesystem) section.
 

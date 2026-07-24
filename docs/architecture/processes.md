@@ -13,7 +13,9 @@ The process subsystem sits between several other documented areas:
 - User page tables, lazy allocation, and Copy-on-Write are covered in
   [memory.md](memory.md).
 - ELF program packaging and userspace startup are covered in
-  [userspace.md](userspace.md).
+  [userspace.md](userspace.md); runtime ELF validation, `exec`, stack setup,
+  page-table replacement, and lazy segment loading are covered in
+  [elf-loading.md](elf-loading.md).
 - File descriptors, open-file references, pipes, `/proc`, and `/dev` are
   covered in [filesystem.md](filesystem.md) and
   [device-drivers.md](device-drivers.md).
@@ -62,7 +64,6 @@ The process subsystem sits between several other documented areas:
 - [Error handling and cleanup policy](#error-handling-and-cleanup-policy)
 - [Testing and debugging hooks](#testing-and-debugging-hooks)
 - [Design tradeoffs and limits](#design-tradeoffs-and-limits)
-- [Documentation gaps](#documentation-gaps)
 
 ## System Structure
 
@@ -522,15 +523,11 @@ refcounting behavior, which is why the details live in `memory.md`.
 
 ### Replacement
 
-`exec` builds a new user page table, maps a fresh kernel-stack/trap-frame
-region, builds the new user stack, registers lazy ELF segments, and then points
-the PCB and executing thread at the new table. Depending on the caller path, it
-may also install the new TTBR0 and destroy the old table immediately.
-
-The important ordering decision is that the old address space remains intact
-until the new executable has been validated and the replacement state is ready.
-That gives `exec` normal failure semantics: on error, the old process image can
-keep running.
+`exec` replaces the process page table after the ELF loader has validated the
+new image, built the replacement user stack, and prepared segment metadata. The
+process-level invariant is that the old address space remains usable until the
+loader commits the replacement. The full page-table replacement and loader
+commit policy is documented in [elf-loading.md](elf-loading.md).
 
 ### Destruction
 
@@ -600,7 +597,9 @@ spaces.
 ## Exec State Replacement
 
 `exec(path, argv)` replaces the current process image with an executable ELF
-loaded from the filesystem.
+loaded from the filesystem. The complete runtime loader design is documented in
+[elf-loading.md](elf-loading.md); this section summarizes the process-state
+effects.
 
 Preserved state:
 
@@ -628,23 +627,11 @@ while failed `exec` leaves the caller alive to report the error.
 
 ## Argument Vector Handoff
 
-The ELF exec path copies `argv` strings into kernel memory first. It then lays
-out strings and the `argv` pointer array on the new user stack, aligned to 16
-bytes.
-
-On entry to the new program:
-
-- `x0 = argc`
-- `x1 = argv`
-- `sp = user stack pointer`
-- `elr = ELF entry point`
-
-The userspace `_start` stub preserves those values, initializes the heap, calls
-`main(argc, argv)`, and then calls `exit`.
-
-The tradeoff is that argument copying has fixed limits (`EXEC_MAX_ARGS` and the
-fixed user stack). That is much simpler than dynamically growing argv storage,
-and adequate for the current command-line environment.
+`exec` enters the new program with `x0 = argc`, `x1 = argv`, `sp` pointing at
+the rebuilt user stack, and `elr` set to the ELF entry point. The detailed
+argument-copying limits and stack layout are documented in
+[elf-loading.md](elf-loading.md#argument-copying-and-user-stack-layout). The
+userspace `_start` behavior is documented in [userspace.md](userspace.md).
 
 ## Exit Semantics
 
@@ -777,49 +764,24 @@ or lock-free wakeup ordering.
 
 ## Signals
 
-Signals are split between process-level state and thread-level state:
+The process subsystem stores the PCB/TCB state that signal delivery needs, and
+the scheduler provides the checkpoints where pending signals can affect the
+running thread. Signals also feed process lifecycle events: stop/continue state
+changes alter schedulability, terminating signals drive exit behavior, and
+`SIGCHLD` wakes parent `waitpid` callers.
 
-- the PCB owns the signal action table and process-pending signal bitset.
-- each TCB owns a pending signal bitset and current signal mask.
-
-Default actions are initialized by the signal subsystem. The documented signal
-set includes termination signals (`SIGINT`, `SIGKILL`, `SIGTERM`), stop signals
-(`SIGSTOP`, `SIGTSTP`, `SIGTTIN`, `SIGTTOU`), continue (`SIGCONT`), and
-parent notification (`SIGCHLD`).
-
-Delivery is checked during scheduler transitions. Process-pending signals are
-delivered to the current thread when unmasked; thread-pending signals are then
-checked separately. Default stop and kill behavior can directly stop or
-terminate the current thread. User-defined handlers are entered through the
-signal handler path described in the signal API docs.
-
-This checkpoint model is simpler than asynchronous signal injection at every
-instruction boundary. It fits the current kernel because all user/kernel
-transitions already pass through the scheduler/trap machinery, but signal
-latency depends on scheduling and trap return opportunities.
-
-The full signal path is documented in [signals.md](signals.md). This process
-document only describes the scheduler and lifecycle integration points.
+The complete signal path, including masks, pending sets, default actions,
+process-group delivery, job-control signals, handler behavior, and tradeoffs, is
+documented in [signals.md](signals.md).
 
 ## Sleep Integration
 
-`sleep(ms)` is a scheduler-blocking operation backed by the software timer
-table, not a busy loop. The syscall path calls `timer_sleep_ms(ms)`.
-
-The process-facing flow is:
-
-1. Resolve the current TCB.
-2. If `ms == 0`, yield once and return.
-3. Set `BLOCK_UNTIL_TIMER` in `tcb->blocked_until`.
-4. Register a software timer callback for the current TID.
-5. Mark the thread `THREAD_BLOCKED_INTERRUPTABLE`.
-6. Yield to the scheduler.
-7. When the timer IRQ fires, the timer callback wakes the TCB or clears the
-   timer bit if the thread is currently stopped over a blocked state.
-
-This keeps sleeping threads off the run queues until their timer expires. The
-timer subsystem owns deadlines and hardware rearming; the process subsystem
-only owns the blocked thread state and scheduler handoff.
+`sleep(ms)` is a scheduler-blocking operation backed by software timers, not a
+busy loop. From the process subsystem's view, the current TCB records
+`BLOCK_UNTIL_TIMER`, enters an interruptible blocked state, and leaves the run
+queue until the timer callback wakes it. Timer table management, hardware
+rearming, and the stopped-while-sleeping behavior are documented in
+[architecture.md](architecture.md#software-timers-and-sleep).
 
 ## Multithreading and Synchronization
 

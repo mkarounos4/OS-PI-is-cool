@@ -11,7 +11,6 @@
 - [Current Feature Status](#current-feature-status)
 - [Future Enhancements](#future-enhancements)
 - [Major Features](#major-features)
-- [Learn More](#learn-more)
 - [Project tree](#project-tree)
 
 ## Other Documentation Files
@@ -23,6 +22,7 @@
 | [Architecture](docs/architecture/architecture.md) | Boot flow, linker layout, platform split, EL1/EL0 boundary, IRQs, timers, traps, and syscalls. |
 | [Filesystem Architecture](docs/architecture/filesystem.md) | Inode filesystem, VFS, open-file table, caches, permissions, and disk layout. |
 | [Processes Architecture](docs/architecture/processes.md) | Scheduler, trap-frame return path, context switching, fork, exec, process groups, zombies/orphans, waitpid, sleep blocking, multithreading, synchronization, isolation. |
+| [ELF Loading Architecture](docs/architecture/elf-loading.md) | Runtime `exec`, ELF validation, argument stack setup, page-table replacement, lazy segment loading, and demand paging from `/bin`. |
 | [Signals Architecture](docs/architecture/signals.md) | Kernel signal delivery, masks, pending sets, default actions, process groups, job-control signals, SIGCHLD, and scheduler delivery checkpoints. |
 | [Userspace Architecture](docs/architecture/userspace.md) | Userspace build pipeline, linker scripts, embedded ELF blobs, EL0 isolation, init, shell, and user libraries. |
 | [Memory Architecture](docs/architecture/memory.md) | Virtual Memory, per-process page tables, lazy allocation, demand paging, page fault handling, copy-on-write, malloc |
@@ -234,12 +234,22 @@ Every subsystem has a dedicated design document located in `docs/`.
 - Multi-priority round-robin scheduler
 - End-to-end trap frame, scheduler interrupt, context switch, and EL0 return path
 - `fork()` with Copy-on-Write
-- `exec()` ELF loading
+- `exec()` process replacement
 - Process groups
 - Zombie and orphan handling
 - `waitpid()`
 - Timer-backed sleep blocking
 - Multithreading and Synchronization
+
+## [ELF Loading](docs/architecture/elf-loading.md)
+
+- Filesystem-backed `exec()`
+- AArch64 ELF validation
+- `argc`/`argv` stack construction
+- Fresh TTBR0 page-table replacement
+- Lazy `PT_LOAD` segment registration
+- Demand paging executable pages from `/bin`
+- Init and shell command integration
 
 ## [Signals](docs/architecture/signals.md)
 
@@ -289,7 +299,7 @@ Every subsystem has a dedicated design document located in `docs/`.
 
 - Interactive shell
 - Job control
-- ELF executable loader
+- Userspace ELF build and `/bin` seeding
 - Core Unix-style commands including:
 
   - `cat`
@@ -374,6 +384,7 @@ Every subsystem has a dedicated design document located in `docs/`.
     ├── architecture               -- Subsystem architecture documents
     │   ├── architecture.md        -- Hardware, boot, linker layout, traps, IRQs, timers, and syscalls
     │   ├── device-drivers.md      -- Block devices, char drivers, UART, TTY, TTYGUI, pipes, and fan
+    │   ├── elf-loading.md         -- Runtime exec, ELF validation, stack setup, and lazy segment paging
     │   ├── filesystem.md          -- Inodes, VFS, mkfs, mount, caches, permissions, and dev nodes
     │   ├── memory.md              -- MMU, page tables, page faults, COW, and allocators
     │   ├── processes.md           -- Scheduler, context switching, fork, exec, waitpid, sleep, and resources

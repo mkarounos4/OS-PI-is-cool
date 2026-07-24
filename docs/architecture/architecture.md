@@ -512,28 +512,9 @@ The timer subsystem is built on the ARM generic physical timer. `timer_init`
 disables the timer, reads `CNTFRQ_EL0`, clears the software timer table,
 registers the timer IRQ handler, and enables the timer interrupt line.
 
-The kernel tracks software timers in a fixed-size table. Each active timer has:
-
-- a deadline in counter ticks.
-- a callback function.
-- a callback context pointer.
-
-When timers are scheduled, the timer code arms the hardware for the nearest
-deadline. If there are no active software timers, it disables the hardware
-timer. If the nearest deadline is too far for the timer compare register, it
-caps the hardware delay and rearms later.
-
-The timer IRQ handler:
-
-1. Disables the hardware timer.
-2. Increments the timer tick counter.
-3. Finds expired software timers.
-4. Clears expired timer slots.
-5. Runs expired callbacks.
-6. Rearms the hardware timer for the next deadline.
-
-Callbacks run from interrupt context, so they should do small state transitions
-and wakeups rather than long blocking work.
+This section covers the hardware-facing timer boundary. The delayed callback
+table and `sleep` behavior are documented in
+[Software Timers and Sleep](#software-timers-and-sleep).
 
 ## Software Timers and Sleep
 
@@ -608,20 +589,6 @@ Userspace enters the kernel with `svc #0`. The userspace wrapper ABI is:
 The inline syscall wrapper marks caller-saved registers and memory as clobbered,
 then returns the value placed in `x0` by the kernel.
 
-The kernel syscall path is:
-
-```
-user wrapper
-  -> svc #0
-  -> lower-EL synchronous exception
-  -> exception_entry
-  -> handle_sync_exception
-  -> syscall_dispatch
-  -> subsystem implementation
-  -> frame->regs[0] = return value
-  -> eret to EL0
-```
-
 `syscall_dispatch` increments syscall counters for `/proc`, switches on the
 number in `x8`, calls the owning subsystem, and writes the result into
 `frame->regs[0]`.
@@ -636,6 +603,8 @@ Some syscalls affect control flow:
 
 This keeps the trap handler narrow. It knows how to identify SVC exceptions,
 but it does not implement filesystem, process, signal, or TTY policy.
+The full user trap, scheduler handoff, context switch, and trap-frame return
+path is documented in [processes.md](processes.md#user-trap-to-kernel-return).
 
 ## Fatal Exception Policy
 
