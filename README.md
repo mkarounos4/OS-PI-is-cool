@@ -22,7 +22,8 @@
 | [Demo Guide](docs/demo.md) | Demo workflow and commands to show the OS running. |
 | [Architecture](docs/architecture/architecture.md) | Boot flow, linker layout, platform split, EL1/EL0 boundary, IRQs, timers, traps, and syscalls. |
 | [Filesystem Architecture](docs/architecture/filesystem.md) | Inode filesystem, VFS, open-file table, caches, permissions, and disk layout. |
-| [Processes Architecture](docs/architecture/processes.md) | Scheduler, fork, exec, process groups, zombies/orphans, waitpid, multithreading, synchronization, isolation. |
+| [Processes Architecture](docs/architecture/processes.md) | Scheduler, trap-frame return path, context switching, fork, exec, process groups, zombies/orphans, waitpid, sleep blocking, multithreading, synchronization, isolation. |
+| [Signals Architecture](docs/architecture/signals.md) | Kernel signal delivery, masks, pending sets, default actions, process groups, job-control signals, SIGCHLD, and scheduler delivery checkpoints. |
 | [Userspace Architecture](docs/architecture/userspace.md) | Userspace build pipeline, linker scripts, embedded ELF blobs, EL0 isolation, init, shell, and user libraries. |
 | [Memory Architecture](docs/architecture/memory.md) | Virtual Memory, per-process page tables, lazy allocation, demand paging, page fault handling, copy-on-write, malloc |
 | [Device Drivers Architecture](docs/architecture/device-drivers.md) | Block devices, SDHCI, UART, char devices, TTY backends, framebuffer terminal, pipes, fan, and driver init order. |
@@ -223,19 +224,31 @@ Every subsystem has a dedicated design document located in `docs/`.
 - Interrupt and exception handling
 - System calls
 - Timer-driven preemption
+- Software timers and `sleep()`
+- Error handling and fatal exception policy
 - UART console
 - SD card persistence
 
 ## [Process Management](docs/architecture/processes.md)
 
 - Multi-priority round-robin scheduler
+- End-to-end trap frame, scheduler interrupt, context switch, and EL0 return path
 - `fork()` with Copy-on-Write
 - `exec()` ELF loading
 - Process groups
-- POSIX-style signals
 - Zombie and orphan handling
 - `waitpid()`
+- Timer-backed sleep blocking
 - Multithreading and Synchronization
+
+## [Signals](docs/architecture/signals.md)
+
+- POSIX-style signal actions and masks
+- Process-level and thread-level pending signals
+- Process-group signal delivery
+- `SIGCHLD` and `waitpid()` wakeups
+- TTY job-control signals
+- Scheduler checkpoint delivery
 
 ## [Memory Management](docs/architecture/memory.md)
 
@@ -363,7 +376,8 @@ Every subsystem has a dedicated design document located in `docs/`.
     │   ├── device-drivers.md      -- Block devices, char drivers, UART, TTY, TTYGUI, pipes, and fan
     │   ├── filesystem.md          -- Inodes, VFS, mkfs, mount, caches, permissions, and dev nodes
     │   ├── memory.md              -- MMU, page tables, page faults, COW, and allocators
-    │   ├── processes.md           -- Process architecture placeholder
+    │   ├── processes.md           -- Scheduler, context switching, fork, exec, waitpid, sleep, and resources
+    │   ├── signals.md             -- Signal delivery, masks, process groups, job control, and SIGCHLD
     │   └── userspace.md           -- Userspace build, linker scripts, ELF embedding, init, shell, and libs
     └── api-docs
         ├── procfs-api.md          -- Procfs file reference and output fields

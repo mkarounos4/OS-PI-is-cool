@@ -26,9 +26,11 @@ detail, but the hardware and CPU-control path is documented here.
 - [IRQ controller architecture](#irq-controller-architecture)
 - [IRQ dispatch flow](#irq-dispatch-flow)
 - [Timer architecture](#timer-architecture)
+- [Software timers and sleep](#software-timers-and-sleep)
 - [Scheduler handoff from interrupts](#scheduler-handoff-from-interrupts)
 - [System call boundary](#system-call-boundary)
 - [Fatal exception policy](#fatal-exception-policy)
+- [Error handling architecture](#error-handling-architecture)
 - [Subsystem integration](#subsystem-integration)
 - [Design tradeoffs and limits](#design-tradeoffs-and-limits)
 
@@ -533,6 +535,48 @@ The timer IRQ handler:
 Callbacks run from interrupt context, so they should do small state transitions
 and wakeups rather than long blocking work.
 
+## Software Timers and Sleep
+
+Software timers are the kernel's general delayed-callback mechanism. The table
+has a fixed capacity of 64 active timers. Each timer slot stores:
+
+- whether the slot is active.
+- an absolute deadline in ARM counter ticks.
+- a callback function.
+- an opaque callback context pointer.
+
+`timer_schedule_interrupt_ms(milliseconds, handler, ctx)` converts milliseconds
+to counter ticks using `CNTFRQ_EL0`, finds a free software timer slot while IRQs
+are masked, records the deadline and callback, and rearms the physical timer to
+the nearest active deadline. If the table is full or the handler is NULL, the
+call fails.
+
+The hardware timer is always armed for the nearest known software deadline. If
+there are no active software timers, `timer_rearm_locked()` disables the
+hardware timer. If the next deadline is farther away than the 32-bit
+`CNTP_TVAL_EL0` register can represent, the timer is armed for the maximum
+representable delay and rechecked later.
+
+`sleep(ms)` is built entirely on this software timer mechanism:
+
+1. The syscall dispatcher calls `timer_sleep_ms(ms)`.
+2. `timer_sleep_ms` gets the current TCB.
+3. `ms == 0` is treated as a scheduler yield.
+4. For nonzero sleeps, the TCB records `BLOCK_UNTIL_TIMER`.
+5. A software timer is scheduled with `timer_wake_thread` and the current TID.
+6. The current thread is blocked interruptibly and yields.
+7. When the timer IRQ fires, `timer_irq_handler` runs expired callbacks.
+8. `timer_wake_thread` resolves the TID and calls `unblock_thread`.
+
+If the sleeping thread was stopped while blocked, the wake callback clears the
+timer bit but leaves the thread stopped. A later continue operation can restore
+it to the appropriate ready or blocked state. This prevents a timer expiry from
+silently undoing job-control stop state.
+
+This design keeps sleep out of busy loops. Sleeping threads leave the run
+queues, the hardware timer wakes the kernel at the next deadline, and the
+scheduler decides what should run next.
+
 ## Scheduler Handoff From Interrupts
 
 The scheduler is connected to the timer through a deferred handoff. The timer
@@ -614,6 +658,32 @@ current thread, the kernel disables IRQs and halts in a `wfe` loop. This
 distinction is important: once the scheduler is running, a bad user process
 should not necessarily bring down the whole kernel, but a fatal exception before
 thread context exists cannot be recovered safely.
+
+## Error Handling Architecture
+
+The kernel uses three broad failure policies:
+
+- recoverable syscall and subsystem errors are returned as negative
+  errno-style values.
+- recoverable filesystem internals use filesystem error codes and are converted
+  to syscall errno values at the syscall boundary.
+- unrecoverable CPU exceptions and corrupted execution state go through the
+  fatal exception path.
+
+The syscall dispatcher is the main normalization point. It receives raw
+arguments from the trap frame, calls the owning subsystem, and writes the final
+return value into `frame->regs[0]`. Filesystem syscalls pass through
+`fs_err_to_sys_errno`; process, signal, timer, and TTY paths generally return
+`SYS_E*` values directly.
+
+Lifecycle operations try to avoid committing partial state before validation is
+complete. For example, `exec` validates and builds the replacement page table
+before swapping it into the PCB, so a failed `exec` can return to the old image.
+`fork` creates a child first and then either enqueues it after the child frame
+and resources are prepared or destroys it on validation failure. Fatal traps are
+treated differently: if a current thread exists, that thread is terminated; if
+there is no current thread, the kernel halts because there is no safe execution
+context to recover into.
 
 ## Subsystem Integration
 

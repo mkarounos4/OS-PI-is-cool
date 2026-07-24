@@ -5,6 +5,10 @@ and `user/lib/syscall.c`. Signal sets are 32-bit integer bitsets; bit `N`
 represents signal number `N`. Return values are `0` on success unless noted, or
 a negative `SYS_E*` kernel error value.
 
+For the kernel delivery path, scheduler checkpoints, process-group behavior,
+and `SIGCHLD`/`waitpid` integration, see
+[Signal Handling Architecture](../architecture/signals.md).
+
 ## Signal Syscall Table
 
 | SVC | Public enum | Userspace API | Kernel entry | Summary |
