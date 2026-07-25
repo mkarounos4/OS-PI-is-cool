@@ -23,6 +23,9 @@
 #define FILE_NOT_CREATED -19
 #define CAT_SAME_INPUT_OUTPUT -20
 #define FS_INVALID -21
+#define FILE_ALREADY_EXISTS -22
+#define NOT_A_DIRECTORY -23
+#define IS_A_DIRECTORY -24
 
 typedef int err_t;
 

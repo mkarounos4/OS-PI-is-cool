@@ -16,12 +16,15 @@ static int write_all(int fd, const char *buf, int n) {
     return written;
 }
 
-static int copy_fd(int in_fd, int out_fd) {
+static int copy_fd(int in_fd, int out_fd, int *failed_on_write) {
     char buf[CP_BUF_SIZE];
 
     while (1) {
         int bytes_read = read(in_fd, buf, sizeof(buf));
         if (bytes_read < 0) {
+            if (failed_on_write != 0) {
+                *failed_on_write = 0;
+            }
             return bytes_read;
         }
         if (bytes_read == 0) {
@@ -30,6 +33,9 @@ static int copy_fd(int in_fd, int out_fd) {
 
         int bytes_written = write_all(out_fd, buf, bytes_read);
         if (bytes_written < 0) {
+            if (failed_on_write != 0) {
+                *failed_on_write = 1;
+            }
             return bytes_written;
         }
     }
@@ -54,7 +60,8 @@ int main(int argc, char **argv) {
         return dest_fd;
     }
 
-    int err = copy_fd(src_fd, dest_fd);
+    int failed_on_write = 0;
+    int err = copy_fd(src_fd, dest_fd, &failed_on_write);
     int close_src_err = close(src_fd);
     int close_dest_err = close(dest_fd);
     if (err == 0 && close_src_err < 0) {
@@ -65,7 +72,7 @@ int main(int argc, char **argv) {
     }
 
     if (err < 0) {
-        print_errno("cp", "failed", err);
+        print_errno("cp", failed_on_write ? argv[2] : argv[1], err);
     }
 
     return err;

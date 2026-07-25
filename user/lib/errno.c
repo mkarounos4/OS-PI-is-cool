@@ -73,31 +73,6 @@ static void write_str(int fd, const char *s) {
     write(fd, s, (int)strlen(s));
 }
 
-static void write_long(int fd, long value) {
-    char buf[32];
-    int i = 0;
-
-    if (value < 0) {
-        write_str(fd, "-");
-        value = -value;
-    }
-
-    if (value == 0) {
-        write_str(fd, "0");
-        return;
-    }
-
-    while (value != 0 && i < (int)sizeof(buf)) {
-        buf[i++] = (char)('0' + (value % 10));
-        value /= 10;
-    }
-
-    while (i > 0) {
-        char c = buf[--i];
-        write(fd, &c, 1);
-    }
-}
-
 void print_errno(const char *cmd, const char *context, long err) {
     if (err >= 0) {
         return;
@@ -112,10 +87,6 @@ void print_errno(const char *cmd, const char *context, long err) {
         write_str(STDERR_FILENO, ": ");
     }
 
-    write_str(STDERR_FILENO, errno_name(err));
-    write_str(STDERR_FILENO, " (");
-    write_long(STDERR_FILENO, err);
-    write_str(STDERR_FILENO, "): ");
     write_str(STDERR_FILENO, errno_message(err));
     write_str(STDERR_FILENO, "\n");
 }

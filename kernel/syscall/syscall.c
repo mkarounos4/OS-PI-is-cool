@@ -18,7 +18,7 @@
 #define SYS_WRITE_CONSOLE_MAX 1024u
 #define SYS_USER_PTR_MIN      UINT64_C(0x1000)
 #define SYS_WRITE_CHUNK       128u
-#define SYSCALL_COUNT         55u
+#define SYSCALL_COUNT         57u
 
 static uint32_t syscall_counts[SYSCALL_COUNT];
 
@@ -78,6 +78,8 @@ static const char *syscall_name(uint64_t syscall_number) {
         [S_TTY_SCREEN_LEAVE] = "tty_screen_leave",
         [S_TTY_SCREEN_PRESENT] = "tty_screen_present",
         [S_PROC_CHANGE_PRIORITY] = "proc_change_priority",
+        [S_CREATE_LINK] = "createlink",
+        [S_READLINK] = "readlink",
     };
 
     if (syscall_number >= SYSCALL_COUNT ||
@@ -401,6 +403,16 @@ struct trap_frame *syscall_dispatch(struct trap_frame *frame) {
     case S_PROC_CHANGE_PRIORITY:
         ret = 0;
         process_change_priority((pid_t)frame->regs[0], (int)frame->regs[1]);
+        break;
+    case S_CREATE_LINK:
+        ret = fs_err_to_sys_errno(createlink((const char *)(uintptr_t)frame->regs[0],
+                                             (const char *)(uintptr_t)frame->regs[1],
+                                             (int)frame->regs[2]));
+        break;
+    case S_READLINK:
+        ret = fs_err_to_sys_errno(k_readlink((const char *)(uintptr_t)frame->regs[0],
+                                             (char *)(uintptr_t)frame->regs[1],
+                                             (size_t)frame->regs[2]));
         break;
     default:
         ret = SYS_ENOSYS;

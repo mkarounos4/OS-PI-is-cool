@@ -25,8 +25,7 @@ static struct devfs_node devfs_nodes[DEVFS_MAX_NODES];
 
 static int devfs_dir_open(struct oft_entry *entry);
 static int devfs_dir_close(struct oft_entry *entry);
-static int devfs_dir_lookup(const char *f_name, uint8_t is_dir_type,
-                            struct fs_dirent *dirent, int curr_dir);
+static int devfs_dir_lookup(const char *f_name, struct fs_dirent *dirent, int curr_dir);
 static int devfs_dir_readdir(struct oft_entry *dir, struct fs_dirent *out);
 
 static struct file_operations devfs_dir_ops = {
@@ -263,22 +262,17 @@ static int devfs_dir_close(struct oft_entry *entry) {
     return SUCCESS;
 }
 
-static int devfs_dir_lookup(const char *f_name, uint8_t is_dir_type,
-                            struct fs_dirent *dirent, int curr_dir) {
+static int devfs_dir_lookup(const char *f_name, struct fs_dirent *dirent, int curr_dir) {
     if (curr_dir != DEVFS_INO_ROOT_DIR || f_name == NULL) {
         return INVALID_ARGS;
     }
 
-    if (is_dir_type && strcmp(f_name, ".") == 0) {
+    if (strcmp(f_name, ".") == 0) {
         return devfs_emit_dirent(dirent, ".", DEVFS_INO_ROOT_DIR);
     }
-    if (is_dir_type && strcmp(f_name, "..") == 0) {
+    if ( strcmp(f_name, "..") == 0) {
         return devfs_emit_dirent(dirent, "..", ROOT_INO);
     }
-    if (is_dir_type) {
-        return FILE_NOT_FOUND;
-    }
-
     int index = devfs_find_node_by_name(f_name);
     if (index < 0) {
         return FILE_NOT_FOUND;

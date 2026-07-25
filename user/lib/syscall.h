@@ -78,6 +78,8 @@ enum syscall_type {
     S_TTY_SCREEN_LEAVE = 52,
     S_TTY_SCREEN_PRESENT = 53,
     S_PROC_CHANGE_PRIORITY = 54,
+    S_CREATE_LINK = 55,
+    S_READLINK = 56,
 };
 
 long write_console(const char *s, uint64_t len);

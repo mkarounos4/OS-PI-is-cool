@@ -32,7 +32,7 @@ These flows validate the public OS behavior through userspace:
 - Shell startup on `/dev/tty0`
 - `/bin` command listing with `ls /bin`
 - Filesystem creation, read/write, copy, remove, and metadata checks with
-  `echo`, `cat`, `cp`, `rm`, `stat`, and `ls`
+  `echo`, `cat`, `cp`, `rm`, `stat`, `ln`, `readlink`, and `ls`
 - Persistent file check across reboot on a persistent SD card or QEMU disk image
 - Pipes and redirection through shell commands such as `cat file | grep pattern`
   and `echo text > file`

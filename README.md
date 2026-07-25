@@ -340,7 +340,7 @@ Every subsystem has a dedicated design document located in `docs/`.
 
 - ext2-inspired inode filesystem
 - Directories
-- Symbolic links
+- Hard and symbolic links
 - Open-file table
 - Virtual filesystem layer
 - `procfs` and `devfs` root virtual filesystems
@@ -371,6 +371,8 @@ Every subsystem has a dedicated design document located in `docs/`.
   - `ls`
   - `grep`
   - `kill`
+  - `ln`
+  - `readlink`
   - `sleep`
   - `vim` style text editor
   - `wc`
@@ -427,6 +429,7 @@ Every subsystem has a dedicated design document located in `docs/`.
 │   │   ├── oft.c/h                -- Open-file table
 │   │   ├── devfs.c/h              -- Devfs virtual device nodes
 │   │   ├── procfs.c/h             -- Procfs virtual files
+│   │   ├── symlink.c/h            -- Symbolic-link fops and readlink support
 │   │   ├── types.h                -- Filesystem types
 │   │   └── virtual_fs.c/h         -- Virtual filesystem routing
 │   ├── gui                        -- Framebuffer GUI and terminal rendering

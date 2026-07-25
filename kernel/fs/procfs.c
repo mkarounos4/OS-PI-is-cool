@@ -95,8 +95,7 @@ static int proc_dir_open(struct oft_entry *entry);
 static int proc_dir_close(struct oft_entry *entry);
 static int proc_emit_dirent(struct fs_dirent *out, const char *name,
                             ino_id_t ino);
-static int proc_dir_lookup(const char *f_name, uint8_t is_dir_type,
-                           struct fs_dirent *dirent, int curr_dir);
+static int proc_dir_lookup(const char *f_name, struct fs_dirent *dirent, int curr_dir);
 static int proc_dir_readdir(struct oft_entry *dir, struct fs_dirent *out);
 static int proc_file_open(struct oft_entry *entry);
 static int proc_file_close(struct oft_entry *entry);
@@ -442,6 +441,16 @@ static err_t procfs_format_path(ino_id_t ino, char *path, size_t size) {
         return SUCCESS;
     }
 
+    if (ino >= PROC_INO_ROOT_FILE_BASE &&
+        ino < PROC_INO_ROOT_FILE_BASE + (ino_id_t)proc_root_file_count()) {
+        int index = (int)(ino - PROC_INO_ROOT_FILE_BASE);
+        if (snprintf(path, size, "/proc/%s",
+                     proc_root_files[index].name) >= (int)size) {
+            return INVALID_ARGS;
+        }
+        return SUCCESS;
+    }
+
     if (ino >= PROC_INO_PID_DIR_BASE &&
         ino < PROC_INO_PID_DIR_BASE + (ino_id_t)MAX_PROCESS_COUNT) {
         pid_t pid = (pid_t)(ino - PROC_INO_PID_DIR_BASE);
@@ -449,6 +458,23 @@ static err_t procfs_format_path(ino_id_t ino, char *path, size_t size) {
             return FILE_NOT_FOUND;
         }
         if (snprintf(path, size, "/proc/%d", pid) >= (int)size) {
+            return INVALID_ARGS;
+        }
+        return SUCCESS;
+    }
+
+    ino_id_t pid_file_start = PROC_INO_PID_FILE_BASE;
+    ino_id_t pid_file_count =
+        (ino_id_t)MAX_PROCESS_COUNT * (ino_id_t)proc_pid_file_count();
+    if (ino >= pid_file_start && ino < pid_file_start + pid_file_count) {
+        ino_id_t raw = ino - pid_file_start;
+        pid_t pid = (pid_t)(raw / (ino_id_t)proc_pid_file_count());
+        int index = (int)(raw % (ino_id_t)proc_pid_file_count());
+        if (get_pcb_by_pid(pid) == NULL) {
+            return FILE_NOT_FOUND;
+        }
+        if (snprintf(path, size, "/proc/%d/%s", pid,
+                     proc_pid_files[index].name) >= (int)size) {
             return INVALID_ARGS;
         }
         return SUCCESS;
@@ -584,29 +610,7 @@ static int proc_dir_close(struct oft_entry *entry) {
     return SUCCESS;
 }
 
-static int proc_lookup_root(const char *f_name, uint8_t is_dir_type,
-                            struct fs_dirent *dirent) {
-    if (is_dir_type) {
-        pid_t pid;
-        err_t err = parse_pid(f_name, &pid);
-        if (err != SUCCESS) {
-            return err;
-        }
-
-        ino_id_t ino;
-        err = proc_ensure_pid_dir(pid, &ino);
-        if (err != SUCCESS) {
-            return err;
-        }
-
-        if (dirent != NULL) {
-            memset(dirent, 0, sizeof(*dirent));
-            write_pid_name(dirent->name, pid);
-            dirent->ino_id = ino;
-        }
-        return SUCCESS;
-    }
-
+static int proc_lookup_root(const char *f_name, struct fs_dirent *dirent) {
     for (int i = 0; i < proc_root_file_count(); i++) {
         if (strcmp(f_name, proc_root_files[i].name) != 0) {
             continue;
@@ -626,13 +630,31 @@ static int proc_lookup_root(const char *f_name, uint8_t is_dir_type,
         return SUCCESS;
     }
 
+    pid_t pid;
+    err_t err = parse_pid(f_name, &pid);
+    if (err == SUCCESS) {
+        ino_id_t ino;
+        err = proc_ensure_pid_dir(pid, &ino);
+        if (err != SUCCESS) {
+            return err;
+        }
+
+        if (dirent != NULL) {
+            memset(dirent, 0, sizeof(*dirent));
+            write_pid_name(dirent->name, pid);
+            dirent->ino_id = ino;
+        }
+        return SUCCESS;
+    }
+    if (err == FILE_NOT_FOUND) {
+        return FILE_NOT_FOUND;
+    }
+
     return FILE_NOT_FOUND;
 }
 
-static int proc_lookup_pid_dir(struct proc_st *proc, const char *f_name,
-                               uint8_t is_dir_type,
-                               struct fs_dirent *dirent) {
-    if (proc == NULL || is_dir_type) {
+static int proc_lookup_pid_dir(struct proc_st *proc, const char *f_name, struct fs_dirent *dirent) {
+    if (proc == NULL) {
         return FILE_NOT_FOUND;
     }
 
@@ -658,8 +680,7 @@ static int proc_lookup_pid_dir(struct proc_st *proc, const char *f_name,
     return FILE_NOT_FOUND;
 }
 
-static int proc_dir_lookup(const char *f_name, uint8_t is_dir_type,
-                           struct fs_dirent *dirent, int curr_dir) {
+static int proc_dir_lookup(const char *f_name, struct fs_dirent *dirent, int curr_dir) {
     attributes_t metadata;
     err_t err = get_inode_metadata(curr_dir, &metadata);
     if (err != SUCCESS) {
@@ -671,10 +692,10 @@ static int proc_dir_lookup(const char *f_name, uint8_t is_dir_type,
         return INVALID_ARGS;
     }
 
-    if (is_dir_type && strcmp(f_name, ".") == 0) {
+    if (strcmp(f_name, ".") == 0) {
         return proc_emit_dirent(dirent, ".", (ino_id_t)curr_dir);
     }
-    if (is_dir_type && strcmp(f_name, "..") == 0) {
+    if (strcmp(f_name, "..") == 0) {
         if (proc->kind == PROC_KIND_ROOT_DIR) {
             return proc_emit_dirent(dirent, "..", ROOT_INO);
         }
@@ -684,10 +705,10 @@ static int proc_dir_lookup(const char *f_name, uint8_t is_dir_type,
     }
 
     if (proc->kind == PROC_KIND_ROOT_DIR) {
-        return proc_lookup_root(f_name, is_dir_type, dirent);
+        return proc_lookup_root(f_name, dirent);
     }
     if (proc->kind == PROC_KIND_PID_DIR) {
-        return proc_lookup_pid_dir(proc, f_name, is_dir_type, dirent);
+        return proc_lookup_pid_dir(proc, f_name, dirent);
     }
 
     return INVALID_ARGS;

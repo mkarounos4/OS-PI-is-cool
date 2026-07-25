@@ -45,6 +45,10 @@ wc hello.txt
 stat hello.txt
 mkdir notes
 cp hello.txt notes/copy.txt
+ln hello.txt hello-hard.txt
+ln -s notes notes-link
+readlink notes-link
+ls notes-link
 ls notes
 rm notes/copy.txt
 ```

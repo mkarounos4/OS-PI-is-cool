@@ -29,12 +29,12 @@ static unsigned char mount_block_buffer[FS_MOUNT_BLOCK_BUFFER_SIZE] __attribute_
 
 static err_t mark_user_bin_executable(const char *path) {
     struct fs_dirent dirent;
-    err_t err = get_dirent_by_path(path, &dirent, 0, NULL, NULL);
+    err_t err = get_dirent_by_path(path, &dirent, NULL, NULL);
     if (err != SUCCESS) {
         return err;
     }
 
-    return update_inode_metadata(dirent.ino_id, INODE_EDIT_PERM, 0, 0x1);
+    return update_inode_metadata(dirent.ino_id, INODE_EDIT_PERM, 0, 0x1, 0);
 }
 
 static err_t seed_user_bin_file(const user_bin_t *bin) {
@@ -84,7 +84,23 @@ static err_t seed_user_bin_file(const user_bin_t *bin) {
 
 static err_t seed_user_bins(void) {
     struct fs_dirent dir;
-    err_t err = get_dirent_by_path("/bin", &dir, 1, NULL, NULL);
+    err_t err = get_dirent_by_path("/bin", &dir, NULL, NULL);
+    
+    if (err == SUCCESS) {
+        attributes_t metadata;
+        err = get_inode_metadata(dir.ino_id, &metadata);
+        if (err) {
+            return err;
+        }
+        if (metadata.type != DIRECTORY_TYPE) {
+            err = k_unlink("/bin");
+            if (err) {
+                return err;
+            }
+            err = FILE_NOT_CREATED;
+        }
+    }
+    
     if (err == FILE_NOT_CREATED || err == FILE_NOT_FOUND) {
         err = k_make_directory("/bin");
     }
@@ -837,7 +853,7 @@ err_t free_file(const char* f_name) {
     struct fs_dirent dirent;
     char *actual_name;
     ino_id_t parent_dir;
-    err_t error = get_dirent_by_path(f_name, &dirent, 0, &parent_dir, &actual_name);
+    err_t error = get_dirent_by_path(f_name, &dirent, &parent_dir, &actual_name);
     if (error == FILE_NOT_FOUND || error == FILE_NOT_CREATED) {
         return FILE_NOT_FOUND;
     } else if (error) {
@@ -847,19 +863,26 @@ err_t free_file(const char* f_name) {
     attributes_t metadata;
     error = get_inode_metadata(dirent.ino_id, &metadata);
     if (error != SUCCESS) {
+        kfree(actual_name);
         return error;
+    }
+    if (metadata.type == DIRECTORY_TYPE) {
+        kfree(actual_name);
+        return IS_A_DIRECTORY;
     }
 
     if (dirent.ino_id != 0) {
 
        error = free_file_inode(get_inode_from_cache(dirent.ino_id));
        if (error != SUCCESS) {
+           kfree(actual_name);
            return error;
        }
     }
     remove_ref_from_cache(dirent.ino_id);
 
-    error = remove_dirent_by_f_name_and_type(actual_name, metadata.type == DIRECTORY_TYPE, parent_dir);
+    error = remove_dirent_by_f_name(actual_name, parent_dir);
+    kfree(actual_name);
     return error;
 }
 

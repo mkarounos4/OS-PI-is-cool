@@ -17,12 +17,15 @@ static int write_all(int fd, const char *buf, int n) {
     return written;
 }
 
-static int copy_fd(int in_fd, int out_fd) {
+static int copy_fd(int in_fd, int out_fd, int *failed_on_write) {
     char buf[CAT_BUF_SIZE];
 
     while (1) {
         int bytes_read = read(in_fd, buf, sizeof(buf));
         if (bytes_read < 0) {
+            if (failed_on_write != 0) {
+                *failed_on_write = 0;
+            }
             return bytes_read;
         }
         if (bytes_read == 0) {
@@ -31,6 +34,9 @@ static int copy_fd(int in_fd, int out_fd) {
 
         int bytes_written = write_all(out_fd, buf, bytes_read);
         if (bytes_written < 0) {
+            if (failed_on_write != 0) {
+                *failed_on_write = 1;
+            }
             return bytes_written;
         }
     }
@@ -80,6 +86,7 @@ int main(int argc, char **argv) {
 
     int saw_input = 0;
     int err = 0;
+    int reported_err = 0;
     for (int i = 1; i < argc; i++) {
         if (i == output_arg || i == output_path_arg) {
             continue;
@@ -87,6 +94,7 @@ int main(int argc, char **argv) {
         if (output_file != NULL && strcmp(argv[i], output_file) == 0) {
             err = -EINVAL;
             print_errno("cat", "input and output are the same file", err);
+            reported_err = 1;
             break;
         }
 
@@ -95,21 +103,36 @@ int main(int argc, char **argv) {
         if (in_fd < 0) {
             err = in_fd;
             print_errno("cat", argv[i], err);
+            reported_err = 1;
             break;
         }
 
-        err = copy_fd(in_fd, out_fd);
+        int failed_on_write = 0;
+        err = copy_fd(in_fd, out_fd, &failed_on_write);
         int close_err = close(in_fd);
         if (err == 0 && close_err < 0) {
             err = close_err;
         }
         if (err < 0) {
+            print_errno("cat",
+                        failed_on_write && output_file != NULL ?
+                        output_file : argv[i],
+                        err);
+            reported_err = 1;
             break;
         }
     }
 
     if (!saw_input && err == 0) {
-        err = copy_fd(STDIN_FILENO, out_fd);
+        int failed_on_write = 0;
+        err = copy_fd(STDIN_FILENO, out_fd, &failed_on_write);
+        if (err < 0) {
+            print_errno("cat",
+                        failed_on_write && output_file != NULL ?
+                        output_file : "stdin",
+                        err);
+            reported_err = 1;
+        }
     }
 
     if (output_file != NULL) {
@@ -119,7 +142,7 @@ int main(int argc, char **argv) {
         }
     }
 
-    if (err < 0) {
+    if (err < 0 && !reported_err) {
         print_errno("cat", "failed", err);
     }
 

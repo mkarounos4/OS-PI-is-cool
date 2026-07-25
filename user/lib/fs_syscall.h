@@ -15,6 +15,9 @@ typedef __SIZE_TYPE__ ssize_t;
 #define O_WRONLY 2
 #define O_RDWR 3
 
+#define LINK_HARD 0
+#define LINK_SOFT 1
+
 #define F_SEEK_SET 0
 #define F_SEEK_CUR 1
 #define F_SEEK_END 2
@@ -100,6 +103,26 @@ static inline err_t ls(char *dir_path) {
 
 static inline err_t fs_mkdir(char **file_paths) {
     return (err_t)sys_call1(S_FS_MKDIR, (long)(uintptr_t)file_paths);
+}
+
+static inline err_t createlink(const char *create_path,
+                               const char *orig_path,
+                               int flags) {
+    return (err_t)sys_call3(S_CREATE_LINK,
+                            (long)(uintptr_t)create_path,
+                            (long)(uintptr_t)orig_path,
+                            flags);
+}
+
+static inline err_t ln(const char *orig_path, const char *create_path, int flags) {
+    return createlink(create_path, orig_path, flags);
+}
+
+static inline int readlink(const char *path, char *buffer, size_t count) {
+    return (int)sys_call3(S_READLINK,
+                          (long)(uintptr_t)path,
+                          (long)(uintptr_t)buffer,
+                          (long)count);
 }
 
 static inline err_t cd(char *path) {

@@ -605,13 +605,13 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
             } else if (parsed_cmd->stdin_file != NULL) {
                 int fd = open(parsed_cmd->stdin_file, O_RDONLY);
                 if (fd < 0) {
-                    perror("failed to open file.");
+                    print_errno("shell", parsed_cmd->stdin_file, fd);
                     exit(EXIT_FAILURE);
                 }
                 dup2(fd, STDIN_FILENO);
                 err_t err = close(fd);
                 if (err < 0) {
-                    perror("failed to close file");
+                    print_errno("shell", parsed_cmd->stdin_file, err);
                     exit(EXIT_FAILURE);
                 }
             }
@@ -620,13 +620,13 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
                 flags |= parsed_cmd->is_file_append ? O_APPEND : O_TRUNC;
                 int fd = open(parsed_cmd->stdout_file, flags);
                 if (fd < 0) {
-                    perror("failed to open file.");
+                    print_errno("shell", parsed_cmd->stdout_file, fd);
                     exit(EXIT_FAILURE);
                 }
                 dup2(fd, STDOUT_FILENO);
                 err_t err = close(fd);
                 if (err < 0) {
-                    perror("failed to close file");
+                    print_errno("shell", parsed_cmd->stdout_file, err);
                     exit(EXIT_FAILURE);
                 }
 
@@ -685,13 +685,13 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
                     } else if (parsed_cmd->stdin_file != NULL) {
                         int fd = open(parsed_cmd->stdin_file, O_RDONLY);
                         if (fd < 0) {
-                            perror("failed to open file.");
+                            print_errno("shell", parsed_cmd->stdin_file, fd);
                             exit(EXIT_FAILURE);
                         }
                         dup2(fd, STDIN_FILENO);
                         err_t err = close(fd);
                         if (err < 0) {
-                            perror("failed to close file");
+                            print_errno("shell", parsed_cmd->stdin_file, err);
                             exit(EXIT_FAILURE);
                         }
                     }
@@ -704,13 +704,13 @@ void execute_commands(struct parsed_command *parsed_cmd, char *cmd) {
                     flags |= parsed_cmd->is_file_append ? O_APPEND : O_TRUNC;
                     int fd = open(parsed_cmd->stdout_file, flags);
                     if (fd < 0) {
-                        perror("failed to open file.");
+                        print_errno("shell", parsed_cmd->stdout_file, fd);
                         exit(EXIT_FAILURE);
                     }
                     dup2(fd, STDOUT_FILENO);
                     err_t err = close(fd);
                     if (err < 0) {
-                        perror("failed to close file");
+                        print_errno("shell", parsed_cmd->stdout_file, err);
                         exit(EXIT_FAILURE);
                     }
                 }

@@ -1,4 +1,7 @@
 #include "kapi.h"
+#include "disk.h"
+#include "errors.h"
+#include "inodes.h"
 #include "uart/uart.h"
 #include "oft.h"
 #include "dirs.h"
@@ -7,15 +10,16 @@
 #include "memory/page_table/page_table.h"
 #include "scheduler/scheduler.h"
 #include "pipe/pipe.h"
+#include "symlink.h"
 #include "string.h"
+#include "virtual_fs.h"
 
 int default_open(struct oft_entry *entry);
 int default_read(struct oft_entry *entry, char *buf, size_t n);
 int default_write(struct oft_entry *entry, const char *buf, size_t n);
 int dir_open(struct oft_entry *entry);
 int dir_close(struct oft_entry *entry);
-int dir_lookup(const char* f_name, uint8_t is_dir_type,
-               struct fs_dirent* dirent, int curr_dir);
+int dir_lookup(const char* f_name, struct fs_dirent* dirent, int curr_dir);
 int dir_readdir(struct oft_entry *dir, struct fs_dirent *out);
 
 static struct file_operations default_ops = (struct file_operations) {
@@ -65,10 +69,13 @@ int k_open(const char *fname, int mode) {
     
     struct fs_dirent dirent;
     ino_id_t parent_dir_id;
-    char *actual_name;
-    err_t error = get_dirent_by_path(fname, &dirent, 0, &parent_dir_id, &actual_name);
+    char *actual_name = NULL;
+    err_t error = get_dirent_by_path(fname, &dirent, &parent_dir_id, &actual_name);
     if (error == FILE_NOT_FOUND) {
         return FILE_NOT_FOUND;
+    }
+    if (error != SUCCESS && error != FILE_NOT_CREATED) {
+        return error;
     }
 
     if (error != FILE_NOT_CREATED) {
@@ -81,6 +88,10 @@ int k_open(const char *fname, int mode) {
             return INVALID_PERMISSIONS;
         } if (!(metadata.perm & 0x2) && ((mode & O_WRONLY) || (mode & O_APPEND))) {
             return INVALID_PERMISSIONS;
+        }
+        if (metadata.type == DIRECTORY_TYPE &&
+            (mode & (O_WRONLY | O_APPEND | O_TRUNC))) {
+            return IS_A_DIRECTORY;
         }
 
     } else if (!(mode & O_CREAT)) {
@@ -144,6 +155,9 @@ int k_read(struct oft_entry *entry, char *buf, size_t n) {
     if (entry->inode->inode.metadata.fops != NULL &&
         entry->inode->inode.metadata.fops->read != NULL) {
         return entry->inode->inode.metadata.fops->read(entry, buf, n);
+    }
+    if (entry->inode->inode.metadata.type == DIRECTORY_TYPE) {
+        return IS_A_DIRECTORY;
     }
     return 0;
 }
@@ -268,6 +282,9 @@ int k_write(struct oft_entry *entry, const char *buf, size_t n) {
 
     if (entry->inode->inode.metadata.fops != NULL && entry->inode->inode.metadata.fops->write != NULL) {
         return entry->inode->inode.metadata.fops->write(entry, buf, n);
+    }
+    if (entry->inode->inode.metadata.type == DIRECTORY_TYPE) {
+        return IS_A_DIRECTORY;
     }
     return 0;
 }
@@ -458,7 +475,7 @@ int k_chmod(const char *file_name, uint8_t new_perms, int flag) {
     char *actual_name;
     struct fs_dirent dirent;
     ino_id_t parent_dir;
-    err_t err = get_dirent_by_path(file_name, &dirent, 0, &parent_dir, &actual_name);
+    err_t err = get_dirent_by_path(file_name, &dirent, &parent_dir, &actual_name);
     if (err) {
         return err;
     }
@@ -466,18 +483,18 @@ int k_chmod(const char *file_name, uint8_t new_perms, int flag) {
     if (flag == 0) {
         err = update_inode_metadata(dirent.ino_id,
                                     INODE_EDIT_PERM | INODE_AND_PERM,
-                                    0, 0);
+                                    0, 0, 0);
         if (err == SUCCESS) {
             err = update_inode_metadata(dirent.ino_id, INODE_EDIT_PERM,
-                                        0, new_perms);
+                                        0, new_perms, 0);
         }
     } else if (flag == 1) {
         err = update_inode_metadata(dirent.ino_id,
                                     INODE_EDIT_PERM | INODE_AND_PERM,
-                                    0, (uint8_t)~new_perms);
+                                    0, (uint8_t)~new_perms, 0);
     } else if (flag == 2) {
         err = update_inode_metadata(dirent.ino_id, INODE_EDIT_PERM,
-                                    0, new_perms);
+                                    0, new_perms, 0);
     } else {
         err = INVALID_ARGS;
     }
@@ -495,11 +512,11 @@ int k_update_file_time(const char *file_name) {
     char *actual_name;
     struct fs_dirent dirent;
     ino_id_t parent_dir;
-    err_t err = get_dirent_by_path(file_name, &dirent, 0, &parent_dir, &actual_name);
+    err_t err = get_dirent_by_path(file_name, &dirent, &parent_dir, &actual_name);
     if (err) {
         return err;
     }
-    err = update_inode_metadata(dirent.ino_id, 0, 0, 0);
+    err = update_inode_metadata(dirent.ino_id, 0, 0, 0, 0);
     kfree(actual_name);
     return err;
 }
@@ -520,7 +537,7 @@ int k_ls(const char *filename, int out_fs) {
     ino_id_t dir_block = get_curr_dir();
     if (filename != NULL) {
         struct fs_dirent dir;
-        err_t err = get_dirent_by_path(filename, &dir, 1, NULL, NULL);
+        err_t err = get_dirent_by_path(filename, &dir, NULL, NULL);
         if (err) {
             return err;
         }
@@ -539,7 +556,7 @@ int k_mv_file(const char *src_path, const char *dest_path) {
 
     struct fs_dirent old_dirent;
     ino_id_t parent_dir;
-    int err = get_dirent_by_path(src_path, &old_dirent, 0, &parent_dir, NULL);
+    int err = get_dirent_by_path(src_path, &old_dirent, &parent_dir, NULL);
     if (err) {
         return err;
     }
@@ -547,7 +564,7 @@ int k_mv_file(const char *src_path, const char *dest_path) {
     ino_id_t new_parent_dir;
     struct fs_dirent new_dirent;
     char *actual_name;
-    err = get_dirent_by_path(dest_path, &new_dirent, 0, &new_parent_dir, &actual_name);
+    err = get_dirent_by_path(dest_path, &new_dirent, &new_parent_dir, &actual_name);
     if (err != FILE_NOT_CREATED && err) {
         return err;
     }
@@ -558,7 +575,7 @@ int k_mv_file(const char *src_path, const char *dest_path) {
         return err;
     }
 
-    err = remove_dirent_by_f_name_and_type(old_dirent.name, FILE_TYPE, parent_dir);
+    err = remove_dirent_by_f_name(old_dirent.name, parent_dir);
     if (err) {
         kfree(actual_name);
         return err;
@@ -575,7 +592,7 @@ int k_check_if_exists(const char *f_name) {
     }
 
     struct fs_dirent dir;
-    return !get_dirent_by_path(f_name, &dir, 0, NULL, NULL);
+    return !get_dirent_by_path(f_name, &dir, NULL, NULL);
 }
 
 static int k_resolve_path_any(const char *path, struct fs_dirent *dirent) {
@@ -589,17 +606,7 @@ static int k_resolve_path_any(const char *path, struct fs_dirent *dirent) {
         return SUCCESS;
     }
 
-    err_t err = get_dirent_by_path(path, dirent, 0, NULL, NULL);
-    if (err == SUCCESS) {
-        return SUCCESS;
-    }
-
-    err = get_dirent_by_path(path, dirent, 1, NULL, NULL);
-    if (err == SUCCESS) {
-        return SUCCESS;
-    }
-
-    return FILE_NOT_FOUND;
+    return get_dirent_by_path(path, dirent, NULL, NULL);
 }
 
 int k_stat(const char *path, struct fs_stat_st *stat) {
@@ -648,15 +655,53 @@ int k_change_directory(char *f_path) {
     }
 
     struct fs_dirent dir;
-    err_t err = get_dirent_by_path(f_path, &dir, 1, NULL, NULL);
+    err_t err = get_dirent_by_path(f_path, &dir, NULL, NULL);
     if (err == FILE_NOT_CREATED) {
         return FILE_NOT_FOUND;
     }
     if (err) {
         return err;
     }
+    struct cached_inode_st *inode;
+    err = vfs_get_inode(dir.ino_id, &inode);
+    if (err != SUCCESS) {
+        return err;
+    }
 
-    set_curr_dir(dir.ino_id);
+    struct oft_entry entry = {
+        .mode = O_RDONLY,
+        .cursor = 0,
+        .ref_count = 1,
+        .ino_id = dir.ino_id,
+        .inode = inode,
+    };
+    struct file_operations *fops = inode->inode.metadata.fops;
+    if (fops == NULL || fops->open == NULL || fops->lookup == NULL) {
+        vfs_put_inode(inode);
+        return NOT_A_DIRECTORY;
+    }
+    err = fops->open(&entry);
+    if (err != SUCCESS) {
+        vfs_put_inode(entry.inode);
+        return err;
+    }
+    fops = entry.inode->inode.metadata.fops;
+    if (fops == NULL || fops->lookup == NULL) {
+        if (fops != NULL && fops->close != NULL) {
+            fops->close(&entry);
+        }
+        vfs_put_inode(entry.inode);
+        return NOT_A_DIRECTORY;
+    }
+
+    set_curr_dir(entry.ino_id);
+    if (fops->close != NULL) {
+        err = fops->close(&entry);
+    }
+    vfs_put_inode(entry.inode);
+    if (err != SUCCESS) {
+        return err;
+    }
     return SUCCESS;
 }
 
@@ -666,7 +711,7 @@ bool k_check_if_executable(char *f_name) {
     }
 
     struct fs_dirent dir;
-    if (!get_dirent_by_path(f_name, &dir, 0, NULL, NULL)) {
+    if (!get_dirent_by_path(f_name, &dir, NULL, NULL)) {
         attributes_t metadata;
         if (get_inode_metadata(dir.ino_id, &metadata) != SUCCESS) {
             return false;
@@ -720,4 +765,128 @@ int k_exec_process(int pid, const char *path, char *const argv[]) {
         (struct trap_frame *)(uintptr_t)((uint8_t *)kernel_stack_page +
                                          frame_offset);
     return elf_exec_process(pcb, path, argv, frame, frame_va, NULL, 0);
+}
+
+static err_t make_absolute_path(const char *path, char **absolute_path) {
+    if (path == NULL || path[0] == '\0' || absolute_path == NULL) {
+        return INVALID_ARGS;
+    }
+
+    if (path[0] == '/') {
+        char *absolute = kmalloc(strlen(path) + 1);
+        if (absolute == NULL) {
+            return NO_FREE_BLOCKS;
+        }
+        strcpy(absolute, path);
+        *absolute_path = absolute;
+        return SUCCESS;
+    }
+
+    char cwd[1024];
+    err_t err = getcwd(cwd, sizeof(cwd));
+    if (err != SUCCESS) {
+        return err;
+    }
+
+    size_t cwd_len = strlen(cwd);
+    size_t path_len = strlen(path);
+    int needs_slash = strcmp(cwd, "/") != 0;
+    char *absolute = kmalloc(cwd_len + (size_t)needs_slash + path_len + 1);
+    if (absolute == NULL) {
+        return NO_FREE_BLOCKS;
+    }
+
+    strcpy(absolute, cwd);
+    size_t pos = cwd_len;
+    if (needs_slash) {
+        absolute[pos++] = '/';
+    }
+    for (size_t i = 0; i < path_len; i++) {
+        absolute[pos++] = path[i];
+    }
+    absolute[pos] = '\0';
+    *absolute_path = absolute;
+    return SUCCESS;
+}
+
+static err_t write_symlink_target(ino_id_t ino, const char *target_path) {
+    struct cached_inode_st *inode = get_inode_from_cache(ino);
+    if (inode == NULL) {
+        return FILE_READ_ERROR;
+    }
+
+    struct oft_entry entry = {
+        .mode = O_WRONLY,
+        .cursor = 0,
+        .ref_count = 1,
+        .ino_id = ino,
+        .inode = inode,
+    };
+
+    int written = default_write(&entry, target_path, strlen(target_path));
+    remove_ref_from_cache(ino);
+    if (written < 0) {
+        return written;
+    }
+    return written == (int)strlen(target_path) ? SUCCESS : FILE_WRITE_ERROR;
+}
+
+int createlink(const char *create_path, const char *orig_path, int is_soft) {
+    fs_dirent dirent;
+    err_t err = get_dirent_by_path(orig_path, &dirent, NULL, NULL);
+    if (err) {
+        return err;
+    }
+
+    attributes_t orig_metadata;
+    err = get_inode_metadata(dirent.ino_id, &orig_metadata);
+    if (err) {
+        return err;
+    }
+
+    char *actual_name = NULL;
+    ino_id_t parent_dir;
+    err = get_dirent_by_path(create_path, &dirent, &parent_dir, &actual_name);
+    if (!err) {
+        kfree(actual_name);
+        return FILE_ALREADY_EXISTS;
+    } else if (err != FILE_NOT_CREATED) {
+        if (actual_name != NULL) {
+            kfree(actual_name);
+        }
+        return err;
+    }
+
+    ino_id_t new_ino = dirent.ino_id;
+    if (is_soft) {
+        char *absolute_orig_path = NULL;
+        err = make_absolute_path(orig_path, &absolute_orig_path);
+        if (err) {
+            kfree(actual_name);
+            return err;
+        }
+        err = add_new_file_inode(&new_ino, SYMLINK_TYPE, orig_metadata.perm, SYMLINK_FOPS);
+        if (err) {
+            kfree(absolute_orig_path);
+            kfree(actual_name);
+            return err;
+        }
+        err = write_symlink_target(new_ino, absolute_orig_path);
+        kfree(absolute_orig_path);
+        if (err) {
+            kfree(actual_name);
+            return err;
+        }
+    }
+    err = add_dirent(actual_name, new_ino, parent_dir);
+    kfree(actual_name);
+    return err;
+}
+
+int k_readlink(const char *path, char *buffer, size_t count) {
+    if (!get_is_mounted()) {
+        return FS_NOT_MOUNTED;
+    }
+
+    return symlink_readlink(path, buffer, count);
 }

@@ -20,12 +20,18 @@ long fs_err_to_sys_errno(long error) {
     case FS_NOT_MOUNTED:
     case FS_INVALID:
         return SYS_ENODEV;
+    case INODE_FULL:
     case NO_FREE_BLOCKS:
     case FAT_NO_SPACE_REMAINING:
         return SYS_ENOSPC;
-    case INODE_FULL:
+    case FILE_ALREADY_EXISTS:
+        return SYS_EEXIST;
     case FILE_NOT_CREATED:
-        return SYS_ENFILE;
+        return SYS_ENOENT;
+    case NOT_A_DIRECTORY:
+        return SYS_ENOTDIR;
+    case IS_A_DIRECTORY:
+        return SYS_EISDIR;
     case INVALID_ARGS:
     case ILLEGAL_BLOCK_NO:
         return SYS_EINVAL;
@@ -102,6 +108,15 @@ void print_error(err_t error) {
             break;
         case FS_INVALID:
             printf("Error: invalid or missing file system.\n");
+            break;
+        case FILE_ALREADY_EXISTS:
+            printf("Error: file already exists.\n");
+            break;
+        case NOT_A_DIRECTORY:
+            printf("Error: not a directory.\n");
+            break;
+        case IS_A_DIRECTORY:
+            printf("Error: is a directory.\n");
             break;
     }
 }

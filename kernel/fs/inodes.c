@@ -17,8 +17,7 @@ static void normalize_default_inode_fops(struct inode_st *node) {
 
     if (node->metadata.type == DIRECTORY_TYPE) {
         node->metadata.fops = get_default_dir_fops();
-    } else if (node->metadata.type == FILE_TYPE ||
-               node->metadata.type == SYMLINK_TYPE) {
+    } else if (node->metadata.type == FILE_TYPE) {
         node->metadata.fops = get_default_fops();
     }
 }
@@ -374,7 +373,7 @@ err_t get_inode_metadata(ino_id_t id, attributes_t *metadata) {
     return vfs_get_metadata(id, metadata);
 }
 
-err_t update_inode_metadata(ino_id_t id, int flags, uint8_t type, uint8_t perm) {
+err_t update_inode_metadata(ino_id_t id, int flags, uint8_t type, uint8_t perm, int ref_count) {
     if (id == 0) {
         return INVALID_ARGS;
     }
@@ -397,6 +396,9 @@ err_t update_inode_metadata(ino_id_t id, int flags, uint8_t type, uint8_t perm) 
     }
     if (flags & INODE_EDIT_MTIME) {
         node->inode.metadata.mtime = timer_get_ticks();
+    }
+    if (flags & INODE_EDIT_REF_COUNT) {
+        node->inode.metadata.i_links_count = ref_count;
     }
 
     node->dirty = 1;
@@ -943,6 +945,10 @@ err_t clear_blocks_of_inode(struct inode_st *inode, int skip_first) {
 }
 
 err_t free_file_inode(struct cached_inode_st *cache_inode) {
+    cache_inode->inode.metadata.i_links_count--;
+    if (cache_inode->inode.metadata.i_links_count > 0) {
+        return SUCCESS;
+    }
     // Remove inode from inode bitmap
     err_t err_code = set_inode_allocated(cache_inode->id, 0);
     if (err_code != SUCCESS) {

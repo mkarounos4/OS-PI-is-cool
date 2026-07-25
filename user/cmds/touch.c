@@ -8,9 +8,14 @@ int main(int argc, char **argv) {
         return -EINVAL;
     }
 
-    int err = touch(argv + 1);
-    if (err < 0) {
-        print_errno("touch", "failed", err);
+    int err = 0;
+    for (int i = 1; i < argc; i++) {
+        char *paths[] = {argv[i], NULL};
+        err = touch(paths);
+        if (err < 0) {
+            print_errno("touch", argv[i], err);
+            return err;
+        }
     }
     return err;
 }

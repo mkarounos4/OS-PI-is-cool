@@ -53,14 +53,13 @@ struct dir_st {
  * copy it into the caller-provided struct.
  *
  * @param f_name Name of the file to find.
- * @param file_type File type to match against, or UNKNOWN_F_TYPE to
- * match any type.
  * @param dirent Output: receives a copy of the matched dirent.
  * @param curr_dir Inode id / first block of the directory to search.
  * @return SUCCESS on success, FILE_NOT_FOUND if no matching dirent
- * exists in that directory, or a negative error code on failure.
+ * exists in that directory, NOT_A_DIRECTORY if curr_dir is not a
+ * directory, or a negative error code on failure.
  */
-err_t get_dirent_by_f_name(const char* f_name, uint8_t file_type, struct fs_dirent* dirent, int curr_dir);
+err_t get_dirent_by_f_name(const char* f_name, struct fs_dirent* dirent, int curr_dir);
 
 /**
  * @brief Resolve a (possibly multi-component) path to its dirent,
@@ -69,16 +68,15 @@ err_t get_dirent_by_f_name(const char* f_name, uint8_t file_type, struct fs_dire
  *
  * @param f_path Path to resolve (absolute or relative to cwd).
  * @param dirent Output: receives a copy of the resolved dirent.
- * @param file_type Expected file type (one of *_F_TYPE), or
- * UNKNOWN_F_TYPE to match any.
  * @param parent_dir Output (optional): receives the id of the directory
  * containing the final component. Pass NULL if not needed.
  * @param actual_name Output (optional): receives a pointer to the
  * final component of f_path. Pass NULL if not needed.
  * @return SUCCESS on success, FILE_NOT_FOUND if any component does
- * not exist, or a negative error code on failure.
+ * not exist, NOT_A_DIRECTORY if an intermediate component is not a
+ * directory, or a negative error code on failure.
  */
-err_t get_dirent_by_path(const char* f_path, struct fs_dirent* dirent, int file_type, ino_id_t *parent_dir, char **actual_name);
+err_t get_dirent_by_path(const char* f_path, struct fs_dirent* dirent, ino_id_t *parent_dir, char **actual_name);
 
 err_t opendir(ino_id_t ino);
 err_t closedir(ino_id_t ino);
@@ -95,18 +93,16 @@ err_t readdir(ino_id_t ino, fs_dirent *out);
 err_t list_dirents(ino_id_t ino_id, int out_fd);
 
 /**
- * @brief Remove the dirent matching f_name and file_type from the
- * given parent directory. Does not free the underlying file blocks;
+ * @brief Remove the dirent matching f_name from the given parent
+ * directory. Does not free the underlying file blocks;
  * that is the caller's responsibility (usually via k_unlink).
  *
  * @param f_name Name of the dirent to remove.
- * @param file_type File type of the entry (disambiguates when names
- * collide across types).
  * @param parent_dir Inode id / first block of the containing directory.
  * @return SUCCESS on success, FILE_NOT_FOUND if no matching entry,
  * or a negative error code on failure.
  */
-err_t remove_dirent_by_f_name_and_type(const char* f_name, uint8_t file_type, ino_id_t parent_dir);
+err_t remove_dirent_by_f_name(const char* f_name, ino_id_t parent_dir);
 
 /**
  * @brief Create a new dirent at the given path, allocating any missing
@@ -116,6 +112,7 @@ err_t remove_dirent_by_f_name_and_type(const char* f_name, uint8_t file_type, in
  * intermediate directories must already exist.
  * @param file_type File type for the new entry (one of *_F_TYPE).
  * @param perm Permission bits to store on the new entry.
- * @return SUCCESS on success, or a negative error code on failure.
- */
+ * @return SUCCESS on success, FILE_ALREADY_EXISTS if the final name
+ * already exists, or a negative error code on failure.
+*/
 err_t add_dirent_by_path(char *f_path, int file_type, int perm);

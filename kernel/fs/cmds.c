@@ -233,7 +233,7 @@ static err_t cat_check_same_input_output(char **file, char *output_file) {
 
     struct fs_dirent output_dirent;
     ino_id_t output_parent;
-    err_t output_err = get_dirent_by_path(output_file, &output_dirent, FILE_TYPE, &output_parent, NULL);
+    err_t output_err = get_dirent_by_path(output_file, &output_dirent, &output_parent, NULL);
     if (output_err == FILE_NOT_CREATED) {
         return SUCCESS;
     }
@@ -244,7 +244,7 @@ static err_t cat_check_same_input_output(char **file, char *output_file) {
     for (int i = 0; file[i] != NULL; i++) {
         struct fs_dirent input_dirent;
         ino_id_t input_parent;
-        err_t input_err = get_dirent_by_path(file[i], &input_dirent, FILE_TYPE, &input_parent, NULL);
+        err_t input_err = get_dirent_by_path(file[i], &input_dirent, &input_parent, NULL);
         if (input_err != SUCCESS) {
             return input_err == FILE_NOT_CREATED ? FILE_NOT_FOUND : input_err;
         }
@@ -560,7 +560,7 @@ err_t getcwd(char* path, size_t size) {
         }
 
         struct fs_dirent parent_dirent;
-        err_t err = get_dirent_by_f_name("..", 1, &parent_dirent, curr);
+        err_t err = get_dirent_by_f_name("..", &parent_dirent, curr);
         if (err != SUCCESS) {
             return err;
         }

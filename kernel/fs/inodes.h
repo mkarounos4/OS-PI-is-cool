@@ -59,6 +59,7 @@ struct cached_inode_st;
 #define INODE_EDIT_PERM 0x02
 #define INODE_AND_PERM 0x04
 #define INODE_EDIT_MTIME 0x08
+#define INODE_EDIT_REF_COUNT 0x10
 
 // Superblock parameters for loading/storing file system metadata
 struct superblock_st {
@@ -88,7 +89,7 @@ err_t get_inode(struct cached_inode_st** node, ino_id_t id);
 
 err_t get_inode_metadata(ino_id_t id, attributes_t *metadata);
 
-err_t update_inode_metadata(ino_id_t id, int flags, uint8_t type, uint8_t perm);
+err_t update_inode_metadata(ino_id_t id, int flags, uint8_t type, uint8_t perm, int ref_count);
 
 /**
  * @brief Write the given inode data to its on-disk slot.

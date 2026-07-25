@@ -184,6 +184,8 @@ int k_stat(const char *path, struct fs_stat_st *stat);
 int k_exec(const char *path, char *const argv[], struct trap_frame *frame,
            struct trap_frame **next_frame);
 int k_exec_process(int pid, const char *path, char *const argv[]);
+int createlink(const char *create_path, const char *orig_path, int is_soft);
+int k_readlink(const char *path, char *buffer, size_t count);
 
 struct file_operations *get_default_fops();
 struct file_operations *get_default_dir_fops();

@@ -44,6 +44,9 @@
 | `lib/fs_syscall.h` | `fs_chmod` | 19 | Change permissions. |
 | `lib/fs_syscall.h` | `ls` | 20 | List directory. |
 | `lib/fs_syscall.h` | `fs_mkdir` | 21 | Create directories. |
+| `lib/fs_syscall.h` | `createlink` | 55 | Create a hard or symbolic link. |
+| `lib/fs_syscall.h` | `ln` | 55 | Convenience wrapper around `createlink`. |
+| `lib/fs_syscall.h` | `readlink` | 56 | Read a symbolic link target. |
 | `lib/fs_syscall.h` | `cd` | 22 | Change cwd. |
 | `lib/fs_syscall.h` | `getcwd` | 44 | Return cwd string. |
 | `lib/fs_syscall.h` | `stat` | 46 | Read path metadata. |
@@ -125,10 +128,12 @@ normal programs.
 
 `open`, `close`, `lseek`, `read`, `write`, `getcwd`, and `stat` are the normal
 file-descriptor API. `touch`, `mv`, `rm`, `cat`, `cp`, `fs_chmod`, `ls`,
-`fs_mkdir`, and `cd` expose higher-level kernel filesystem commands.
+`fs_mkdir`, `cd`, `createlink`, `ln`, and `readlink` expose higher-level kernel
+filesystem commands.
 
 Open flags are `O_RDONLY`, `O_WRONLY`, `O_RDWR`, `O_TRUNC`, `O_CREAT`, and
-`O_APPEND`. Seek modes are `F_SEEK_SET`, `F_SEEK_CUR`, and `F_SEEK_END`.
+`O_APPEND`. Seek modes are `F_SEEK_SET`, `F_SEEK_CUR`, and `F_SEEK_END`. Link
+flags are `LINK_HARD` and `LINK_SOFT`.
 TTY devices are exposed as `/dev/ttyN`; backend devices are exposed as
 `/dev/uart0` and `/dev/ttyguiN` for direct testing. These paths are devfs
 virtual nodes, not persistent disk files. Normal programs should use `/dev/ttyN`
@@ -168,8 +173,8 @@ used by tests and diagnostics.
 ### Error helpers
 
 `errno_name` and `errno_message` accept either positive or negative errno values.
-`print_errno(cmd, context, err)` writes `cmd: context: ENAME (-N): message` to
-stderr when `err` is negative.
+`print_errno(cmd, context, err)` writes a command-style human message to stderr
+when `err` is negative.
 
 ### Test helpers
 
@@ -199,10 +204,12 @@ redirections with `open`, `dup2`, and `close`.
 | `grep` | `grep pattern [file...]` | Print matching lines from files or stdin. |
 | `init` | `init` | First userspace process; starts shells and reaps children. |
 | `kill` | `kill [-signal] pid` | Send a signal to a process. |
+| `ln` | `ln [-s] target link` | Create a hard link or symbolic link. |
 | `ls` | `ls [dir]` | List a directory, defaulting to the current directory. |
 | `mkdir` | `mkdir dir...` | Create one or more directories. |
 | `mv` | `mv src dest` | Move or rename a path. |
 | `ps` | `ps` | Display process information. |
+| `readlink` | `readlink path` | Print the stored target path of a symbolic link. |
 | `rm` | `rm path...` | Remove paths. |
 | `shell` | `shell [tty_number]` | Interactive shell with pipelines, redirection, scripts, and job control. |
 | `sleep` | `sleep milliseconds` | Sleep for a number of milliseconds. |
@@ -257,6 +264,12 @@ reaps children with `waitpid(-1, ..., WNOHANG)`.
 
 Defaults to `SIGTERM`. A numeric `-signal` argument overrides the signal number.
 
+### `ln`
+
+Creates a hard link by default. With `-s`, creates a symbolic link whose stored
+target is an absolute path. Symbolic links are followed by normal file,
+directory, and executable operations.
+
 ### `ls`
 
 Lists the requested directory or the current directory when no path is supplied.
@@ -272,6 +285,10 @@ Moves or renames `src` to `dest`.
 ### `ps`
 
 Invokes the process-listing syscall.
+
+### `readlink`
+
+Prints the stored target path of a symbolic link without following it.
 
 ### `rm`
 

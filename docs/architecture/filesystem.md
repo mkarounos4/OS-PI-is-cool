@@ -4,7 +4,7 @@
 
 - Inode-based filesystem with ext2-inspired block layout
 - Disk persistence with mount/unmount support
-- Directories, nested paths, symbolic links, and permissions
+- Directories, nested paths, hard links, symbolic links, and permissions
 - Open-file table and file-descriptor integration
 - Virtual filesystem layer with `procfs` and `devfs` root mounts
 - Character devices and VFS file-operation dispatch
@@ -104,6 +104,8 @@ KAPI specifications:
 - `k_change_directory(char *f_path)`: Updates the current process's `cwd`; relative paths are resolved from the current `cwd`.
 - `k_check_if_executable(char *f_name)`: Checks whether a file has execute permission.
 - `k_stat(const char *path, struct fs_stat_st *stat)`: Reads filesystem metadata for `stat` and `/proc` reporting.
+- `createlink(const char *create_path, const char *orig_path, int is_soft)`: Creates hard links or symbolic links. Hard links add another dirent to the target inode; symbolic links allocate a symlink inode and store the absolute target path in its file data.
+- `k_readlink(const char *path, char *buffer, size_t count)`: Copies a symbolic link's stored target path into a userspace buffer without following the link.
 - `k_exec` and `k_exec_process`: Bridge filesystem paths into the runtime
   ELF loader; the full design is documented in [elf-loading.md](elf-loading.md).
 
@@ -123,6 +125,11 @@ The inode layer uses an ext2-inspired metadata structure. Each inode stores:
 - `i_rdev`: character-device major/minor number for device nodes.
 - `fops`: VFS file-operation handlers such as `read`, `write`, `open`, `lookup`, and `readdir`.
 - `i_<type>`: type-specific metadata, such as `i_pipe` for pipe state.
+
+Regular files, directories, devices, pipes, virtual files, and symbolic links
+all use the same inode metadata shape. The important difference is their fops
+table. A symbolic-link inode stores its target path as ordinary file data, but
+its fops resolve that path and forward normal operations to the target inode.
 
 ### Blocks
 Each inode stores a 15-entry block pointer array:
@@ -422,9 +429,29 @@ Directory helpers return `err_t` values from
 - `add_dirent`: Creates a new directory entry with a name and inode id in `curr_dir`.
 - `get_dirent_by_f_name`: Wrapper around the `fops->lookup` VFS file operation.
 - `get_dirent_by_path`: Splits a path by `/`, resolves each component, and returns the final directory entry.
-- `list_dirents`: Verifies the inode is a directory, then reads entries through VFS `readdir` and prints them to `out_fd`.
-- `remove_dirent_by_fname_and_type`: Removes a matching dirent, shifts later entries down, and drops one inode reference.
+- `list_dirents`: Opens the inode through its fops, reads entries through VFS `readdir`, and prints them to `out_fd`.
+- `remove_dirent_by_f_name`: Removes a matching dirent, shifts later entries down, and drops one inode reference.
 - `add_dirent_by_path`: Resolves the parent directory and adds a dirent there.
+
+## Links
+
+Hard links are additional directory entries pointing at an existing inode. The
+inode link count records how many dirents reference it, and storage is released
+when the final link is removed.
+
+Symbolic links are their own inode type. Creating one stores the target as an
+absolute path in the symlink inode's data blocks and assigns the symlink fops
+table to the inode. The symlink fops read that stored path, resolve the target,
+and forward file operations such as `open`, `read`, `write`, `lookup`, and
+`readdir` to the target's fops. This lets soft links work for regular files,
+directories, and executable paths without adding symlink branches throughout
+the rest of the filesystem.
+
+Opening a symlink replaces the open-file entry's inode with the resolved target
+inode. That means `exec` sees the real executable inode and file size, and `cd`
+to a symlinked directory stores the target directory inode as the process cwd.
+`readlink` is the exception: it reads the symlink inode's stored path directly
+and does not follow the target.
 
 ## Open-file table
 
@@ -522,7 +549,7 @@ stream behavior at the lookup layer. A directory supports:
 
 - `open`: initialize directory iteration state.
 - `close`: clear directory iteration state.
-- `lookup`: map a child name and expected type to a dirent.
+- `lookup`: map a child name to a dirent.
 - `readdir`: return directory entries sequentially.
 
 This is why `get_dirent_by_f_name` can resolve children by calling
@@ -537,9 +564,11 @@ relative paths begin at the current process's `cwd`. The path is split on `/`,
 and each component is resolved by `get_dirent_by_f_name`.
 
 `get_dirent_by_f_name` first obtains metadata for the current directory inode
-through `vfs_get_metadata`. It verifies that the current inode is a directory
-and that the directory has a `lookup` operation. It then calls that lookup
-operation to resolve the next path component.
+and verifies that the inode has a `lookup` operation. It then calls that lookup
+operation to resolve the next path component. Regular files do not provide
+`lookup`, so trying to walk through one returns `NOT_A_DIRECTORY`. Directories,
+virtual directories, and symlinks to directories can all participate in lookup
+through their fops.
 
 For normal disk directories, `dir_lookup` scans the directory's on-disk dirent
 array. This keeps normal files and directories persistent. The VFS extension is
@@ -565,12 +594,10 @@ and operation table. If the name already exists, the existing mount is updated.
 Otherwise, a new slot is allocated from the fixed table. The table currently
 supports up to eight root mounts.
 
-`vfs_lookup_root_mount(name, is_dir_type, dirent)` is called by root directory
-lookup. It only returns virtual mount entries for directory lookups, because a
-root mount behaves like a directory. When a match is found, it fills a normal
-`dirent` with the mount name and synthetic root inode. The caller can then open,
-stat, or continue walking the virtual directory using the same code path as any
-other directory.
+`vfs_lookup_root_mount(name, dirent)` is called by root directory lookup. When a
+match is found, it fills a normal `dirent` with the mount name and synthetic
+root inode. The caller can then open, stat, or continue walking the virtual
+directory using the same code path as any other directory.
 
 `vfs_root_mount_readdir(offset, dirent)` exposes registered virtual mounts while
 listing `/`. This is what lets `ls /` show virtual mount points even though they
@@ -671,6 +698,8 @@ The VFS is intentionally simple:
 - Virtual providers must use stable synthetic inode ranges and implement
   `is_inode` correctly so inode ownership is unambiguous.
 - Virtual inode metadata must provide the correct file type and fops table.
+- Symlink inodes use persistent symlink fops and resolve the target from their
+  stored path when an operation follows the link.
 - Disk-backed files remain the default path; VFS dispatch only takes over when
   a provider explicitly owns an inode.
 
@@ -739,6 +768,11 @@ Syscall-facing wrappers convert these internal errors into Unix-style negative
 `SYS_E*` values before returning to userspace. This keeps low-level filesystem
 diagnostics specific while preserving a simple errno-style API for user
 programs.
+
+Userspace commands report those failures through `print_errno`, which writes a
+human-readable message to file descriptor 2. For example, creating an existing
+path reports `file exists`, trying to read a directory reports `is a directory`,
+and trying to use a regular file as a directory reports `not a directory`.
 
 See [`errors.h`](../../kernel/fs/errors.h) and
 [`errors.c`](../../kernel/fs/errors.c).

@@ -1,5 +1,7 @@
 #include "dirs.h"
 #include "devices.h"
+#include "disk.h"
+#include "inodes.h"
 #include "virtual_fs.h"
 
 err_t add_dirent(const char* name, ino_id_t ino_id, ino_id_t curr_dir) {
@@ -39,7 +41,20 @@ err_t add_dirent(const char* name, ino_id_t ino_id, ino_id_t curr_dir) {
                     }
                 }
                 kfree(dir);
-                return SUCCESS;
+
+                // increase refcount
+                attributes_t metadata;
+                err = get_inode_metadata(ino_id, &metadata);
+                if (err) {
+                    return err;
+                }
+                err = update_inode_metadata(ino_id, INODE_EDIT_REF_COUNT, 0, 0, metadata.i_links_count+1);
+
+                return err;
+            }
+            if (!strcmp(dir[i].name, name)) {
+                kfree(dir);
+                return FILE_ALREADY_EXISTS;
             }
             i++;
         }
@@ -66,6 +81,14 @@ err_t add_dirent(const char* name, ino_id_t ino_id, ino_id_t curr_dir) {
     kfree(dir);
     kfree(new_dir);
 
+    // increate refcount
+    attributes_t metadata;
+    err = get_inode_metadata(ino_id, &metadata);
+    if (err) {
+        return err;
+    }
+    err = update_inode_metadata(ino_id, INODE_EDIT_REF_COUNT, 0, 0, metadata.i_links_count+1);
+
     return SUCCESS;
 }
 
@@ -91,7 +114,7 @@ err_t add_dirent_by_path(char *f_path, int file_type, int perm) {
 
     struct fs_dirent dirent;
     while (next_token != NULL) {
-        err_t err = get_dirent_by_f_name(token, 1, &dirent, start_dir);
+        err_t err = get_dirent_by_f_name(token, &dirent, start_dir);
         if (err) {
             kfree(f_path_mut_root);
             return FILE_NOT_FOUND;
@@ -99,6 +122,21 @@ err_t add_dirent_by_path(char *f_path, int file_type, int perm) {
         start_dir = dirent.ino_id;
         token = next_token;
         next_token = strtok(NULL, "/");
+    }
+
+    if (token == NULL) {
+        kfree(f_path_mut_root);
+        return INVALID_FILE_NAME;
+    }
+
+    err_t existing = get_dirent_by_f_name(token, &dirent, start_dir);
+    if (existing == SUCCESS) {
+        kfree(f_path_mut_root);
+        return FILE_ALREADY_EXISTS;
+    }
+    if (existing != FILE_NOT_FOUND) {
+        kfree(f_path_mut_root);
+        return existing;
     }
 
     block_no_t block;
@@ -133,15 +171,12 @@ err_t add_dirent_by_path(char *f_path, int file_type, int perm) {
 }
 
 
-err_t get_dirent_by_path(const char* f_path, struct fs_dirent* dirent, int is_dir_type, ino_id_t *parent_dir, char **actual_name) {
+err_t get_dirent_by_path(const char* f_path, struct fs_dirent* dirent, ino_id_t *parent_dir, char **actual_name) {
     if (f_path == 0 || f_path[0] == 0) {
         return INVALID_FILE_NAME;
     }
 
     if (f_path[0] == '/' && f_path[1] == '\0') {
-        if (!is_dir_type) {
-            return FILE_NOT_FOUND;
-        }
         if (dirent != NULL) {
             memset(dirent, 0, sizeof(*dirent));
             strcpy(dirent->name, "/");
@@ -159,7 +194,7 @@ err_t get_dirent_by_path(const char* f_path, struct fs_dirent* dirent, int is_di
 
     ino_id_t start_dir = get_curr_dir();
     if (f_path[0] == '/') {
-        start_dir = 1;
+        start_dir = ROOT_INO;
         f_path++;
     }
 
@@ -172,7 +207,7 @@ err_t get_dirent_by_path(const char* f_path, struct fs_dirent* dirent, int is_di
             *parent_dir = start_dir;
         }
 
-        err_t err = get_dirent_by_f_name(token, next_token == NULL ? is_dir_type : 1, dirent, start_dir);
+        err_t err = get_dirent_by_f_name(token, dirent, start_dir);
 
         if (err) {
             if (next_token == NULL) {
@@ -212,10 +247,9 @@ err_t get_dirent_by_path(const char* f_path, struct fs_dirent* dirent, int is_di
     return SUCCESS;
 }
 
-int dir_lookup(const char* f_name, uint8_t is_dir_type,
-               struct fs_dirent* dirent, int curr_dir) {
+int dir_lookup(const char* f_name, struct fs_dirent* dirent, int curr_dir) {
     if (curr_dir == ROOT_INO) {
-        err_t mount_err = vfs_lookup_root_mount(f_name, is_dir_type, dirent);
+        err_t mount_err = vfs_lookup_root_mount(f_name, dirent);
         if (mount_err == SUCCESS) {
             return SUCCESS;
         }
@@ -240,19 +274,12 @@ int dir_lookup(const char* f_name, uint8_t is_dir_type,
             if (!strcmp(dir[i].name, "\0")) {
                 kfree(dir);
                 if (curr_dir == ROOT_INO) {
-                    return vfs_lookup_root_mount(f_name, is_dir_type, dirent);
+                    return vfs_lookup_root_mount(f_name, dirent);
                 }
                 return FILE_NOT_FOUND;
             }
             
-            attributes_t metadata;
-            err = get_inode_metadata(dir[i].ino_id, &metadata);
-            if (err != SUCCESS) {
-                kfree(dir);
-                return err;
-            }
-
-            if (!strcmp(dir[i].name, f_name) && (((metadata.type == DIRECTORY_TYPE) && is_dir_type) || ((metadata.type != DIRECTORY_TYPE) && !is_dir_type))) {
+            if (!strcmp(dir[i].name, f_name)) {
                 if (dirent != NULL) {
                     *dirent = dir[i];
                 }
@@ -265,26 +292,22 @@ int dir_lookup(const char* f_name, uint8_t is_dir_type,
     }
     kfree(dir);
     if (curr_dir == ROOT_INO) {
-        return vfs_lookup_root_mount(f_name, is_dir_type, dirent);
+        return vfs_lookup_root_mount(f_name, dirent);
     }
     return FILE_NOT_FOUND;
 }
 
-err_t get_dirent_by_f_name(const char* f_name, uint8_t is_dir_type, struct fs_dirent* dirent, int curr_dir) {
+err_t get_dirent_by_f_name(const char* f_name, struct fs_dirent* dirent, int curr_dir) {
     attributes_t metadata;
     err_t err = get_inode_metadata(curr_dir, &metadata);
     if (err != SUCCESS) {
         return err;
     }
-    if (metadata.type != DIRECTORY_TYPE) {
-        return INVALID_ARGS;
+    if (metadata.fops == NULL || metadata.fops->lookup == NULL) {
+        return NOT_A_DIRECTORY;
     }
 
-    if (metadata.fops->lookup == NULL) {
-        return INVALID_ARGS;
-    }
-
-    return metadata.fops->lookup(f_name, is_dir_type, dirent, curr_dir);
+    return metadata.fops->lookup(f_name, dirent, curr_dir);
 }
 
 void format_chmod_str(int perm, char res[4]) {
@@ -467,7 +490,7 @@ err_t readdir(ino_id_t ino, fs_dirent *out) {
     }
 
     if (ino == ROOT_INO &&
-        vfs_lookup_root_mount(dir[entry_index].name, 1, NULL) == SUCCESS) {
+        vfs_lookup_root_mount(dir[entry_index].name, NULL) == SUCCESS) {
         kfree(dir);
         metadata.i_dir->offset++;
         err = set_inode_metadata(ino, &metadata);
@@ -518,16 +541,11 @@ err_t list_dirents(ino_id_t ino_id, int out_fd) {
         return err;
     }
 
-    if (inode->inode.metadata.type != DIRECTORY_TYPE) {
-        vfs_put_inode(inode);
-        return INVALID_ARGS;
-    }
-
     struct file_operations *fops = inode->inode.metadata.fops;
     if (fops == NULL || fops->open == NULL || fops->close == NULL ||
         fops->readdir == NULL) {
         vfs_put_inode(inode);
-        return INVALID_ARGS;
+        return NOT_A_DIRECTORY;
     }
 
     struct oft_entry dir_entry = {
@@ -543,26 +561,34 @@ err_t list_dirents(ino_id_t ino_id, int out_fd) {
         vfs_put_inode(inode);
         return err;
     }
+    fops = dir_entry.inode->inode.metadata.fops;
+    if (fops == NULL || fops->readdir == NULL) {
+        if (fops != NULL && fops->close != NULL) {
+            fops->close(&dir_entry);
+        }
+        vfs_put_inode(dir_entry.inode);
+        return NOT_A_DIRECTORY;
+    }
 
     fs_dirent dirent;
     while ((err = fops->readdir(&dir_entry, &dirent)) == SUCCESS) {
         err = list_one_dirent(out_fd, &dirent);
         if (err != SUCCESS) {
             fops->close(&dir_entry);
-            vfs_put_inode(inode);
+            vfs_put_inode(dir_entry.inode);
             return err;
         }
     }
 
     err_t close_err = fops->close(&dir_entry);
-    vfs_put_inode(inode);
+    vfs_put_inode(dir_entry.inode);
     if (err != FILE_NOT_FOUND) {
         return err;
     }
     return close_err;
 }
 
-err_t remove_dirent_by_f_name_and_type(const char* f_name, uint8_t is_dir_type, ino_id_t parent_dir) {
+err_t remove_dirent_by_f_name(const char* f_name, ino_id_t parent_dir) {
     struct fs_dirent *dir = kmalloc(get_bytes_per_block());
     struct fs_dirent *next_dir = kmalloc(get_bytes_per_block());
 
@@ -602,7 +628,7 @@ err_t remove_dirent_by_f_name_and_type(const char* f_name, uint8_t is_dir_type, 
                 kfree(next_dir);
                 return err;
             }
-            if (!strcmp(dir[i].name, f_name) && (((metadata.type == DIRECTORY_TYPE) && is_dir_type) || ((metadata.type != DIRECTORY_TYPE) && !is_dir_type))) {
+            if (!strcmp(dir[i].name, f_name)) {
                 found_dirent = 1;
             }
             if (found_dirent) {

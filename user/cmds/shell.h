@@ -6,6 +6,7 @@
 #include "lib/signals.h"
 #include "lib/stdio.h"
 #include "lib/string.h"
+#include "lib/errno.h"
 #include "shell/Vec.h"
 #include "shell/io-helpers.h"
 #include "shell/Job.h"

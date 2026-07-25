@@ -8,9 +8,14 @@ int main(int argc, char **argv) {
         return -EINVAL;
     }
 
-    int err = fs_mkdir(argv + 1);
-    if (err < 0) {
-        print_errno("mkdir", "failed", err);
+    int err = 0;
+    for (int i = 1; i < argc; i++) {
+        char *paths[] = {argv[i], NULL};
+        err = fs_mkdir(paths);
+        if (err < 0) {
+            print_errno("mkdir", argv[i], err);
+            return err;
+        }
     }
     return err;
 }

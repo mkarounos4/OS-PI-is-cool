@@ -41,9 +41,8 @@ err_t vfs_register_root_mount(const char *name, ino_id_t root_ino,
     return SUCCESS;
 }
 
-int vfs_lookup_root_mount(const char *name, uint8_t is_dir_type,
-                          struct fs_dirent *dirent) {
-    if (name == NULL || !is_dir_type) {
+int vfs_lookup_root_mount(const char *name, struct fs_dirent *dirent) {
+    if (name == NULL ) {
         return FILE_NOT_FOUND;
     }
 

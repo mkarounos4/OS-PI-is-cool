@@ -62,6 +62,8 @@ returned in `x0`. Negative return values are errno-style failures.
 | 52 | `S_TTY_SCREEN_LEAVE` | `tty_screen_leave` | Leave alternate screen mode. |
 | 53 | `S_TTY_SCREEN_PRESENT` | `tty_screen_present` | Present a complete text screen buffer. |
 | 54 | `S_PROC_CHANGE_PRIORITY` | `proc_change_priority` | Change a process scheduler priority. |
+| 55 | `S_CREATE_LINK` | `createlink`, `ln` | Create a hard link or symbolic link. |
+| 56 | `S_READLINK` | `readlink` | Read the stored target path from a symbolic link. |
 
 ## Syscall Notes
 
@@ -198,3 +200,16 @@ alternate-screen presentation for fullscreen tools such as `vim`.
 
 Changes scheduler priority for a process. The wrapper returns the syscall
 result; the dispatcher currently returns `0` after invoking the kernel helper.
+
+### `createlink(const char *create_path, const char *orig_path, int flags)` - SVC 55
+
+Creates a hard link when `flags == LINK_HARD` and a symbolic link when
+`flags == LINK_SOFT`. Hard links add a new dirent pointing at the target inode.
+Symbolic links create a symlink inode that stores the absolute target path.
+
+### `readlink(const char *path, char *buffer, size_t count)` - SVC 56
+
+Copies up to `count` bytes of a symbolic link's stored target path into
+`buffer`. It returns the number of bytes copied or a negative errno. The target
+path is not NUL-terminated by the kernel unless the caller leaves space and adds
+the terminator itself.

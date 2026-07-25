@@ -2,10 +2,14 @@
 #include "lib/errno.h"
 
 int main(int argc, char **argv) {
-    (void)argc;
-    int err = rm(argv + 1);
-    if (err < 0) {
-        print_errno("rm", "failed", err);
+    int err = 0;
+    for (int i = 1; i < argc; i++) {
+        char *paths[] = {argv[i], NULL};
+        err = rm(paths);
+        if (err < 0) {
+            print_errno("rm", argv[i], err);
+            return err;
+        }
     }
     return err;
 }

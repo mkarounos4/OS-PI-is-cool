@@ -53,7 +53,7 @@ int oft_open_file(int mode, const char *file_name, ino_id_t ino_id, ino_id_t dir
     if (ino_id == 0) {
         // Adds new dirent to end of directory 
         struct fs_dirent dir;
-        err = get_dirent_by_f_name(file_name, FILE_TYPE, &dir, dir_block);
+        err = get_dirent_by_f_name(file_name, &dir, dir_block);
         if (err != SUCCESS) {
             err = add_new_file(&new_entry, FILE_TYPE, 6, get_default_fops());
             if (err < 0) {
