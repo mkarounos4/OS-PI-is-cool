@@ -55,11 +55,17 @@ The project is intentionally educational rather than a complete POSIX implementa
 
 ## Why This Was Hard
 
-This project goes beyond a toy kernel or emulator-only OS. Raspberry Pi 5 low-level documentation is limited, so hardware support required cross-referencing available documentation, Linux source, device-tree behavior, ARMv8-A documentation, and observed MMIO behavior to initialize and drive real devices.
+This project goes beyond a toy kernel or emulator-only OS. Raspberry Pi 5 support was especially difficult because the board moved to the BCM2712 SoC and the newer RP1 peripheral controller. That changes the practical bring-up path for almost every hardware-facing driver compared with older Raspberry Pi boards.
 
-The OS also implements Unix-style semantics across interacting subsystems rather than isolated features. `fork`, copy-on-write memory, page faults, ELF loading, file descriptors, pipes, signals, process groups, job control, and `waitpid` all interact through the scheduler, trap return path, filesystem, and virtual memory system.
+The RP1 peripherals are partially documented, but there is very little dedicated bare-metal reference material for the Raspberry Pi 5 firmware and hardware handoff path. Even getting UART working required finding the right MMIO addresses, initialization order, interrupt routing behavior, and device-tree assumptions with almost no direct examples to follow.
 
-The result is a full vertical stack: boot code, kernel, drivers, memory manager, filesystem, syscall layer, userspace runtime, shell, and applications.
+Much of the hardware work came from reverse engineering behavior by reading the Linux kernel source, comparing it against device-tree data and available register documentation, and then deriving the minimal sequence our kernel needed. We had to use Linux as a map without copying Linux's architecture, because our OS has a much smaller scope and different tradeoffs.
+
+The software stack was also built from scratch. Other than fixed-width integer types from `stdint.h`, the kernel does not rely on a standard library or imported runtime. That meant writing our own boot path, memory routines, allocators, scheduler, page-table management, filesystem, syscall layer, userspace loader, shell support, synchronization primitives, and device abstractions.
+
+This made implementation more than a matter of following existing kernel formatting. For each subsystem, we had to research how mature systems solve the problem, understand the tradeoffs in the Linux source and other references, and then design a smaller version that fit our goals: understandable, educational, and still realistic enough for features like `fork`, copy-on-write page faults, filesystem-backed `exec`, file descriptors, pipes, signals, process groups, job control, and `waitpid` to interact correctly.
+
+The result is a full vertical stack: boot code, kernel, drivers, memory manager, filesystem, syscall layer, userspace runtime, shell, and applications, all brought up on real Raspberry Pi 5 hardware and QEMU.
 
 ---
 
