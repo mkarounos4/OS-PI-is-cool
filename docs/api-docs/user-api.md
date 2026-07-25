@@ -87,17 +87,11 @@
 | `cmds/shell.h` | `shell_init` | mixed | Initialize shell state for a TTY. |
 | `cmds/shell.h` | `perror` | 27 | Minimal inline stderr writer. |
 | `cmds/shell/parser.h` | `parse_command` | allocator | Parse command text into `struct parsed_command`. |
-| `cmds/shell/parser.h` | `print_parsed_command` | 27 | Debug-print a parsed command. |
-| `cmds/shell/parser.h` | `print_parser_errcode` | 27 | Debug-print parser errors. |
 | `cmds/shell/Vec.h` | `vec_new` | allocator | Create a dynamic array. |
 | `cmds/shell/Vec.h` | `vec_get` | none | Return an element by index. |
-| `cmds/shell/Vec.h` | `vec_set` | none | Replace an element by index. |
 | `cmds/shell/Vec.h` | `vec_push_back` | allocator | Append an element, resizing as needed. |
 | `cmds/shell/Vec.h` | `vec_pop_back` | none | Remove and optionally return the last element. |
-| `cmds/shell/Vec.h` | `vec_insert` | allocator | Insert an element at an index. |
 | `cmds/shell/Vec.h` | `vec_erase` | none | Remove an element by index. |
-| `cmds/shell/Vec.h` | `vec_resize` | allocator | Resize vector storage. |
-| `cmds/shell/Vec.h` | `vec_clear` | none | Remove all elements and run destructors. |
 | `cmds/shell/Vec.h` | `vec_destroy` | allocator | Clear and free vector storage. |
 | `cmds/shell/Job.h` | `get_job_by_pid` | none | Find a shell job containing a pid. |
 | `cmds/shell/Job.h` | `vec_remove_job_by_id` | none | Remove a shell job from a vector by job id. |
@@ -320,8 +314,6 @@ files are provided, prints a total line.
 | `cmds/shell.h` | `shell_init` | Initialize shell process state for a TTY. |
 | `cmds/shell.h` | `perror` | Minimal inline stderr writer. |
 | `cmds/shell/parser.h` | `parse_command` | Parse command text into `struct parsed_command`. |
-| `cmds/shell/parser.h` | `print_parsed_command` | Debug-print a parsed command. |
-| `cmds/shell/parser.h` | `print_parser_errcode` | Debug-print parser errors. |
 | `cmds/shell/Vec.h` | `Vec` and `vec_*` | Dynamic array used by shell jobs. |
 | `cmds/shell/Job.h` | `job` and job helpers | Shell job bookkeeping and lookup helpers. |
 | `cmds/shell/io-helpers.h` | `changeStdInput` | Apply parsed stdin redirection. |
