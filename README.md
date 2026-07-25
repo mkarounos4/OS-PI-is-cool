@@ -2,6 +2,8 @@
 
 A bare-metal AArch64 Unix-style operating system for Raspberry Pi 5 hardware and QEMU, with user/kernel isolation, virtual memory, copy-on-write `fork`, ELF userspace, an inode VFS, POSIX-style signals, threads, memory-mapped device I/O, and graphical terminals.
 
+Documentation website: [https://veerkakar17.github.io/rpi-os-docs-website/](https://veerkakar17.github.io/rpi-os-docs-website/)
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -132,6 +134,7 @@ These tradeoffs keep the full OS understandable while still implementing the cor
 
 | Document | Scope |
 |---|---|
+| [About Us](docs/about-us.md) | Project authorship, collaboration model, and room for a deeper team writeup. |
 | [Quickstart Guide](docs/quickstart.md) | Build, rebuild, Raspberry Pi 5 boot, and QEMU boot instructions. |
 | [Demo Guide](docs/demo.md) | Demo workflow and commands to show the OS running. |
 | [Testing and Validation](docs/testing.md) | Smoke tests, manual validation flows, and debugging interfaces. |
@@ -162,21 +165,10 @@ These tradeoffs keep the full OS understandable while still implementing the cor
 
 # About Us
 
-This project was developed by two students with a shared interest in operating systems, low-level programming, and computer architecture.
+OS-PI-is-cool was developed by **Veer Kakar** and **Matthew Karounos**.
 
-**Veer Kakar**  
-University of Pennsylvania, Class of 2028  
-BSE + MSE in Computer Science, Systems Concentration
-Operating Systems TA
-
-**Mathew Karounos**  
-Penn State, Class of 2027  
-
-The project was built through close technical collaboration. We jointly discussed and designed the major kernel subsystems, reviewed architecture decisions together, and both contributed across the codebase rather than dividing the project into isolated ownership areas.
-
-This collaboration model was especially important because many features cut across subsystem boundaries. For example, `fork`, `exec`, copy-on-write memory, ELF loading, signals, file descriptors, pipes, process groups, and shell behavior all interact through the scheduler, virtual memory system, filesystem, trap path, and userspace runtime.
-
-As a result, we both developed a broad understanding of the full operating-system stack instead of focusing on only one layer.
+See [About Us](docs/about-us.md) for the dedicated project-authorship page.
+That page is intentionally structured as a place to add more depth later.
 
 ---
 
