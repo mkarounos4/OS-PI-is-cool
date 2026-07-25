@@ -319,9 +319,6 @@ to the old program, but failure returns an error to the old program.
 
 ## Design Tradeoffs and Limits
 
-- Only static AArch64 executable ELFs are supported.
-- No dynamic linker, shared libraries, relocations, PIE, interpreter segments,
-  or auxiliary vectors are implemented.
 - Segment pages are demand-loaded, which improves exec latency but makes page
   fault handling part of normal program startup.
 - Argument limits are fixed and small, matching the current shell environment.
@@ -329,5 +326,5 @@ to the old program, but failure returns an error to the old program.
   user mappings are driven by virtual addresses and allocated physical pages.
 - The loader uses the filesystem and inode APIs directly; executable bytes are
   ordinary files under `/bin`, not special kernel symbols.
-- The implementation favors understandable Unix-like semantics over full ELF
+- The implementation favors understandable Unix-style semantics over full ELF
   ABI completeness.

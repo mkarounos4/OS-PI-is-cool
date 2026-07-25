@@ -1,61 +1,161 @@
 # Quickstart Guide
 
-### Supported Architecture
-- Raspberry Pi 5 Hardware
-- Raspberry Pi 3B Emulator through QEMU. Supported on most Mac, Windows, and Linux machines.
+This guide covers building OS-PI-is-cool and running it on either QEMU or Raspberry Pi 5 hardware.
 
-# Raspberry Pi 5 Quickstart
-The following section includes the steps for building and running this OS on a physical RPI5. For using the QEMU emulator, please look at the `QEMU` section below.
-A video covering the following steps may also be found below:
+## Supported Targets
 
-## Required Parts
-1. Physical Raspberry Pi 5
-2. UART GPIO to USB adaptor (for reading console logging and sending UART input with the RPI5)
-3. USB SD card Reader (For reading and loading the kernel code onto the SD)
+- Raspberry Pi 5 hardware
+- QEMU `raspi3b` machine model for fast emulated development
 
-## Initial Setup
-For the first time only, it is required to partition the disk and download the bare minimum firmware needed to boot the code. While we still implemented the boot.S and linker.ld ourselves to load into C code, the focus of this project was not to implement all the drivers by hand, so we need the `BCM2712` processor firmware (to let us run code). 
-The formatting is needed to specify a boot section, done in FAT32, which is where our kernel.img, kernel.elf, and config.txt are placed. The rest of the disk will be automaticallly formatted into our own internal filesystem upon boot.
+## Prerequisites
 
-### Step 1: Format the disk
-NOTE: If you already have the official RPI OS installed on this SD card, you may skip to `Step 2`.
-1. Remove the SD card from the RPI5.
-2. Insert the SD card into the SD card reader and plug it into your PC.
-3. Download the official Raspberry Pi OS Installer from [this link](!https://www.raspberrypi.com/software/operating-systems/).
-4. Click through the prompts until you install either the lite or full RPI5 OS onto this microSD.
-5. Open the bootfs of this SD card. You may remove the entire other partition and remove all files in bootfs besides for `BCM2712`. Including or excluding the other files has no impact on this Operating System, so you may remove or add the other files as you wish.
+- Git
+- Make
+- AArch64 bare-metal cross toolchain available as `aarch64-none-elf-gcc`, `aarch64-none-elf-objcopy`, `aarch64-none-elf-objdump`, and `aarch64-none-elf-nm`, if rebuilding project
+- QEMU with `qemu-system-aarch64`, if running the emulated target
+- Raspberry Pi Imager or an equivalent SD-card imaging tool, if running on Raspberry Pi 5
+- USB UART adapter for Raspberry Pi 5 serial input/output
+- HDMI display for framebuffer terminal output on Raspberry Pi 5
 
-### Step 2: Install our OS on the SD card
-1. Download the `kernel_2712.img`, `kernel.elf`, and `config.txt` files from this repository.
-2. Follow 1 and 2 from `Step 1` above to open the SD card on your PC.
-3. Drag the 3 files from 1 into the `bootfs` on this SD card.
+The Makefile uses `CROSS ?= aarch64-none-elf-`, so a different toolchain prefix can be supplied with `make CROSS=<prefix> ...` if needed.
 
-### Step 3: Start the RPI5
-1. Remove the SD card from the SD card reader and insert it back into the RPI5
-2. Plug in the power of the RPI5 to start it. You may remove power by unplugging it at any time, and restart it by plugging it back in, and the filesystem data will persist.
-3. Make sure to plug in the HDMI cable from HDMI slot 0 into any monitor to see the physical GUI terminal.
+## Clone the Repository
 
-### UART Input/Output
-1. Make sure to plug in a UART adaptor into your computer and plug the RX GPIO line into GPIO PIN 14 and the TX GPIO line into GPIO PIN 15. A photo of this can be found below. This is needed to give UART input to the RPI and get optional debug output.
-2a. [LINUX] - install `screen` on your device and run ```sudo screen /dev/ttyUSB<number> 115200``` for the number corresponding to that usb. You may now read UART output through this terminal and, by typing into this terminal, send UART input.
-2b. [WINDOWS/MAC] - Navigate to `www.serialterminal.com` and set the `BAUD` rate to `115200`. Then, hit connect and select the USB PORT corresponding to the UART adaptor. You can now read UART output through the terminal and type UART input and hit Send to send commands.
+```sh
+git clone https://github.com/mkarounos4/OS-PI-is-cool.git
+cd OS-PI-is-cool
+```
 
-# QEMU Raspberry Pi 3 Emulator
+## Build
 
-### Step 1: Download QEMU
+Build the Raspberry Pi 5 target:
 
-### Step 2: Make the project
-1. Clone this repo with `git clone git@github.com:mkarounos4/OS-PI-is-cool.git` (SSH)
-2. Run `make qemu` from the directory root
-3. Once the terminal is started, keyboard input will be sent to qemu display
+```sh
+make rpi
+```
 
-# Rebuilding the project
-If you ever remove the kernel img files or want to make changes and rebuild the project, you will need to adhere to the following steps.
-### Step 1: Download aarch64-none-elf compiler
+This produces:
 
-### Step 2: Make the project
-1. Clone this repo with `git clone <url i dont wanna copy it rn>`
-2. Run `make clone` to make sure there are no stale build artifacts
-3. Make the project depending on the architecture.
-    - [QEMU] Run `make qemu` to rebuild the project and rum qemu automatically. 
-    - [RPI5] Run `make rpi` to rebuild the `kernel_2712.img` and `kernel.elf` files. You may then run it by following `Step 2` onwards of `Raspberry Pi 5 Quickstart`.
+- `kernel_2712.img`, the Raspberry Pi 5 boot image
+- `kernel.elf`, the linked kernel ELF
+- generated userspace ELFs under `build/rpi/user/bin/`
+
+Build the QEMU target without starting QEMU:
+
+```sh
+make PLATFORM=qemu build
+```
+
+This produces `kernel8.img` for the QEMU `raspi3b` target and generated userspace ELFs under `build/qemu/user/bin/`.
+
+## Run in QEMU
+
+```sh
+make qemu
+```
+
+The `qemu` target builds with `PLATFORM=qemu`, creates `build/qemu/sd.img` if it does not already exist, and starts:
+
+```text
+qemu-system-aarch64 -M raspi3b -cpu cortex-a53 -display gtk -serial mon:stdio -kernel kernel8.img -drive file=build/qemu/sd.img,if=sd,format=raw
+```
+
+Keyboard input goes to the QEMU display. Use `Ctrl-A`, then `X`, to quit QEMU from the serial monitor.
+
+## Run on Raspberry Pi 5
+
+Raspberry Pi 5 boot still relies on the board firmware to load the kernel image, as is standard for bare-metal Raspberry Pi development. After firmware handoff, the OS initializes its own kernel entry path, memory layout, drivers, filesystem, and userspace environment.
+
+### Prepare the SD Card
+
+1. Image a microSD card with Raspberry Pi OS using Raspberry Pi Imager or an equivalent tool. The OS does not depend on Linux at runtime, but this creates the FAT boot partition and installs the Raspberry Pi 5 firmware files needed for board startup.
+2. Open the card's `bootfs` partition on the development machine.
+3. Keep the Raspberry Pi 5 firmware files on the boot partition. The kernel image and `config.txt` from this repository are copied into the same partition.
+
+### Copy the OS Image
+
+Build the Raspberry Pi 5 target:
+
+```sh
+make rpi
+```
+
+Copy these files to the SD card boot partition:
+
+- `kernel_2712.img`
+- `kernel.elf`
+- `config.txt`
+
+The provided `config.txt` selects `kernel_2712.img`, enables 64-bit boot, configures the framebuffer, enables UART, and keeps the RP1 PCIe path available for kernel MMIO.
+
+These files are already committed to the repository, so you may skip the `build` step if you do not desire to make any changes.
+
+The repository also includes `build_to_sd`, a helper script that runs `make clean`, builds the Raspberry Pi 5 target, copies the boot files to `/run/media/veerkakar/bootfs/`, syncs, unmounts, and ejects that mount point. Adjust the mount path before using it on a different machine.
+
+### Boot
+
+1. Insert the SD card into the Raspberry Pi 5.
+2. Connect HDMI to the first HDMI port for framebuffer terminal output.
+3. Connect a USB UART adapter if serial console input/output is needed.
+4. Power on the Raspberry Pi 5.
+
+The filesystem is created or mounted by the kernel during boot. On Raspberry Pi 5 media, the filesystem region is selected after the existing boot partition so firmware files remain intact and OS data can persist across reboot.
+
+## UART Input and Output
+
+For Raspberry Pi 5 serial I/O, connect the UART adapter:
+
+- Adapter RX to Raspberry Pi GPIO14/TX
+- Adapter TX to Raspberry Pi GPIO15/RX
+- Adapter GND to Raspberry Pi GND
+
+Use a serial terminal at `115200` baud. On Linux, for example:
+
+```sh
+sudo screen /dev/ttyUSB0 115200
+```
+
+The device name may differ, such as `/dev/ttyUSB1` or `/dev/ttyACM0`.
+
+For Windows/Mac as an example, you may use [www.serialterminal.com](www.serialterminal.com).
+
+## Rebuild and Clean
+
+Remove build artifacts:
+
+```sh
+make clean
+```
+
+Rebuild for Raspberry Pi 5:
+
+```sh
+make rpi
+```
+
+Rebuild and run QEMU:
+
+```sh
+make qemu
+```
+
+Build with UART-backed TTY output instead of framebuffer-backed TTY output:
+
+```sh
+make UART_OUT=1 rpi
+```
+
+or:
+
+```sh
+make UART_OUT=1 qemu
+```
+
+## Troubleshooting
+
+- Toolchain not found: confirm `aarch64-none-elf-gcc` is installed and on `PATH`, or pass `CROSS=<prefix>` to `make`.
+- QEMU target missing: install a QEMU package that includes `qemu-system-aarch64`.
+- SD-card copy fails: check the boot partition mount path and write permissions. The default helper script path is machine-specific.
+- Serial output is not visible: confirm the adapter wiring, `115200` baud rate, and that `enable_uart=1` is present in `config.txt`.
+- Framebuffer output is not visible: use the first HDMI port and confirm the display supports the configured framebuffer mode.
+- Stale build artifacts: run `make clean` before rebuilding the target.

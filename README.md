@@ -1,46 +1,88 @@
-# Table of Contents
+# OS-PI-is-cool
+
+A bare-metal AArch64 Unix-style operating system for Raspberry Pi 5 hardware and QEMU, with user/kernel isolation, virtual memory, copy-on-write `fork`, ELF userspace, an inode VFS, POSIX-style signals, threads, memory-mapped device I/O, and graphical terminals.
+
+## Table of Contents
 
 - [Overview](#overview)
+- [Current Feature Status](#current-feature-status)
+- [Why This Was Hard](#why-this-was-hard)
+- [Demo](#demo)
+- [Project Scope](#project-scope)
 - [Project Goals](#project-goals)
 - [Design Philosophy](#design-philosophy)
-- [What Makes It Unix-like](#what-makes-it-unix-like)
+- [What Makes It Unix-style](#what-makes-it-unix-style)
 - [What Is Intentionally Simplified](#what-is-intentionally-simplified)
+- [Other Documentation Files](#other-documentation-files)
 - [Kernel Space vs User Space](#kernel-space-vs-user-space)
 - [Why Raspberry Pi 5 + QEMU Pi 3B](#why-raspberry-pi-5--qemu-pi-3b)
 - [Major Accomplishments](#major-accomplishments)
-- [Current Feature Status](#current-feature-status)
 - [Future Enhancements](#future-enhancements)
 - [Major Features](#major-features)
 - [Project tree](#project-tree)
 
-## Other Documentation Files
+---
 
-| Document | Scope |
-|---|---|
-| [Quickstart Guide](docs/quickstart.md) | Build, rebuild, Raspberry Pi 5 boot, and QEMU boot instructions. |
-| [Demo Guide](docs/demo.md) | Demo workflow and commands to show the OS running. |
-| [Architecture](docs/architecture/architecture.md) | Boot flow, linker layout, platform split, EL1/EL0 boundary, IRQs, timers, traps, and syscalls. |
-| [Filesystem Architecture](docs/architecture/filesystem.md) | Inode filesystem, VFS, open-file table, caches, permissions, and disk layout. |
-| [Processes Architecture](docs/architecture/processes.md) | Scheduler, trap-frame return path, context switching, fork, exec, process groups, zombies/orphans, waitpid, sleep blocking, multithreading, synchronization, isolation. |
-| [ELF Loading Architecture](docs/architecture/elf-loading.md) | Runtime `exec`, ELF validation, argument stack setup, page-table replacement, lazy segment loading, and demand paging from `/bin`. |
-| [Signals Architecture](docs/architecture/signals.md) | Kernel signal delivery, masks, pending sets, default actions, process groups, job-control signals, SIGCHLD, and scheduler delivery checkpoints. |
-| [Userspace Architecture](docs/architecture/userspace.md) | Userspace build pipeline, linker scripts, embedded ELF blobs, EL0 isolation, init, shell, and user libraries. |
-| [Memory Architecture](docs/architecture/memory.md) | Virtual Memory, per-process page tables, lazy allocation, demand paging, page fault handling, copy-on-write, malloc |
-| [Device Drivers Architecture](docs/architecture/device-drivers.md) | Block devices, SDHCI, UART, char devices, TTY backends, framebuffer terminal, pipes, fan, and driver init order. |
-| [Syscall API Reference](docs/api-docs/syscall-table.md) | Raw syscall table with SVC numbers and brief syscall notes. |
-| [Userspace API Reference](docs/api-docs/user-api.md) | Userspace library functions, shell helpers, and command mini man pages. |
-| [Procfs API Reference](docs/api-docs/procfs-api.md) | `/proc` files, generated fields, and mount-table reporting. |
-| [Signals API Reference](docs/api-docs/signals-api.md) | Signals ids, default dispositions, usage. |
+## Overview
 
-# Overview
+OS-PI-is-cool is a Unix-inspired operating system written from scratch for **AArch64**. It runs on **Raspberry Pi 5 hardware** and under **QEMU's Raspberry Pi 3B emulator**, combining bare-metal hardware bring-up with realistic OS mechanisms: virtual memory, multitasking, persistent storage, a filesystem-backed `/bin`, and an interactive userspace shell.
 
-This project is a Unix-inspired operating system written from scratch for **AArch64**. It runs both on **Raspberry Pi 5 hardware** and under **QEMU's Raspberry Pi 3B emulator**, providing a complete educational operating system with virtual memory, multitasking, a persistent filesystem, and a userspace environment.
-
-Rather than reproducing every feature of a modern Unix kernel, the project focuses on implementing the core concepts that make Unix systems elegant and understandable, with each subsystem documented in detail throughout `docs/`.
+The project is intentionally educational rather than a complete POSIX implementation. It focuses on the core mechanics that make Unix-style systems understandable: processes own resources, threads are scheduled, files and devices share descriptor paths, page faults drive memory behavior, and userspace reaches the kernel through a narrow syscall ABI.
 
 ---
 
-# Project Goals
+## Current Feature Status
+
+| Area | Implemented |
+|---|---|
+| Architecture | Bare-metal AArch64 kernel, EL1/EL0 isolation, traps, IRQs, syscalls, timer preemption |
+| Processes | `fork`, `exec`, `waitpid`, `exit`, process groups, zombies, orphans, job control |
+| Scheduling | Multi-priority round-robin scheduling, timer interrupts, blocking sleep, thread wakeups |
+| Virtual Memory | Per-process page tables, page faults, lazy allocation, demand paging, `mmap`, copy-on-write |
+| ELF Loading | Runtime `exec`, ELF validation, argument stack setup, lazy `PT_LOAD` paging from `/bin` |
+| Filesystem | Inode filesystem, directories, symlinks, permissions, VFS, file descriptors, block/inode caches |
+| Virtual Filesystems | `procfs`, `devfs`, device nodes, mount-table reporting |
+| IPC | Pipes, POSIX-style signals, process-group signal delivery, `SIGCHLD` |
+| Threads | Kernel/user threading support, mutexes, semaphores, condition variables |
+| Drivers / Devices | Memory-mapped hardware drivers, UART, SD/block device support, framebuffer, TTY backends, fan |
+| Terminal / GUI | UART TTY, framebuffer graphical terminal, multi-terminal support, raw/canonical mode |
+| Userspace | ELF executables, shell, user libraries, Unix-style commands, tests, and editor utilities |
+
+---
+
+## Why This Was Hard
+
+This project goes beyond a toy kernel or emulator-only OS. Raspberry Pi 5 low-level documentation is limited, so hardware support required cross-referencing available documentation, Linux source, device-tree behavior, ARMv8-A documentation, and observed MMIO behavior to initialize and drive real devices.
+
+The OS also implements Unix-style semantics across interacting subsystems rather than isolated features. `fork`, copy-on-write memory, page faults, ELF loading, file descriptors, pipes, signals, process groups, job control, and `waitpid` all interact through the scheduler, trap return path, filesystem, and virtual memory system.
+
+The result is a full vertical stack: boot code, kernel, drivers, memory manager, filesystem, syscall layer, userspace runtime, shell, and applications.
+
+---
+
+## Demo
+
+A full demo guide is available in [docs/demo.md](docs/demo.md). The demo is intended to show:
+
+- Booting the kernel on QEMU or Raspberry Pi 5
+- Entering userspace and launching the shell
+- Running ELF userspace commands from `/bin`
+- Creating, reading, and persisting files
+- Demonstrating `fork`, `exec`, `waitpid`, pipes, and signals
+- Inspecting process and kernel state through `/proc`
+- Showing UART and framebuffer-backed terminal output
+
+Screenshots and video clips can be added here as the public demo page is finalized.
+
+---
+
+## Project Scope
+
+This repository contains the kernel, userspace runtime, shell commands, architecture documentation, and API references for OS-PI-is-cool. The project is designed to be understandable as a complete operating-system codebase while still implementing realistic Unix-style mechanisms such as process isolation, filesystem-backed execution, signals, pipes, and persistent storage.
+
+---
+
+## Project Goals
 
 The primary goals of this operating system are:
 
@@ -54,7 +96,7 @@ The result is an educational operating system that implements many of the mechan
 
 ---
 
-# Design Philosophy
+## Design Philosophy
 
 Several principles guide the design of the project.
 
@@ -66,7 +108,7 @@ Several principles guide the design of the project.
 
 ---
 
-# What Makes It Unix-like
+## What Makes It Unix-style
 
 The operating system adopts many of the classic Unix abstractions.
 
@@ -81,32 +123,63 @@ The operating system adopts many of the classic Unix abstractions.
 - Shell with job control
 - Small userspace utilities
 
-While not POSIX-complete, the system intentionally mirrors familiar Unix behavior whenever practical.
+While not a complete POSIX implementation, the system intentionally mirrors familiar Unix behavior whenever practical.
 
 ---
 
-# What Is Intentionally Simplified
+## What Is Intentionally Simplified
 
-Some areas are intentionally reduced in scope to keep the codebase understandable.
+The OS is designed as an educational Unix-style kernel rather than a production replacement for Linux. Some production-scale features are intentionally out of scope:
 
-Examples include:
+- Single-core execution instead of SMP
+- No networking stack yet
+- Focused hardware support for the devices needed to boot, interact with, render output, and persist data
+- ext2-inspired educational filesystem rather than a fully POSIX-compliant production filesystem
+- Simple, readable subsystem designs over highly optimized production algorithms
 
-- Single-core execution
-- No networking stack
-- Minimal driver framework
-- Limited device support
-- Simplified ext2-inspired filesystem instead of a production filesystem
-- Educational implementations over highly optimized production algorithms
-
-These tradeoffs allow the project to focus on the operating-system fundamentals rather than production-scale complexity.
+These tradeoffs keep the full OS understandable while still implementing the core mechanisms of a Unix-style kernel.
 
 ---
 
-# Kernel Space vs User Space
+## Other Documentation Files
+
+### General Docs
+
+| Document | Scope |
+|---|---|
+| [Quickstart Guide](docs/quickstart.md) | Build, rebuild, Raspberry Pi 5 boot, and QEMU boot instructions. |
+| [Demo Guide](docs/demo.md) | Demo workflow and commands to show the OS running. |
+| [Testing and Validation](docs/testing.md) | Smoke tests, manual validation flows, and debugging interfaces. |
+
+### Architecture Docs
+
+| Document | Scope |
+|---|---|
+| [Architecture](docs/architecture/architecture.md) | Boot flow, linker layout, platform split, EL1/EL0 boundary, IRQs, timers, traps, and syscalls. |
+| [Filesystem Architecture](docs/architecture/filesystem.md) | Inode filesystem, VFS, open-file table, caches, permissions, and disk layout. |
+| [Processes Architecture](docs/architecture/processes.md) | Scheduler, trap-frame return path, context switching, fork, exec, process groups, zombies/orphans, waitpid, sleep blocking, multithreading, synchronization, isolation. |
+| [ELF Loading Architecture](docs/architecture/elf-loading.md) | Runtime `exec`, ELF validation, argument stack setup, page-table replacement, lazy segment loading, and demand paging from `/bin`. |
+| [Signals Architecture](docs/architecture/signals.md) | Kernel signal delivery, masks, pending sets, default actions, process groups, job-control signals, SIGCHLD, and scheduler delivery checkpoints. |
+| [Userspace Architecture](docs/architecture/userspace.md) | Userspace build pipeline, linker scripts, embedded ELF blobs, EL0 isolation, init, shell, and user libraries. |
+| [Memory Architecture](docs/architecture/memory.md) | Virtual memory, per-process page tables, lazy allocation, demand paging, page fault handling, copy-on-write, and allocators. |
+| [Device Drivers Architecture](docs/architecture/device-drivers.md) | Block devices, SDHCI, UART, char devices, TTY backends, framebuffer terminal, pipes, fan, and driver init order. |
+
+### API Docs
+
+| Document | Scope |
+|---|---|
+| [Syscall API Reference](docs/api-docs/syscall-table.md) | Raw syscall table with SVC numbers and brief syscall notes. |
+| [Userspace API Reference](docs/api-docs/user-api.md) | Userspace library functions, shell helpers, and command mini man pages. |
+| [Procfs API Reference](docs/api-docs/procfs-api.md) | `/proc` files, generated fields, and mount-table reporting. |
+| [Signals API Reference](docs/api-docs/signals-api.md) | Signal ids, default dispositions, masks, `sigaction`, and signal helper behavior. |
+
+---
+
+## Kernel Space vs User Space
 
 The operating system follows a traditional split between privileged kernel code and isolated user processes.
 
-## Kernel Space
+### Kernel Space
 
 Kernel responsibilities include:
 
@@ -122,7 +195,7 @@ Kernel responsibilities include:
 - Terminal drivers
 - ELF loading
 
-## User Space
+### User Space
 
 User space contains:
 
@@ -149,15 +222,15 @@ User space contains:
 
 ---
 
-# Why Raspberry Pi 5 + QEMU Pi 3B
+## Why Raspberry Pi 5 + QEMU Pi 3B
 
 Development targets two complementary platforms.
 
-## Raspberry Pi 5
+### Raspberry Pi 5
 
-The Raspberry Pi 5 provides modern ARM64 hardware for running the operating system on real hardware with full peripheral support.
+The Raspberry Pi 5 provides modern ARM64 hardware for running the operating system on real hardware with the supported UART, framebuffer, interrupt, fan, and SD-backed storage paths.
 
-## QEMU Raspberry Pi 3B
+### QEMU Raspberry Pi 3B
 
 QEMU enables rapid development, debugging, and automated testing without requiring physical hardware.
 
@@ -165,7 +238,7 @@ Supporting both platforms makes development significantly faster while ensuring 
 
 ---
 
-# Major Accomplishments
+## Major Accomplishments
 
 Major completed subsystems include:
 
@@ -184,38 +257,24 @@ Major completed subsystems include:
 
 ---
 
-# Current Feature Status
-
-| Area | Implemented |
-|------|-------------|
-| Processes | `fork`, `exec`, `waitpid`, `exit`, process groups |
-| Virtual Memory | Page tables, Copy-on-Write, lazy allocation, page faults, `mmap` |
-| Filesystem | Inode filesystem, directories, symbolic links, permissions, VFS |
-| IPC | Pipes, signals |
-| Terminal | UART TTY, graphical framebuffer terminal |
-| Userspace | Statically linked ELF executables and shell commands |
-
----
-
 ## Future Enhancements
 
-The following is a list of Future Enhancements we are in progress of making.
+Planned or in-progress areas:
 
-- TCP Networking Stack
-- Custom Search Engine
-- Multicore Support
-- Proper GUI Desktop Environment
-- Custom Package Manager
-- On-device C compiler to proogram our OS and make system calls with C
-- More userspace functions and POSIX API calls
+- TCP/IP networking stack
+- Multicore/SMP support
+- More complete POSIX userspace APIs
+- GUI desktop environment on top of the framebuffer terminal system
+- On-device C toolchain or small C-like compiler for writing userspace programs inside the OS
+- Package-management or search tooling for discovering and installing userspace programs
 
 ---
 
-# Major Features
+## Major Features
 
 Every subsystem has a dedicated design document located in `docs/`.
 
-## [Architecture & Hardware](docs/architecture/architecture.md)
+### [Architecture & Hardware](docs/architecture/architecture.md)
 
 - Bare-metal AArch64 kernel
 - Raspberry Pi 5 support
@@ -229,7 +288,7 @@ Every subsystem has a dedicated design document located in `docs/`.
 - UART console
 - SD card persistence
 
-## [Process Management](docs/architecture/processes.md)
+### [Process Management](docs/architecture/processes.md)
 
 - Multi-priority round-robin scheduler
 - End-to-end trap frame, scheduler interrupt, context switch, and EL0 return path
@@ -241,7 +300,7 @@ Every subsystem has a dedicated design document located in `docs/`.
 - Timer-backed sleep blocking
 - Multithreading and Synchronization
 
-## [ELF Loading](docs/architecture/elf-loading.md)
+### [ELF Loading](docs/architecture/elf-loading.md)
 
 - Filesystem-backed `exec()`
 - AArch64 ELF validation
@@ -251,7 +310,7 @@ Every subsystem has a dedicated design document located in `docs/`.
 - Demand paging executable pages from `/bin`
 - Init and shell command integration
 
-## [Signals](docs/architecture/signals.md)
+### [Signals](docs/architecture/signals.md)
 
 - POSIX-style signal actions and masks
 - Process-level and thread-level pending signals
@@ -260,7 +319,7 @@ Every subsystem has a dedicated design document located in `docs/`.
 - TTY job-control signals
 - Scheduler checkpoint delivery
 
-## [Memory Management](docs/architecture/memory.md)
+### [Memory Management](docs/architecture/memory.md)
 
 - Virtual memory
 - Page tables
@@ -273,7 +332,7 @@ Every subsystem has a dedicated design document located in `docs/`.
 - Kernel memory allocator
 - `mmap()`
 
-## [Filesystem](docs/architecture/filesystem.md)
+### [Filesystem](docs/architecture/filesystem.md)
 
 - ext2-inspired inode filesystem
 - Directories
@@ -286,16 +345,18 @@ Every subsystem has a dedicated design document located in `docs/`.
 - Inode cache
 - Permissions
 
-## [Devices](docs/architecture/device-drivers.md)
+### [Devices](docs/architecture/device-drivers.md)
 
-- UART driver
-- Interrupt-driven input
-- TTY terminal, with multi-terminal support
-- Raw vs Canonical terminal mode
-- Pipes
-- Framebuffer graphical terminal
+- Memory-mapped hardware driver implementation
+- Block-device and SDHCI support for persistent storage
+- UART driver and interrupt-driven input
+- Character-device layer for TTY backends
+- UART TTY and framebuffer graphical TTY
+- Multi-terminal support with raw and canonical modes
+- Raspberry Pi 5 fan/device support
+- Device initialization order and kernel driver registration
 
-## [Userspace](docs/architecture/userspace.md)
+### [Userspace](docs/architecture/userspace.md)
 
 - Interactive shell
 - Job control
@@ -308,8 +369,8 @@ Every subsystem has a dedicated design document located in `docs/`.
   - `kill`
   - `sleep`
   - `vim` style text editor
-  - `pong`
-  - and many others
+  - `wc`
+  - and other small utilities
 
 ---
 
@@ -381,6 +442,7 @@ Every subsystem has a dedicated design document located in `docs/`.
 └── docs
     ├── quickstart.md              -- Build and boot instructions
     ├── demo.md                    -- Demo workflow notes
+    ├── testing.md                 -- Smoke tests, manual validation, and debugging interfaces
     ├── architecture               -- Subsystem architecture documents
     │   ├── architecture.md        -- Hardware, boot, linker layout, traps, IRQs, timers, and syscalls
     │   ├── device-drivers.md      -- Block devices, char drivers, UART, TTY, TTYGUI, pipes, and fan

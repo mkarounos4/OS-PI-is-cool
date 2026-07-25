@@ -52,6 +52,16 @@ and `SIGCHLD`/`waitpid` integration, see
 | `SIGCHLD` | 12 | Ignore | Used to notify parents about child state changes. |
 | `SIGTERM` | 15 | Terminate | General termination signal. |
 
+## Default Dispositions
+
+Default dispositions are process-wide. `SIGINT`, `SIGKILL`, and `SIGTERM`
+terminate; `SIGSTOP`, `SIGTSTP`, `SIGTTIN`, and `SIGTTOU` stop; `SIGCONT`
+continues stopped threads; and `SIGCHLD` is ignored by default while still
+participating in parent `waitpid` wakeups.
+
+`SIGKILL` and `SIGSTOP` cannot be caught or ignored. `sigaction` rejects attempts
+to install a non-default handler for either signal.
+
 ## Data Types
 
 ### `sigset_t`
@@ -74,6 +84,27 @@ type `void (*)(int)`. While a userspace handler runs, the kernel blocks the
 delivered signal and every signal in `sa_mask`; it restores the old mask after
 the handler returns. `sa_flags` is stored but no flag behavior is currently
 documented by the implementation.
+
+## Signal Masks
+
+Signal masks are per-thread. `sigprocmask` changes the current thread's mask,
+not a process-wide mask. A process-directed signal is delivered to one unmasked
+thread when possible; if every thread masks it, the signal remains in the
+process-pending bitset until a scheduler delivery checkpoint can retry it.
+
+Thread-directed signals remain in the target thread's pending bitset when
+masked. Pending signals are represented as bits, so repeated deliveries of the
+same signal coalesce.
+
+## Process and Process-Group Delivery
+
+`kill(pid, signal)` targets one process when `pid > 0`. Negative `pid` values
+target process group `-pid`, which is the path used by shell job control for
+foreground/background jobs and pipelines.
+
+Default stop, continue, and terminate actions apply to all threads in the target
+process. Other non-ignored process-directed signals are delivered to one
+eligible unmasked thread.
 
 ## Mini Reference
 
@@ -137,3 +168,11 @@ and `SIGTERM` terminate; `SIGSTOP`, `SIGTSTP`, `SIGTTIN`, and `SIGTTOU` stop;
 Signals can interrupt `THREAD_BLOCKED_INTERRUPTABLE` waits. Terminating signals
 also interrupt `THREAD_BLOCKED_KILLABLE` waits. `SIGCONT` clears pending default
 stop signals for the target process before continuing stopped threads.
+
+## Limitations
+
+- The signal namespace is a fixed 32-bit bitset.
+- Process groups support practical shell job control, but full POSIX sessions
+  and controlling-terminal permission rules are intentionally out of scope.
+- `sa_flags` is stored, but POSIX `SA_*` flag behavior is not currently
+  implemented.

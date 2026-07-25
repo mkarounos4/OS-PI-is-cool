@@ -35,6 +35,129 @@ For each live process, procfs exposes `/proc/<pid>` as a virtual directory.
 | `/proc/<pid>/maps` | User page-table segment map for the process. |
 | `/proc/<pid>/threads` | Threads owned by the process with TID, state, kernel/user stack addresses, and thread name. |
 
+## Example Output Shapes
+
+Values vary by platform, boot state, and current workload. These examples show
+the generated field shape rather than fixed expected values.
+
+### `/proc/processes`
+
+```text
+PID PPID PGID STATE THREADS NAME
+0 -1 0 R 1 init
+1 0 1 R 1 shell
+```
+
+### `/proc/meminfo`
+
+```text
+MemTotal: 262144 kB
+MemFree: 240000 kB
+KernelHeap: 1024 kB
+PageSize: 4 kB
+
+PagesTotal: 65536
+PagesFree: 60000
+PagesUsed: 5536
+
+AnonPages: 12
+FilePages: 8
+CowPages: 0
+MappedPages: 4
+KernelPages: 0
+PageTables: 3
+
+PageFaults: 20
+CowFaults: 0
+AnonFaults: 12
+FileFaults: 8
+InvalidFaults: 0
+```
+
+### `/proc/vmstat`
+
+```text
+pgfault 20
+pgfault_anon 12
+pgfault_file 8
+pgfault_cow 0
+pgfault_invalid 0
+cow_copies 0
+cow_shared_pages 0
+mmap_regions 4
+heap_lazy_allocs 2
+stack_lazy_allocs 1
+tlb_flushes 5
+page_allocs 40
+page_frees 3
+```
+
+### `/proc/threads`
+
+```text
+TID PID STATE CPU NAME
+0 0 R 0 init.main
+1 1 R 0 shell.main
+```
+
+### `/proc/interrupts`
+
+```text
+IRQ COUNT NAME
+30 128 timer
+185 4 uart
+```
+
+The UART IRQ number differs between the QEMU and Raspberry Pi 5 interrupt
+paths.
+
+### `/proc/syscalls`
+
+```text
+NR COUNT NAME
+23 3 open
+26 3 read
+27 6 write
+43 2 exec
+```
+
+### `/proc/cache`
+
+```text
+BlockCache:
+  capacity_blocks: 12
+  used_blocks: 4
+  hits: 10
+  misses: 6
+  evictions: 0
+  dirty_blocks: 1
+
+InodeCache:
+  capacity: 0
+  used: 3
+  hits: 8
+  misses: 4
+  evictions: 1
+  dirty: 0
+```
+
+### `/proc/tty`
+
+```text
+ttys: 1
+name: tty0
+foreground_pgid: 1
+input_backend: uart0 (1:0)
+output_backend: ttygui0 (2:0)
+rows: 45
+cols: 120
+cursor: 0,0
+input_buffer: 0
+output_buffer: 0
+refcount: 1
+canonical_mode: yes
+```
+
 ## Mounts Format
 
 `/proc/mounts` uses this header:

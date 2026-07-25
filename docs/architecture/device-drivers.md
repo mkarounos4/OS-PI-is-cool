@@ -13,6 +13,11 @@ subsystems should not write MMIO registers directly. They should call stable
 wrappers such as `block_read`, `block_write`, `char_device_read`,
 `char_device_write`, `tty_write`, or an inode's `file_operations`.
 
+The driver list below is not meant to imply a production Linux-style driver
+model. The current design focuses on the devices needed to boot, interact with
+the machine, render output, and persist data while keeping the boundaries clear
+enough to inspect.
+
 ## List of Features
 
 - [Block-device abstraction](#block-devices)
@@ -204,7 +209,8 @@ open("/dev/tty0")
   -> tty_open / tty_read / tty_write handle the operation
 ```
 
-For more information about char drivers with respect to the Filesystem, please check out [filesystem.md](filesystem.md).
+For more information about character drivers in the filesystem/VFS model, see
+[filesystem.md](filesystem.md).
 
 ## Device Nodes and devfs Creation
 
@@ -477,8 +483,10 @@ Pipes are not hardware drivers, but they use the same file-operation pattern as
 character devices. A pipe endpoint behaves like an inode file with custom
 read/write behavior and internal buffering.
 
-The important similarity is that code above the filesystem still calls normal
-`read` and `write`. The inode's fops decide what behavior to use.
+Pipes are documented here because they share the same descriptor and blocking
+I/O paths as devices, even though they are IPC objects rather than physical
+hardware. The important similarity is that code above the filesystem still
+calls normal `read` and `write`. The inode's fops decide what behavior to use.
 
 Internally, each pipe has the following metadata:
 - `num_readers`: number of threads with this pipe open in `read` mode
@@ -503,7 +511,9 @@ The design is intentionally conservative: if fan hardware is not present or the
 platform is not Raspberry Pi 5, the rest of the kernel should not depend on fan
 support existing.
 
-This is a simple addon added to prevent RPI5 hardware from overheating, and is not a major special feature of this project.
+The fan driver is a small Raspberry Pi 5-specific hardware support path. It is
+intentionally isolated from the generic driver framework because it is not
+exposed as a user-facing device yet.
 
 ## Driver Initialization Order
 

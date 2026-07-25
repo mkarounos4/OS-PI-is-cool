@@ -2,7 +2,7 @@
 
 This document describes the process, thread, scheduler, signal, and job-control
 architecture of the OS. It focuses on how runnable work is represented, how the
-kernel moves between threads, how Unix-like lifecycle operations are modeled,
+kernel moves between threads, how Unix-style lifecycle operations are modeled,
 and why the implementation chooses these boundaries instead of larger
 production-kernel machinery.
 
@@ -234,7 +234,7 @@ and TTY requests.
 the current thread. Process state is derived from thread counters: if all
 threads are gone or zombie, the process becomes a zombie and the parent is
 notified with `SIGCHLD`. The process table slot is not freed until a parent
-successfully reaps it with `waitpid`, preserving status for Unix-like child
+successfully reaps it with `waitpid`, preserving status for Unix-style child
 collection.
 
 ## Process Model
@@ -908,8 +908,6 @@ substitute for automated regression tests around fork/exec/wait failure paths.
 
 - Single-core scheduling keeps the scheduler global and understandable, but it
   does not exercise SMP locking, per-CPU run queues, or cross-core wakeups.
-- Fixed PID slots make lookup and `/proc` simple, but impose a hard process
-  limit and do not protect against PID reuse races.
 - Thread scheduling with process-owned resources matches Unix structure, but
   makes `exec`, `exit`, and signal delivery more complex than a purely
   single-threaded process model.
@@ -922,6 +920,3 @@ substitute for automated regression tests around fork/exec/wait failure paths.
   POSIX controlling-terminal rules are intentionally simplified.
 - Synchronization primitives demonstrate kernel wait queues, but they are not
   designed as production SMP primitives.
-- `spawn` remains available for function-entry processes even though normal
-  userspace execution now uses ELF `exec`; this preserves a useful test path at
-  the cost of having two process-entry models.

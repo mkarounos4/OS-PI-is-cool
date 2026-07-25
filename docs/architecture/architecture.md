@@ -17,6 +17,7 @@ detail, but the hardware and CPU-control path is documented here.
 - [Kernel linker script and image layout](#kernel-linker-script-and-image-layout)
 - [Kernel initialization order](#kernel-initialization-order)
 - [Platform split](#platform-split)
+- [Raspberry Pi 5 hardware bring-up](#raspberry-pi-5-hardware-bring-up)
 - [MMIO and device memory](#mmio-and-device-memory)
 - [Exception vector table](#exception-vector-table)
 - [Trap frame layout](#trap-frame-layout)
@@ -265,6 +266,20 @@ behind stable interfaces.
 The rest of the kernel should not care which platform supplied a device. For
 example, the filesystem calls `block_read`, not SDHCI internals. The syscall
 path calls `write` on a file descriptor, not UART or framebuffer directly.
+
+## Raspberry Pi 5 Hardware Bring-up
+
+Raspberry Pi 5 support required separating platform-specific hardware code from
+common kernel subsystems. The QEMU target uses an emulated Raspberry Pi 3B-style
+device model, while Raspberry Pi 5 requires different initialization paths for
+hardware such as interrupts, UART, framebuffer output, timers, and SD-backed
+storage.
+
+Because low-level Raspberry Pi 5 documentation is limited, hardware support was
+developed by cross-referencing available documentation, device-tree behavior,
+Linux source, and observed MMIO behavior on real hardware. The platform split
+keeps those details behind stable interfaces so the scheduler, filesystem,
+syscall layer, and userspace code do not need target-specific branches.
 
 ## MMIO and Device Memory
 

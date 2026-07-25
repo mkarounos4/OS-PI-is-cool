@@ -35,7 +35,7 @@ returned in `x0`. Negative return values are errno-style failures.
 | 25 | `S_FS_LSEEK` | `lseek` | Reposition a seekable file descriptor. |
 | 26 | `S_FS_READ` | `read` | Read bytes from a file descriptor. |
 | 27 | `S_FS_WRITE` | `write` | Write bytes to a file descriptor. |
-| 28 | `S_SIGPROCMASK` | `sigprocmask` | Change or read the process signal mask. |
+| 28 | `S_SIGPROCMASK` | `sigprocmask` | Change or read the current thread's signal mask. |
 | 29 | `S_SIGEMPTYSET` | `sigemptyset` | Initialize an empty signal set. |
 | 30 | `S_SIGADDSET` | `sigaddset` | Add a signal to a signal set. |
 | 31 | `S_SIGFILLSET` | `sigfillset` | Initialize a full signal set. |
@@ -143,6 +143,7 @@ and `STDERR_FILENO == 2`.
 
 The signal API uses `sigset_t` bitsets and `struct sigaction`. Handlers may be
 `SIG_DFL`, `SIG_IGN`, or a function pointer of type `void (*)(int)`.
+Signal dispositions are process-wide; signal masks are per-thread.
 
 ### Process-control syscalls - SVC 34 through 38
 

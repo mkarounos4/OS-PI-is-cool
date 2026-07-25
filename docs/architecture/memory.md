@@ -10,6 +10,7 @@
 - [Page Allocation and Management](#page-allocation-and-management)
 - [TLB Management and Invalidation](#tlb-management)
 - [Memory Statistics and Debugging](#memory-statistics-and-debugging)
+- [Design Tradeoffs and Limits](#design-tradeoffs-and-limits)
 
 ## System Structure
 
@@ -229,10 +230,10 @@ Specific physical memory ranges are mapped as device memory for hardware periphe
 
 ```c
 DEVICE_BLOCK_QEMU_LOCAL      0x40000000      // QEMU local peripherals
-DEVICE_BLOCK_RPI5_PCIE       0x1000000000    // RPi5 PCIe
+DEVICE_BLOCK_RPI5_PCIE       0x1000000000    // Raspberry Pi 5 PCIe
 DEVICE_BLOCK_RPI_GIC         0x1040000000    // RPi GIC interrupt controller
-DEVICE_BLOCK_RPI5_RP1_PERIPH 0x1c00000000    // RPi5 RP1 peripherals
-DEVICE_BLOCK_RPI5_RP1_MSIX   0x1f80000000    // RPi5 RP1 MSI-X
+DEVICE_BLOCK_RPI5_RP1_PERIPH 0x1c00000000    // Raspberry Pi 5 RP1 peripherals
+DEVICE_BLOCK_RPI5_RP1_MSIX   0x1f80000000    // Raspberry Pi 5 RP1 MSI-X
 ```
 
 ---
@@ -609,3 +610,10 @@ Pre-allocated boot page tables mapped at compile-time:
 6. **Direct Mapping**: Kernel pages directly mapped eliminates translation overhead for kernel code
 7. **Exception-Driven Faults**: Uses MMU exceptions (translation faults, permission faults) to drive allocation and protection
 8. **Hardware-Enforced Protection**: ARMv8 PTE bits enforce all memory permissions and access controls
+
+## Design Tradeoffs and Limits
+
+- Single-core execution avoids SMP TLB shootdowns and per-core address-space synchronization.
+- Demand paging and copy-on-write are implemented for the supported anonymous, heap, stack, `mmap`, and ELF-backed paths described above.
+- User TLB invalidation is global for the current design rather than ASID-targeted.
+- The implementation favors clear page-fault and mapping logic over production-scale VM optimizations.
