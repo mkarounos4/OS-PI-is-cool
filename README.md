@@ -14,6 +14,7 @@ A bare-metal AArch64 Unix-style operating system for Raspberry Pi 5 hardware and
 - [What Makes It Unix-style](#what-makes-it-unix-style)
 - [What Is Intentionally Simplified](#what-is-intentionally-simplified)
 - [Other Documentation Files](#other-documentation-files)
+- [About Us](#about-us)
 - [Kernel Space vs User Space](#kernel-space-vs-user-space)
 - [Why Raspberry Pi 5 + QEMU Pi 3B](#why-raspberry-pi-5--qemu-pi-3b)
 - [Major Accomplishments](#major-accomplishments)
@@ -57,22 +58,6 @@ This project goes beyond a toy kernel or emulator-only OS. Raspberry Pi 5 low-le
 The OS also implements Unix-style semantics across interacting subsystems rather than isolated features. `fork`, copy-on-write memory, page faults, ELF loading, file descriptors, pipes, signals, process groups, job control, and `waitpid` all interact through the scheduler, trap return path, filesystem, and virtual memory system.
 
 The result is a full vertical stack: boot code, kernel, drivers, memory manager, filesystem, syscall layer, userspace runtime, shell, and applications.
-
----
-
-## Demo
-
-A full demo guide is available in [docs/demo.md](docs/demo.md). The demo is intended to show:
-
-- Booting the kernel on QEMU or Raspberry Pi 5
-- Entering userspace and launching the shell
-- Running ELF userspace commands from `/bin`
-- Creating, reading, and persisting files
-- Demonstrating `fork`, `exec`, `waitpid`, pipes, and signals
-- Inspecting process and kernel state through `/proc`
-- Showing UART and framebuffer-backed terminal output
-
-Screenshots and video clips can be added here as the public demo page is finalized.
 
 ---
 
@@ -172,6 +157,26 @@ These tradeoffs keep the full OS understandable while still implementing the cor
 | [Userspace API Reference](docs/api-docs/user-api.md) | Userspace library functions, shell helpers, and command mini man pages. |
 | [Procfs API Reference](docs/api-docs/procfs-api.md) | `/proc` files, generated fields, and mount-table reporting. |
 | [Signals API Reference](docs/api-docs/signals-api.md) | Signal ids, default dispositions, masks, `sigaction`, and signal helper behavior. |
+
+---
+
+# About Us
+
+This project was developed by two students with a shared interest in operating systems, low-level programming, and computer architecture.
+
+**Veer Kakar**  
+University of Pennsylvania, Class of 2028  
+BSE + MSE in Computer Science, Systems Concentration
+Operating Systems TA
+
+**Mathew Karounos**  
+Penn State, Class of 2027  
+
+The project was built through close technical collaboration. We jointly discussed and designed the major kernel subsystems, reviewed architecture decisions together, and both contributed across the codebase rather than dividing the project into isolated ownership areas.
+
+This collaboration model was especially important because many features cut across subsystem boundaries. For example, `fork`, `exec`, copy-on-write memory, ELF loading, signals, file descriptors, pipes, process groups, and shell behavior all interact through the scheduler, virtual memory system, filesystem, trap path, and userspace runtime.
+
+As a result, we both developed a broad understanding of the full operating-system stack instead of focusing on only one layer.
 
 ---
 

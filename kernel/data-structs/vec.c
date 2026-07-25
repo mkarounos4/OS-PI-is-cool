@@ -3,6 +3,8 @@
 #include "uart/uart.h"
 #include "traps/traps.h"
 
+static void vec_reserve(Vec* self, size_t new_capacity);
+
 Vec vec_new(size_t initial_capacity, ptr_dtor_fn ele_dtor_fn) {
 	ptr_t* data = kmalloc(sizeof(void*) * initial_capacity);
 	if (data == NULL) {
@@ -38,7 +40,7 @@ void vec_set(Vec* self, size_t index, ptr_t new_ele) {
 
 void vec_push_back(Vec* self, ptr_t new_ele) {
 	if (vec_len(self) >= vec_capacity(self)) {
-		vec_resize(self, vec_capacity(self) == 0 ? 1 : vec_capacity(self) * 2);
+		vec_reserve(self, vec_capacity(self) == 0 ? 1 : vec_capacity(self) * 2);
 	}
 
 	self->data[vec_len(self)] = new_ele;
@@ -71,7 +73,7 @@ void vec_insert(Vec* self, size_t index, ptr_t new_ele) {
 	}
 
 	if (vec_len(self) == vec_capacity(self)) {
-		vec_resize(self, vec_capacity(self) == 0 ? 1 : vec_capacity(self) * 2);
+		vec_reserve(self, vec_capacity(self) == 0 ? 1 : vec_capacity(self) * 2);
 	}
 	
 	ptr_t temp = self->data[index];
@@ -99,7 +101,7 @@ void vec_erase(Vec* self, size_t index) {
 	vec_len(self)--;
 }
 
-void vec_resize(Vec* self, size_t new_capacity) {
+static void vec_reserve(Vec* self, size_t new_capacity) {
 	if (new_capacity < vec_len(self)) {
 		fatal_exception("Resize capacity must be at least length.");
 	}

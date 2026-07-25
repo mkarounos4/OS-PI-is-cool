@@ -1,6 +1,6 @@
 #pragma once
 
-#include <stddef.h>  // for size_t
+#include <stddef.h>
 #include <stdbool.h>
 
 typedef void* ptr_t;
@@ -33,8 +33,6 @@ bool vec_pop_back(Vec* self, ptr_t *deleted_elem);
 void vec_insert(Vec* self, size_t index, ptr_t new_ele);
 
 void vec_erase(Vec* self, size_t index);
-
-void vec_resize(Vec* self, size_t new_capacity);
 
 void vec_clear(Vec* self);
 
