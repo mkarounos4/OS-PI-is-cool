@@ -18,6 +18,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.DOCS_SITE_DISPATCH_TOKEN }}
         run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::Missing DOCS_SITE_DISPATCH_TOKEN. Add it as an Actions repository secret in mkarounos4/OS-PI-is-cool, not in the website repo."
+            exit 1
+          fi
+
           curl -fsSL \
             -X POST \
             -H "Accept: application/vnd.github+json" \
