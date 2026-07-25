@@ -162,14 +162,14 @@ $(USER_BINS_ASM_OBJ): $(USER_BINS_ASM)
 $(USER_BINS_C_OBJ): $(USER_BINS_C) $(USER_DIR)/user_bins.h
 	$(CC) $(CFLAGS) -c $< -o $@
 
-all: rpi install
+all: rpi
+	$(MAKE) PLATFORM=rpi install
 
 rpi:
 	$(MAKE) PLATFORM=rpi UART_OUT=$(UART_OUT) build
 
-install:
-	cp kernel8.img $(BOOTDIR)
-	cp kernel8.img $(BOOTDIR)/kernel_2712.img
+install: kernel_2712.img
+	cp kernel_2712.img $(BOOTDIR)/kernel_2712.img
 	cp kernel.elf $(BOOTDIR)
 	cp config.txt $(BOOTDIR)
 	@echo "Copied all files to boot dir correctly."

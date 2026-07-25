@@ -34,6 +34,10 @@ void uart_putuint(unsigned int u);
 void uart_putint(int i);
 void uart_puthex(uint64_t value);
 
+#ifdef PLATFORM_RPI5
+void uart_rpi_get_pci_debug(uint64_t values[16]);
+#endif
+
 void uart_raw_putc(const char c);
 void uart_raw_puts(const char *s);
 

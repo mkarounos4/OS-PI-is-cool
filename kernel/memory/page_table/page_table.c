@@ -49,6 +49,7 @@
 #define DEVICE_BLOCK_RPI5_PCIE UINT64_C(0x1000000000)
 #define DEVICE_BLOCK_RPI_GIC UINT64_C(0x1040000000)
 #define DEVICE_BLOCK_RPI5_RP1_PERIPH UINT64_C(0x1c00000000)
+#define DEVICE_BLOCK_RPI5_RP1_BAR     UINT64_C(0x1f00000000)
 #define DEVICE_BLOCK_RPI5_RP1_MSIX UINT64_C(0x1f80000000)
 
 extern uint8_t __text_start[];
@@ -738,6 +739,7 @@ static uint8_t map_kernel_devices(uint64_t *l0) {
          map_device_block(l0, DEVICE_BLOCK_RPI5_PCIE) &&
          map_device_block(l0, DEVICE_BLOCK_RPI_GIC) &&
          map_device_block(l0, DEVICE_BLOCK_RPI5_RP1_PERIPH) &&
+         map_device_block(l0, DEVICE_BLOCK_RPI5_RP1_BAR) &&
          map_device_block(l0, DEVICE_BLOCK_RPI5_RP1_MSIX);
 }
 

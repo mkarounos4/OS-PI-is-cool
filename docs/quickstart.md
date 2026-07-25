@@ -97,7 +97,21 @@ The repository also includes `build_to_sd`, a helper script that runs `make clea
 1. Insert the SD card into the Raspberry Pi 5.
 2. Connect HDMI to the first HDMI port for framebuffer terminal output.
 3. Connect a USB UART adapter if serial console input/output is needed.
-4. Power on the Raspberry Pi 5.
+4. Connect a USB HID boot-protocol keyboard directly to a USB-A port if
+   framebuffer-console keyboard input is wanted.
+5. Power on the Raspberry Pi 5.
+
+The keyboard may be connected at boot or hot-plugged later. Removing and
+reconnecting it releases and recreates the xHCI device slot automatically.
+Connect the keyboard directly: USB hubs and non-boot/NKRO-only keyboards are
+not currently supported. UART input remains available at the same time.
+
+USB keyboard state and low-level controller diagnostics can be inspected from
+the graphical terminal:
+
+```sh
+cat /proc/usb
+```
 
 The filesystem is created or mounted by the kernel during boot. On Raspberry Pi 5 media, the filesystem region is selected after the existing boot partition so firmware files remain intact and OS data can persist across reboot.
 
@@ -158,4 +172,7 @@ make UART_OUT=1 qemu
 - SD-card copy fails: check the boot partition mount path and write permissions. The default helper script path is machine-specific.
 - Serial output is not visible: confirm the adapter wiring, `115200` baud rate, and that `enable_uart=1` is present in `config.txt`.
 - Framebuffer output is not visible: use the first HDMI port and confirm the display supports the configured framebuffer mode.
+- USB keyboard input is unavailable: connect a boot-protocol keyboard directly
+  to a USB-A port and inspect `cat /proc/usb`; `keyboard_ready: 1` indicates
+  successful enumeration.
 - Stale build artifacts: run `make clean` before rebuilding the target.

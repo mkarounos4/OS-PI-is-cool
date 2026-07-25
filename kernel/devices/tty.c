@@ -475,6 +475,8 @@ static const char *tty_backend_name(struct dev_st backend) {
         return "uart";
     case TTY_GUI_MAJOR:
         return "ttygui";
+    case USB_KEYBOARD_MAJOR:
+        return "usb";
     default:
         return "unknown";
     }
@@ -900,6 +902,12 @@ static int tty_backend_matches(struct dev_st a, struct dev_st b) {
 
 static int tty_input_target_for_backend(struct dev_st input_backend) {
     int active = tty_gui_get_active_terminal();
+    if (input_backend.major == USB_KEYBOARD_MAJOR &&
+        active >= 0 && active < MAX_TTY_DEVICES &&
+        tty_state.devices[active] != NULL &&
+        tty_state.devices[active]->active) {
+        return active;
+    }
     if (active >= 0 && active < MAX_TTY_DEVICES &&
         tty_state.devices[active] != NULL &&
         tty_state.devices[active]->active &&

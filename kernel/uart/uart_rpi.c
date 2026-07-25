@@ -50,6 +50,7 @@
 #define PCIE_EXT_CFG_DATA           0x8000u
 #define PCIE_MISC_CPU_2_PCIE_MEM_WIN0_LO          0x400cu
 #define PCIE_MISC_CPU_2_PCIE_MEM_WIN0_HI          0x4010u
+#define PCIE_MISC_MISC_CTRL                       0x4008u
 #define PCIE_MISC_RC_BAR1_CONFIG_LO 0x402cu
 #define PCIE_MISC_UBUS_BAR1_REMAP   0x40acu
 #define PCIE_MISC_PCIE_STATUS       0x4068u
@@ -59,6 +60,13 @@
 #define PCIE_STATUS_DL_ACTIVE       (1u << 5)
 #define PCIE_STATUS_PHYLINKUP       (1u << 4)
 #define PCIE_UBUS_REMAP_ACCESS_EN   (1u << 0)
+#define PCIE_MISC_SCB_ACCESS_EN     (1u << 12)
+#define PCIE_MISC_CFG_READ_UR_MODE  (1u << 13)
+#define PCIE_MISC_RCB_MPS_MODE      (1u << 10)
+#define PCIE_MISC_MAX_BURST_MASK    (3u << 20)
+#define PCIE_MISC_MAX_BURST_256     (1u << 20)
+#define PCIE_MISC_SCB0_SIZE_MASK    (0x1fu << 27)
+#define PCIE_MISC_SCB0_SIZE_64G     (21u << 27)
 #define PCIE_OUTBOUND_WIN_LO(win)   (PCIE_MISC_CPU_2_PCIE_MEM_WIN0_LO + ((win) * 8u))
 #define PCIE_OUTBOUND_WIN_HI(win)   (PCIE_MISC_CPU_2_PCIE_MEM_WIN0_HI + ((win) * 8u))
 #define PCIE_OUTBOUND_BASE_LIMIT(win) \
@@ -71,6 +79,9 @@
 
 #define PCI_COMMAND_STATUS          0x04u
 #define PCI_BAR0                    0x10u
+#define PCI_BAR1                    0x14u
+#define PCI_BAR2                    0x18u
+#define PCI_BAR3                    0x1cu
 #define PCI_PRIMARY_BUS             0x18u
 #define PCI_CAP_PTR                 0x34u
 #define PCI_STATUS_CAP_LIST         (1u << 20)
@@ -102,6 +113,9 @@
 #define MIP0_MSIX_MSG_ADDR          UINT64_C(0x000000fffffff000)
 #define MIP0_MSI_INBOUND_BAR        3u
 #define MIP0_MSI_INBOUND_SIZE_4K    0x1cu
+#define RP1_DMA_PCI_BASE            UINT64_C(0x1000000000)
+#define RP1_DMA_INBOUND_BAR         2u
+#define RP1_DMA_INBOUND_SIZE_64G    0x15u
 
 #define MIP_INT_CLEAR               0x10u
 #define MIP_INT_CFGL_HOST           0x20u
@@ -120,6 +134,7 @@
 #define RP1_MSIX_CFG_IACK_EN        (1u << 3)
 
 static unsigned char uart_rx_buffer[UART_RX_BUFFER_SIZE];
+static uint64_t rp1_pci_debug[16];
 
 static void uart_rx_buffer_clear(void) {
     for (size_t i = 0; i < UART_RX_BUFFER_SIZE; i++) {
@@ -179,6 +194,30 @@ static void pcie2_set_mip0_msi_window(void) {
     pcie2_root_write32(PCIE_INBOUND_UBUS(bar) + 4u,
                        (uint32_t)(RPI5_MIP0_BASE >> 32));
     rpi5_mmio_barrier();
+}
+
+static void pcie2_set_rp1_dma_window(void) {
+    /*
+     * Pi 5 RP1 bus masters address RAM through PCIe addresses
+     * 0x1000000000..0x1fffffffff.  RC_BAR2 translates that 64 GiB
+     * aperture to physical address zero.
+     */
+    unsigned bar = RP1_DMA_INBOUND_BAR;
+    pcie2_root_write32(PCIE_INBOUND_BAR_LO(bar),
+                       (uint32_t)RP1_DMA_PCI_BASE |
+                       RP1_DMA_INBOUND_SIZE_64G);
+    pcie2_root_write32(PCIE_INBOUND_BAR_LO(bar) + 4u,
+                       (uint32_t)(RP1_DMA_PCI_BASE >> 32));
+    pcie2_root_write32(PCIE_INBOUND_UBUS(bar),
+                       PCIE_UBUS_REMAP_ACCESS_EN);
+    pcie2_root_write32(PCIE_INBOUND_UBUS(bar) + 4u, 0);
+
+    uint32_t misc = pcie2_root_reg32(PCIE_MISC_MISC_CTRL);
+    misc &= ~(PCIE_MISC_MAX_BURST_MASK | PCIE_MISC_SCB0_SIZE_MASK);
+    misc |= PCIE_MISC_SCB_ACCESS_EN | PCIE_MISC_CFG_READ_UR_MODE |
+            PCIE_MISC_RCB_MPS_MODE | PCIE_MISC_MAX_BURST_256 |
+            PCIE_MISC_SCB0_SIZE_64G;
+    pcie2_root_write32(PCIE_MISC_MISC_CTRL, misc);
 }
 
 static uint32_t pcie2_cfg_read32(unsigned bus, unsigned devfn, unsigned where) {
@@ -253,6 +292,25 @@ static int rp1_find_pci_device(unsigned *bus_out, unsigned *devfn_out) {
     uart_puts("\n");
 
     return -1;
+}
+
+static void rp1_capture_pci_state(unsigned bus, unsigned devfn) {
+    rp1_pci_debug[0] =
+        rpi5_mmio_read32(RPI5_PCIE2_BASE + PCIE_MISC_PCIE_STATUS);
+    rp1_pci_debug[1] = pcie2_cfg_read32(bus, devfn, 0);
+    rp1_pci_debug[2] =
+        pcie2_cfg_read32(bus, devfn, PCI_COMMAND_STATUS);
+    rp1_pci_debug[3] = pcie2_cfg_read32(bus, devfn, PCI_BAR0);
+    rp1_pci_debug[4] = pcie2_cfg_read32(bus, devfn, PCI_BAR1);
+    rp1_pci_debug[5] = pcie2_cfg_read32(bus, devfn, PCI_BAR2);
+    rp1_pci_debug[6] = pcie2_cfg_read32(bus, devfn, PCI_BAR3);
+
+}
+
+void uart_rpi_get_pci_debug(uint64_t values[16]) {
+    for (unsigned i = 0; i < 16; i++) {
+        values[i] = rp1_pci_debug[i];
+    }
 }
 
 static unsigned rp1_find_msix_cap(unsigned bus, unsigned devfn) {
@@ -353,7 +411,7 @@ static uint64_t rp1_msix_table_base(unsigned bus, unsigned devfn,
     uint64_t bar_base = 0;
 
     if ((bir == 0u && offset < RP1_BAR0_SIZE) ||
-        (bir == 1u && offset < RP1_BAR1_SIZE)) {
+        (bir == 2u && offset < RP1_BAR1_SIZE)) {
         if (rp1_bar_cpu_base(bus, devfn, bir, &bar_base) == 0) {
             return bar_base + offset;
         }
@@ -377,6 +435,20 @@ static int rp1_configure_msix_table(void) {
         uart_puts("[uart] RP1 PCI device not found\n");
         return -1;
     }
+
+    rp1_capture_pci_state(bus, devfn);
+    for (unsigned bir = 0; bir < 3; bir++) {
+        uint64_t cpu_base = 0;
+        if (rp1_bar_cpu_base(bus, devfn, bir, &cpu_base) == 0) {
+            rp1_pci_debug[7 + bir] = cpu_base;
+        }
+    }
+    rp1_pci_debug[10] = pcie2_root_reg32(PCIE_INBOUND_BAR_LO(1));
+    rp1_pci_debug[11] = pcie2_root_reg32(PCIE_INBOUND_BAR_LO(1) + 4u);
+    rp1_pci_debug[12] = pcie2_root_reg32(PCIE_INBOUND_BAR_LO(2));
+    rp1_pci_debug[13] = pcie2_root_reg32(PCIE_INBOUND_BAR_LO(2) + 4u);
+    rp1_pci_debug[14] = pcie2_root_reg32(PCIE_INBOUND_UBUS(2));
+    rp1_pci_debug[15] = pcie2_root_reg32(PCIE_INBOUND_UBUS(2) + 4u);
 
     uint32_t command_status = pcie2_cfg_read32(bus, devfn, PCI_COMMAND_STATUS);
     pcie2_cfg_write32(bus, devfn, PCI_COMMAND_STATUS,
@@ -452,6 +524,7 @@ static void rp1_uart0_msix_iack(void) {
 }
 
 static void rp1_uart0_irq_bridge_init(void) {
+    pcie2_set_rp1_dma_window();
     pcie2_set_mip0_msi_window();
 
     if (rp1_configure_msix_table() != 0) {

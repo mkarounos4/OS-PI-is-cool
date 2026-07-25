@@ -23,6 +23,8 @@
 #include "gui/gui.h"
 #include "gui/tty_gui_device.h"
 #include "uart/uart_device.h"
+#include "usb/xhci.h"
+#include "usb/usb_keyboard_device.h"
 
 #define FS_DEFAULT_INODE_TABLE_BLOCKS 64
 #define FS_DEFAULT_BLOCK_SIZE_CONFIG 1
@@ -30,6 +32,11 @@
 
 void kernel_main(void) {
     uart_init();
+#ifdef PLATFORM_RPI5
+    uart_puts("[boot] build=rpi5 usb=rp1-xhci-hid\n");
+#else
+    uart_puts("[boot] build=qemu usb=disabled\n");
+#endif
     printf("\nAArch64 bare-metal kernel entered\n");
     gui_framebuffer_init();
     fan_init();
@@ -101,6 +108,10 @@ void kernel_main(void) {
     if (err) {
         printf("[tty] ERROR: failed to init uart char driver\n");
     }
+    err = usb_keyboard_char_driver_init();
+    if (err) {
+        printf("[usb] ERROR: failed to init keyboard char driver\n");
+    }
     err = tty_gui_char_driver_init();
     if (err) {
         printf("[tty] ERROR: failed to init tty gui char driver\n");
@@ -114,6 +125,10 @@ void kernel_main(void) {
     err = uart_create_device_nodes();
     if (err) {
         printf("[tty] ERROR: failed to create uart device node\n");
+    }
+    err = usb_keyboard_create_device_nodes();
+    if (err) {
+        printf("[usb] ERROR: failed to create /dev/usb0\n");
     }
     err = tty_gui_create_device_nodes();
     if (err) {
@@ -129,6 +144,12 @@ void kernel_main(void) {
     } else {
         printf("[tty] Created terminal");
     }
+
+#ifdef PLATFORM_RPI5
+    if (xhci_keyboard_init() == 0) {
+        printf("[usb] no xHCI controllers started; UART input remains active\n");
+    }
+#endif
 
     initialize_signals();
 

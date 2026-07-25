@@ -186,6 +186,60 @@ static void redraw_active_terminal(void) {
     }
 }
 
+static void scroll_framebuffer_text_up(void) {
+    gui_framebuffer_t fb;
+    if (!gui_framebuffer_get(&fb) || MAX_ROWS < 2) {
+        return;
+    }
+
+    uint32_t top = row_to_px(0);
+    uint32_t bottom = row_to_px(MAX_ROWS);
+    uint32_t shift = CHAR_HEIGHT + HEIGHT_BUFFER;
+    if (bottom > fb.height) {
+        bottom = fb.height;
+    }
+    if (top + shift >= bottom) {
+        return;
+    }
+
+    uint32_t bg = BG_COLOR;
+    uint8_t *base = (uint8_t *)fb.addr;
+    if (fb.depth == 32) {
+        uint32_t words = fb.pitch / sizeof(uint32_t);
+        for (uint32_t y = top; y + shift < bottom; y++) {
+            uint32_t *dst = (uint32_t *)(void *)(base + (size_t)y * fb.pitch);
+            uint32_t *src =
+                (uint32_t *)(void *)(base + (size_t)(y + shift) * fb.pitch);
+            for (uint32_t x = 0; x < words; x++) {
+                dst[x] = src[x];
+            }
+        }
+        for (uint32_t y = bottom - shift; y < bottom; y++) {
+            uint32_t *dst = (uint32_t *)(void *)(base + (size_t)y * fb.pitch);
+            for (uint32_t x = 0; x < words; x++) {
+                dst[x] = bg;
+            }
+        }
+    } else if (fb.depth == 16) {
+        uint32_t words = fb.pitch / sizeof(uint16_t);
+        uint16_t bg16 = (uint16_t)bg;
+        for (uint32_t y = top; y + shift < bottom; y++) {
+            uint16_t *dst = (uint16_t *)(void *)(base + (size_t)y * fb.pitch);
+            uint16_t *src =
+                (uint16_t *)(void *)(base + (size_t)(y + shift) * fb.pitch);
+            for (uint32_t x = 0; x < words; x++) {
+                dst[x] = src[x];
+            }
+        }
+        for (uint32_t y = bottom - shift; y < bottom; y++) {
+            uint16_t *dst = (uint16_t *)(void *)(base + (size_t)y * fb.pitch);
+            for (uint32_t x = 0; x < words; x++) {
+                dst[x] = bg16;
+            }
+        }
+    }
+}
+
 static void scroll_down_row(tty_gui_terminal_t *tty) {
     if (tty == NULL || !tty_dimensions_valid() || tty->cells == NULL) {
         return;
@@ -201,7 +255,7 @@ static void scroll_down_row(tty_gui_terminal_t *tty) {
     memset(&tty->cells[cell_index(MAX_ROWS - 1, 0)], ' ', (size_t)MAX_COLS);
 
     if (tty == active_state()) {
-        redraw_active_terminal();
+        scroll_framebuffer_text_up();
     }
 }
 

@@ -99,7 +99,7 @@ int vsnprintf(char *buf, size_t size, const char *fmt, va_list args) {
         case 'x':
         case 'X':
             format_uint(&out, long_arg ? va_arg(args, unsigned long) :
-                        va_arg(args, unsigned long), 16);
+                        va_arg(args, unsigned int), 16);
             break;
         case '%':
             format_emit(&out, '%');

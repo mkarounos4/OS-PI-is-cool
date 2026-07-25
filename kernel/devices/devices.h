@@ -11,6 +11,7 @@ typedef __SIZE_TYPE__ ssize_t;
 #define TTY_MAJOR 0
 #define UART_MAJOR 1
 #define TTY_GUI_MAJOR 2
+#define USB_KEYBOARD_MAJOR 3
 
 struct file_operations {
     int (*open)(struct oft_entry *entry);

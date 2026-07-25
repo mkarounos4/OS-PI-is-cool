@@ -1,9 +1,8 @@
 make clean
 make rpi
 cp config.txt   /run/media/veerkakar/bootfs/
-cp kernel8.img  /run/media/veerkakar/bootfs/
 cp kernel.elf /run/media/veerkakar/bootfs/
-cp kernel8.img  /run/media/veerkakar/bootfs/kernel_2712.img
+cp kernel_2712.img  /run/media/veerkakar/bootfs/kernel_2712.img
 sync /run/media/veerkakar/bootfs/
 umount /run/media/veerkakar/bootfs/
 eject /run/media/veerkakar/bootfs/

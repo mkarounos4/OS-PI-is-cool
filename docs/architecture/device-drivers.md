@@ -23,6 +23,7 @@ enough to inspect.
 - [Block-device abstraction](#block-devices)
 - [SDHCI-backed storage](#sdhci-storage)
 - [Platform UART driver](#platform-uart-driver)
+- [Raspberry Pi 5 USB keyboard](#raspberry-pi-5-usb-keyboard)
 - [Character-device registry](#character-device-registry)
 - [Device nodes and devfs creation](#device-nodes-and-devfs-creation)
 - [UART character device](#uart-character-device)
@@ -163,6 +164,45 @@ The IRQ handler disables UART RX interrupts while it drains hardware state,
 acknowledges the interrupt, calls the receive hook, and then re-enables RX
 interrupts. This keeps input delivery serialized around the driver's RX buffer.
 
+## Raspberry Pi 5 USB Keyboard
+
+Raspberry Pi 5 builds initialize both RP1 xHCI controllers after the first TTY
+exists. The firmware may assign RP1 PCI BARs differently from a standalone
+PCIe host implementation, so the driver reads the live endpoint BARs and
+outbound windows instead of using fixed CPU addresses. The two xHCI bases are
+derived from RP1's large AXI BAR.
+
+RP1 bus-master DMA uses PCIe addresses beginning at `0x1000000000`. The host
+bridge's RC_BAR2 inbound window maps that aperture back to physical RAM.
+Command rings, event rings, the ERST, contexts, and transfer buffers are all
+explicitly aligned to the boundaries required by xHCI.
+
+`kernel/usb/xhci.c` supplies a deliberately small polling xHCI host. It creates
+command, event, control, and interrupt rings, enumerates a directly connected
+device, and configures a HID boot-protocol keyboard. Both controllers are
+polled by an 8 ms software timer.
+
+`kernel/usb/hid_keyboard.c` owns HID report state and the US-keymap
+translation. Newly pressed keys are converted to the same characters and ANSI
+arrow sequences accepted by the TTY input layer. The translated byte stream is
+queued by the registered `usb` character driver and exposed as `/dev/usb0`.
+Like UART, that driver calls `tty_receive_input_from_device`, which reads the
+bytes back through the character-device registry. USB keyboard bytes target the
+active graphical TTY while the TTY's normal UART backend remains configured.
+UART RX, `/dev/uart0`, and `UART_OUT` therefore continue to operate alongside
+the keyboard.
+
+Connection state is monitored continuously. Removing a keyboard releases its
+xHCI slot and clears HID state; connecting or reconnecting one triggers port
+reset, address assignment, and HID configuration. The current USB host remains
+intentionally keyboard-focused: it supports one directly connected
+boot-protocol keyboard per RP1 controller. USB hubs, non-boot/NKRO report
+descriptors, and other USB device classes are not implemented.
+
+Runtime status is available from `/proc/usb`. It includes the resolved RP1 BAR
+addresses, inbound DMA-window state, controller stage, port status, event and
+report counts, and keyboard readiness.
+
 ## Character Device Registry
 
 Character devices are exposed through devfs as virtual inodes with type
@@ -185,6 +225,7 @@ Current major assignments are:
 | 0 | `tty` | `/dev/ttyN` | User-facing terminal frontend. |
 | 1 | `uart` | `/dev/uart0` | UART byte-stream backend and direct UART access. |
 | 2 | `ttygui` | `/dev/ttyguiN` | Framebuffer terminal backend. |
+| 3 | `usb` | `/dev/usb0` | USB HID boot-keyboard byte stream. |
 
 The registry is a fixed array of 16 `struct char_driver *` entries. A
 `char_driver` contains:
@@ -428,6 +469,12 @@ The renderer handles:
 - tab by writing tab spacing on the active terminal.
 - normal characters by updating the cell array and drawing the glyph.
 
+Scrolling updates the terminal cell array and moves the framebuffer text
+scanlines upward by one glyph row. It then clears only the new bottom row.
+This avoids clearing and redrawing the complete 1920x1080 Pi 5 framebuffer on
+every newline. Pi 5 and QEMU use this same shared renderer; only their
+mailbox/MMIO framebuffer initialization differs.
+
 TTYGUI devices are activated lazily. `tty_gui_char_driver_init()` only clears
 the device table and registers the driver. It does not allocate all terminal
 buffers. `tty_gui_char_device_activate(minor)` populates the `/dev/ttyguiN`
@@ -538,7 +585,8 @@ Driver initialization is ordered around dependency availability:
     creation.
 14. `tty_create` creates the initial terminal state and populates the
     `tty0`/`ttygui0` devfs nodes.
-15. The scheduler starts user processes.
+15. Raspberry Pi 5 initializes the RP1 xHCI keyboard path.
+16. The scheduler starts user processes.
 
 The key design choice is that hardware can be initialized before char-device
 nodes exist. The `/dev` mount itself appears when the filesystem is mounted;
@@ -559,7 +607,8 @@ Current limitations include:
 - Single UART backend instance.
 - Single framebuffer terminal renderer.
 - Build-time platform selection.
-- No hotplug.
+- No general-purpose device hotplug framework; the USB keyboard driver handles
+  its own connect and disconnect lifecycle.
 - No dynamic module loading.
 - No device-tree probing layer.
 - No general block-device registry.

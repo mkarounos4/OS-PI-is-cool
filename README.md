@@ -228,7 +228,7 @@ Development targets two complementary platforms.
 
 ### Raspberry Pi 5
 
-The Raspberry Pi 5 provides modern ARM64 hardware for running the operating system on real hardware with the supported UART, framebuffer, interrupt, fan, and SD-backed storage paths.
+The Raspberry Pi 5 provides modern ARM64 hardware for running the operating system on real hardware with the supported UART, USB HID keyboard, framebuffer, interrupt, fan, and SD-backed storage paths.
 
 ### QEMU Raspberry Pi 3B
 
@@ -253,6 +253,7 @@ Major completed subsystems include:
 - Demand paging
 - Lazy page allocation
 - Graphical framebuffer terminal
+- Raspberry Pi 5 RP1 USB HID keyboard input with connect/reconnect support
 - Interactive shell with userspace commands
 
 ---
