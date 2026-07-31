@@ -5,8 +5,8 @@
 #include "memory/page_table/page_table.h"
 #include "uart/uart.h"
 
-#define GUI_FB_WIDTH 640u
-#define GUI_FB_HEIGHT 480u
+#define GUI_FB_WIDTH 1280u
+#define GUI_FB_HEIGHT 800u
 #define GUI_FB_DEPTH 32u
 
 #define QEMU_RPI3_MAILBOX_BASE UINT64_C(0x3f00b880)

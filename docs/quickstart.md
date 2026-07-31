@@ -14,8 +14,8 @@ This guide covers building OS-PI-is-cool and running it on either QEMU or Raspbe
 - AArch64 bare-metal cross toolchain available as `aarch64-none-elf-gcc`, `aarch64-none-elf-objcopy`, `aarch64-none-elf-objdump`, and `aarch64-none-elf-nm`, if rebuilding project
 - QEMU with `qemu-system-aarch64`, if running the emulated target
 - Raspberry Pi Imager or an equivalent SD-card imaging tool, if running on Raspberry Pi 5
-- USB UART adapter for Raspberry Pi 5 serial input/output
 - HDMI display for framebuffer terminal output on Raspberry Pi 5
+- OPTIONAL: USB UART adapter for Raspberry Pi 5 serial input/output. Since we have USB Keyboard and HDMI GUI support, this is only needed for debugging purposes, or running with UART flags enabled.
 
 The Makefile uses `CROSS ?= aarch64-none-elf-`, so a different toolchain prefix can be supplied with `make CROSS=<prefix> ...` if needed.
 
@@ -60,7 +60,9 @@ The `qemu` target builds with `PLATFORM=qemu`, creates `build/qemu/sd.img` if it
 qemu-system-aarch64 -M raspi3b -cpu cortex-a53 -display gtk -serial mon:stdio -kernel kernel8.img -drive file=build/qemu/sd.img,if=sd,format=raw
 ```
 
-Keyboard input goes to the QEMU display. Use `Ctrl-A`, then `X`, to quit QEMU from the serial monitor.
+Keyboard input goes to the terminal where `make qemu` is running, through the
+emulated UART used by the kernel's TTY input path. Use `Ctrl-A`, then `X`, to
+quit QEMU from the serial monitor.
 
 ## Run on Raspberry Pi 5
 
@@ -74,7 +76,7 @@ Raspberry Pi 5 boot still relies on the board firmware to load the kernel image,
 
 ### Copy the OS Image
 
-Build the Raspberry Pi 5 target:
+Build the Raspberry Pi 5 target: (If you have not made any changes, you can download the files specified below from the repository page).
 
 ```sh
 make rpi

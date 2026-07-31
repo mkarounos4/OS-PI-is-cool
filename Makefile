@@ -6,6 +6,7 @@ NM      = $(CROSS)nm
 BOOTDIR = /run/media/veerkakar/bootfs
 QEMU_SD_IMG ?= build/qemu/sd.img
 QEMU_SD_SIZE ?= 1G
+QEMU_SERIAL ?= mon:stdio
 UART_OUT ?= 0
 
 PLATFORM ?= rpi
@@ -176,7 +177,8 @@ install: kernel_2712.img
 	eject $(BOOTDIR)
 	@echo "Ejected boot directory"
 
-# quit qemu with Ctrl+A X
+# QEMU TTY input is routed through the emulated UART on stdio. Quit with
+# Ctrl+A, then X.
 qemu:
 	$(MAKE) PLATFORM=qemu UART_OUT=$(UART_OUT) build
 	@mkdir -p $(dir $(QEMU_SD_IMG))
@@ -185,7 +187,7 @@ qemu:
 	    -M raspi3b \
 	    -cpu cortex-a53 \
 	    -display gtk \
-	    -serial mon:stdio \
+	    -serial $(QEMU_SERIAL) \
 	    -kernel kernel8.img \
 	    -drive file=$(QEMU_SD_IMG),if=sd,format=raw
 
