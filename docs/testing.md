@@ -23,6 +23,39 @@ The current `init` program calls `malloc_lazy_test()` and
 Those tests are useful smoke coverage, not a replacement for a full automated
 regression suite.
 
+## Seeded Shell Test Suite
+
+Fresh filesystems created by `mkfs` include an executable `/tests` directory.
+These scripts run through the normal shell, command, syscall, filesystem, and
+`/proc` paths, so they are useful for demo validation as well as manual
+regression checks.
+
+Run the index first:
+
+```sh
+/tests/README.sh
+```
+
+Available scripts:
+
+| Script | Purpose |
+|---|---|
+| `/tests/all.sh` | Runs the procfs, VFS, VM, and multicore smoke scripts in order. |
+| `/tests/proc.sh` | Prints `/proc` state such as CPU info, processes, timers, and interrupts. |
+| `/tests/vfs.sh` | Exercises directories, regular files, redirection, copy, rename, hard links, symlinks, `stat`, and removal. |
+| `/tests/vm.sh` | Shows heap/memory accounting, runs a timed CPU workload, and prints VM diagnostics. |
+| `/tests/multicore.sh` | Starts four timed `cpubusy` workers, then inspects process and per-CPU scheduler state. |
+| `/tests/stress.sh` | Starts four infinite `cpubusy` workers for manual SMP stress inspection until they are killed. |
+
+The scripts intentionally print each step, pause between major sections, and
+describe what successful output should look like. This keeps demos readable on
+UART or framebuffer terminals and gives time to inspect `/proc` output.
+
+`cpubusy` is the userspace CPU-load helper used by the VM, multicore, and stress
+scripts. `cpubusy <ticks> <tag>` runs until the requested timer tick duration
+has elapsed. `cpubusy 0 <tag>` runs indefinitely and should be stopped with
+`kill <pid>` after inspecting `ps` or `/proc/processes`.
+
 ## Manual Demo Tests
 
 These flows validate the public OS behavior through userspace:
@@ -40,6 +73,8 @@ These flows validate the public OS behavior through userspace:
 - Framebuffer terminal output, UART-backed input, and terminal tab creation where
   available
 - Fullscreen TTY path with `vim`
+- Seeded shell tests with `/tests/README.sh`, `/tests/all.sh`, and targeted
+  scripts such as `/tests/multicore.sh`
 
 ## Debugging Interfaces
 

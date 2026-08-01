@@ -198,6 +198,7 @@ redirections with `open`, `dup2`, and `close`.
 | `chmod` | `chmod [-|+|=]mode file` | Change permissions using set, add, or remove-style modes. |
 | `clear` | `clear` | Write a form-feed to clear the terminal. |
 | `cp` | `cp src dest` | Copy one file to another. |
+| `cpubusy` | `cpubusy [timer_ticks] [tag]` | Run a CPU-bound loop for a duration or until killed. |
 | `echo` | `echo [arg...]` | Print arguments separated by spaces. |
 | `free` | `free` | Print userspace heap total, used, and free bytes. |
 | `getcwd` | `getcwd` | Print the current working directory. |
@@ -236,6 +237,13 @@ Writes `\f` to stdout; terminal drivers interpret this as a screen clear.
 
 Copies bytes from `src` to `dest` using `open`, `read`, `write`, and `close`.
 The destination is created or truncated.
+
+### `cpubusy`
+
+Runs a CPU-bound loop and prints start/done messages with the pid, tag, elapsed
+timer ticks, and checksum. A nonzero `timer_ticks` value stops automatically; a
+zero value runs indefinitely until killed. This is mainly used by
+`/tests/multicore.sh`, `/tests/stress.sh`, and VM smoke checks.
 
 ### `echo`
 

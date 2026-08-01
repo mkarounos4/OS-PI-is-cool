@@ -613,7 +613,7 @@ Pre-allocated boot page tables mapped at compile-time:
 
 ## Design Tradeoffs and Limits
 
-- Single-core execution avoids SMP TLB shootdowns and per-core address-space synchronization.
+- User TLB invalidation is global and conservative rather than ASID-targeted or
+  per-CPU shootdown-driven.
 - Demand paging and copy-on-write are implemented for the supported anonymous, heap, stack, `mmap`, and ELF-backed paths described above.
-- User TLB invalidation is global for the current design rather than ASID-targeted.
 - The implementation favors clear page-fault and mapping logic over production-scale VM optimizations.

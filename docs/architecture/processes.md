@@ -345,23 +345,39 @@ reaping.
 
 ## Scheduler Design
 
-The scheduler is preemptive and single-core. A periodic ARM generic timer event
-sets a scheduling flag; trap/interrupt return paths can then call
-`run_scheduler_if_needed()` and switch threads. Threads may also yield
-explicitly through `S_YIELD`, blocking operations, sleep, or signal-driven state
-changes.
+The scheduler is preemptive and SMP-aware. Each online CPU programs its own ARM
+generic timer event. The local timer callback sets that CPU's scheduling flag;
+trap/interrupt return paths can then call `run_scheduler_if_needed()` and switch
+the current CPU to another thread. Threads may also yield explicitly through
+`S_YIELD`, blocking operations, sleep, or signal-driven state changes.
 
 The scheduler is deliberately small:
 
-- one global `curr_thread`.
-- three global ready queues.
-- a boot context used for the first switch.
-- an idle context used when no TCB is runnable.
+- per-CPU `curr_thread` pointers stored in `struct cpu_st`.
+- one shared set of three ready queues protected by `scheduler_lock`.
+- per-CPU boot and idle contexts used for the first switch and idle execution.
+- per-CPU scheduler timer interrupts.
 - a timer quantum configured by `SCHEDULER_QUANTUM_MS`.
 
-This matches the OS's current single-core architecture. Per-CPU run queues,
-load balancing, CPU affinity, and inter-processor interrupts would add
-complexity without benefit until multicore support exists.
+The global ready queue keeps policy easy to inspect: only one CPU at a time can
+requeue a running thread, pop the next ready TCB, and mark it running. This is
+not as scalable as per-CPU queues with load balancing, but it is a practical SMP
+model for the current OS because it prevents two CPUs from selecting the same
+ready thread while preserving the existing round-robin behavior.
+
+## Per-CPU Kernel State
+
+Core-local scheduler state lives in `struct cpu_st` instead of file-static
+globals. The current CPU is found through `tpidr_el1`, and helpers such as
+`get_curr_thread()` return `cpu_current()->curr_thread`. The CPU struct also
+tracks the logical CPU id, MPIDR, online flag, boot context, idle context, idle
+stack, pending scheduling flag, and scheduler tick count.
+
+This matters for SMP because the old single global current-thread pointer could
+only describe one executing thread. With per-CPU current-thread storage, each
+core can run or idle independently while shared structures such as the scheduler
+queue, block cache, inode cache, and page-table metadata are protected by
+spinlocks.
 
 ## Run Queues and Scheduling Policy
 
@@ -758,9 +774,9 @@ mutexes, condition variables, and child waits, keep their own waiter vectors and
 move threads back to `THREAD_READY` when work becomes available.
 
 The implementation favors simple vectors over a generic wait-channel subsystem.
-This is easy to debug and sufficient for single-core execution, but it does not
-provide sophisticated cancellation, priority inheritance, timeout composition,
-or lock-free wakeup ordering.
+This is easy to debug and works with the current spinlock-protected SMP paths,
+but it does not provide sophisticated cancellation, priority inheritance,
+timeout composition, or lock-free wakeup ordering.
 
 ## Signals
 
@@ -906,8 +922,9 @@ substitute for automated regression tests around fork/exec/wait failure paths.
 
 ## Design Tradeoffs and Limits
 
-- Single-core scheduling keeps the scheduler global and understandable, but it
-  does not exercise SMP locking, per-CPU run queues, or cross-core wakeups.
+- SMP scheduling uses one global ready queue protected by a spinlock. This keeps
+  selection understandable, but it does not provide per-CPU run queues, CPU
+  affinity, load balancing, or cross-core scheduler IPIs.
 - Thread scheduling with process-owned resources matches Unix structure, but
   makes `exec`, `exit`, and signal delivery more complex than a purely
   single-threaded process model.
@@ -918,5 +935,6 @@ substitute for automated regression tests around fork/exec/wait failure paths.
   generic wait channels with deadlines and cancellation.
 - Process groups support practical shell job control, but sessions and full
   POSIX controlling-terminal rules are intentionally simplified.
-- Synchronization primitives demonstrate kernel wait queues, but they are not
-  designed as production SMP primitives.
+- Synchronization primitives protect the current shared kernel structures and
+  demonstrate kernel wait queues, but they are not production-grade SMP
+  primitives with robust ownership recovery or priority inheritance.

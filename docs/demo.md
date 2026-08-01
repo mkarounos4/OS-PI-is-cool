@@ -2,7 +2,10 @@
 
 ## Demo Goals
 
-This demo shows the OS booting, entering userspace, running shell commands, using the filesystem, launching ELF programs, exercising process control, inspecting `/proc`, and displaying UART/framebuffer terminal output.
+This demo shows the OS booting, bringing SMP cores online, entering userspace,
+running shell commands, using the filesystem, launching ELF programs, exercising
+process control, inspecting `/proc`, running seeded smoke tests, and displaying
+UART/framebuffer terminal output.
 
 ## Recommended Demo Flow
 
@@ -14,8 +17,9 @@ This demo shows the OS booting, entering userspace, running shell commands, usin
 6. Demonstrate `fork`, `exec`, `waitpid`, and pipes through shell command execution.
 7. Demonstrate signals and job control.
 8. Inspect `/proc` diagnostics.
-9. Show framebuffer terminal and multi-terminal behavior, if available.
-10. Demonstrate persistence across reboot, if using a persistent SD card or QEMU disk image.
+9. Run seeded `/tests` scripts, including the multicore test.
+10. Show framebuffer terminal and multi-terminal behavior, if available.
+11. Demonstrate persistence across reboot, if using a persistent SD card or QEMU disk image.
 
 ## Example Commands
 
@@ -33,6 +37,26 @@ cat /proc/interrupts
 cat /proc/syscalls
 cat /proc/cache
 cat /proc/tty
+cat /proc/cpuinfo
+```
+
+Seeded smoke-test flow:
+
+```sh
+/tests/README.sh
+/tests/proc.sh
+/tests/vfs.sh
+/tests/vm.sh
+/tests/multicore.sh
+```
+
+Manual SMP stress flow:
+
+```sh
+/tests/stress.sh
+ps
+cat /proc/cpuinfo
+kill <pid>
 ```
 
 Filesystem read/write flow:
@@ -84,6 +108,7 @@ Replace `<pid>` with a live process id shown by `ps`, `jobs`, or `/proc/processe
 - Filesystem read/write
 - Process and job-control demo
 - `/proc` output
+- `/tests/multicore.sh` showing four `cpubusy` workers
 - Framebuffer terminal
 - Multiple terminal tabs
 - Editor utility
