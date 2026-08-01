@@ -9,6 +9,8 @@
 #include "kapi.h"
 #include "procfs.h"
 #include "scheduler.h"
+#include "sync/spinlock.h"
+#include "string.h"
 #include "user_bins.h"
 
 #define FS_MOUNT_BLOCK_BUFFER_SIZE 4096
@@ -26,6 +28,250 @@ static uint32_t inode_bitmap_blocks = 1;
 static uint32_t inode_table_start = 3;
 static uint32_t data_start_block = 4;
 static unsigned char mount_block_buffer[FS_MOUNT_BLOCK_BUFFER_SIZE] __attribute__((aligned(16)));
+static spinlock_t fs_block_cache_lock = SPINLOCK_INIT;
+
+typedef struct fs_seed_file_st {
+    const char *path;
+    const char *contents;
+    uint8_t executable;
+} fs_seed_file_t;
+
+static const fs_seed_file_t test_scripts[] = {
+    {
+        "/tests/README.sh",
+        "#!/bin/sh\n"
+        "# OS-PI smoke test index. Run one script at a time from /tests.\n"
+        "echo OS-PI test scripts\n"
+        "echo Each script prints what it is about to do and what success looks like\n"
+        "sleep 1000\n"
+        "echo Run /tests/all.sh for a full smoke pass\n"
+        "echo Run /tests/multicore.sh to show four CPU-bound jobs sharing CPUs\n"
+        "echo Run /tests/stress.sh to leave cpubusy jobs running until killed\n"
+        "echo Run /tests/vfs.sh to exercise file directory link and procfs paths\n"
+        "echo Run /tests/vm.sh to exercise user heap and process VM maps\n"
+        "sleep 1000\n"
+        "echo Available tests are:\n"
+        "ls /tests\n",
+        1,
+    },
+    {
+        "/tests/all.sh",
+        "#!/bin/sh\n"
+        "# Runs the main scripted smoke tests.\n"
+        "echo BEGIN all-tests\n"
+        "echo This runs proc vfs vm and multicore tests in order\n"
+        "echo Success means each section reaches its END marker without fatal exceptions\n"
+        "sleep 1500\n"
+        "/tests/proc.sh\n"
+        "sleep 1500\n"
+        "/tests/vfs.sh\n"
+        "sleep 1500\n"
+        "/tests/vm.sh\n"
+        "sleep 1500\n"
+        "/tests/multicore.sh\n"
+        "sleep 1500\n"
+        "echo END all-tests\n",
+        1,
+    },
+    {
+        "/tests/proc.sh",
+        "#!/bin/sh\n"
+        "# Shows kernel state exported by procfs.\n"
+        "echo BEGIN procfs-test\n"
+        "echo Step 1 list /proc\n"
+        "echo Success looks like entries such as cpuinfo processes meminfo timers interrupts\n"
+        "sleep 1000\n"
+        "ls /proc\n"
+        "sleep 1500\n"
+        "echo Step 2 print /proc/cpuinfo\n"
+        "echo Success looks like online_processors and per_cpu rows for each CPU\n"
+        "sleep 1000\n"
+        "cat /proc/cpuinfo\n"
+        "sleep 1500\n"
+        "echo Step 3 print process table\n"
+        "echo Success looks like init shell and this script runner in the table\n"
+        "sleep 1000\n"
+        "cat /proc/processes\n"
+        "sleep 1500\n"
+        "echo Step 4 print timer and interrupt state\n"
+        "echo Success looks like readable counters without errors\n"
+        "sleep 1000\n"
+        "cat /proc/timers\n"
+        "sleep 1000\n"
+        "cat /proc/interrupts\n"
+        "sleep 1000\n"
+        "echo END procfs-test\n",
+        1,
+    },
+    {
+        "/tests/vfs.sh",
+        "#!/bin/sh\n"
+        "# Exercises VFS, regular files, stat, copy, rename, hard links, and symlinks.\n"
+        "echo BEGIN vfs-test\n"
+        "echo Step 1 create test directories under /tmp\n"
+        "echo It is OK if mkdir says the directory already exists from an earlier run\n"
+        "sleep 1000\n"
+        "mkdir /tmp\n"
+        "mkdir /tmp/vfs-test\n"
+        "sleep 1000\n"
+        "echo Step 2 create a regular file through shell redirection\n"
+        "echo Success looks like cat printing alpha beta gamma\n"
+        "sleep 1000\n"
+        "echo alpha beta gamma > /tmp/vfs-test/input.txt\n"
+        "cat /tmp/vfs-test/input.txt\n"
+        "sleep 1500\n"
+        "echo Step 3 count and search the file\n"
+        "echo Success looks like wc counts and grep printing the same line\n"
+        "sleep 1000\n"
+        "wc /tmp/vfs-test/input.txt\n"
+        "grep beta /tmp/vfs-test/input.txt\n"
+        "sleep 1500\n"
+        "echo Step 4 copy rename hardlink and symlink the file\n"
+        "sleep 1000\n"
+        "cp /tmp/vfs-test/input.txt /tmp/vfs-test/copy.txt\n"
+        "mv /tmp/vfs-test/copy.txt /tmp/vfs-test/moved.txt\n"
+        "ln /tmp/vfs-test/input.txt /tmp/vfs-test/hardlink.txt\n"
+        "ln -s /tmp/vfs-test/input.txt /tmp/vfs-test/symlink.txt\n"
+        "sleep 1500\n"
+        "echo Step 5 inspect link and inode metadata\n"
+        "echo Success looks like readlink target and stat output for both files\n"
+        "sleep 1000\n"
+        "readlink /tmp/vfs-test/symlink.txt\n"
+        "stat /tmp/vfs-test/input.txt\n"
+        "stat /tmp/vfs-test/hardlink.txt\n"
+        "sleep 1500\n"
+        "echo Step 6 list directory and verify moved copy contents\n"
+        "sleep 1000\n"
+        "ls /tmp/vfs-test\n"
+        "cat /tmp/vfs-test/moved.txt\n"
+        "sleep 1500\n"
+        "echo Step 7 remove the moved copy and list again\n"
+        "echo Success looks like moved.txt is gone while input and links remain\n"
+        "sleep 1000\n"
+        "rm /tmp/vfs-test/moved.txt\n"
+        "ls /tmp/vfs-test\n"
+        "sleep 1000\n"
+        "echo END vfs-test\n",
+        1,
+    },
+    {
+        "/tests/vm.sh",
+        "#!/bin/sh\n"
+        "# Exercises process VM visibility, heap growth, and scheduler process views.\n"
+        "echo BEGIN vm-test\n"
+        "echo Step 1 show user heap accounting before a workload\n"
+        "echo Success looks like heap total used and free values\n"
+        "sleep 1000\n"
+        "free\n"
+        "sleep 1500\n"
+        "echo Step 2 run cpubusy for a short timed workload\n"
+        "echo Success looks like cpubusy start and cpubusy done with checksum\n"
+        "sleep 1000\n"
+        "cpubusy 300 vm\n"
+        "sleep 1500\n"
+        "echo Step 3 print kernel memory and VM counters\n"
+        "echo Success looks like readable meminfo and vmstat output\n"
+        "sleep 1000\n"
+        "cat /proc/meminfo\n"
+        "sleep 1000\n"
+        "cat /proc/vmstat\n"
+        "sleep 1500\n"
+        "echo Step 4 print init process maps and process table\n"
+        "echo Success looks like virtual address ranges followed by ps output\n"
+        "sleep 1000\n"
+        "cat /proc/0/maps\n"
+        "sleep 1000\n"
+        "ps\n"
+        "cat /proc/processes\n"
+        "sleep 1000\n"
+        "echo END vm-test\n",
+        1,
+    },
+    {
+        "/tests/multicore.sh",
+        "#!/bin/sh\n"
+        "# Starts one busy loop per expected CPU and displays CPU/process/timer state.\n"
+        "echo BEGIN multicore-test\n"
+        "echo Step 1 show CPU state before load\n"
+        "echo Success looks like online_processors is 4 on QEMU -smp 4 or Pi 5\n"
+        "sleep 1000\n"
+        "cat /proc/cpuinfo\n"
+        "sleep 1500\n"
+        "echo Step 2 start four CPU-bound workers with staggered launches\n"
+        "echo Success looks like four cpubusy start lines and no SDHCI errors\n"
+        "sleep 1000\n"
+        "echo Launching worker cpu0\n"
+        "cpubusy 2000 cpu0 &\n"
+        "sleep 1000\n"
+        "echo Launching worker cpu1\n"
+        "cpubusy 2000 cpu1 &\n"
+        "sleep 1000\n"
+        "echo Launching worker cpu2\n"
+        "cpubusy 2000 cpu2 &\n"
+        "sleep 1000\n"
+        "echo Launching worker cpu3\n"
+        "cpubusy 2000 cpu3 &\n"
+        "sleep 1500\n"
+        "echo Step 3 inspect process table while workers are active\n"
+        "echo Success looks like several cpubusy processes running\n"
+        "sleep 1000\n"
+        "ps\n"
+        "cat /proc/processes\n"
+        "sleep 1500\n"
+        "echo Step 4 inspect per-CPU scheduler ticks during load\n"
+        "echo Success looks like scheduler_ticks values have increased on online CPUs\n"
+        "sleep 1000\n"
+        "cat /proc/cpuinfo\n"
+        "sleep 1000\n"
+        "cat /proc/timers\n"
+        "echo Step 5 wait for timed workers to finish\n"
+        "echo Success looks like cpubusy done lines then no fatal exceptions\n"
+        "sleep 10000\n"
+        "sleep 1000\n"
+        "ps\n"
+        "cat /proc/cpuinfo\n"
+        "sleep 1000\n"
+        "echo END multicore-test\n",
+        1,
+    },
+    {
+        "/tests/stress.sh",
+        "#!/bin/sh\n"
+        "# Leaves background burners running until killed. Use ps, then kill PIDs.\n"
+        "echo BEGIN stress-test\n"
+        "echo Step 1 show CPU state before infinite workers\n"
+        "echo Success looks like all expected CPUs online\n"
+        "sleep 1000\n"
+        "cat /proc/cpuinfo\n"
+        "sleep 1500\n"
+        "echo Step 2 start four infinite CPU burners with staggered launches\n"
+        "echo Success looks like four cpubusy start lines and a responsive shell afterward\n"
+        "sleep 1000\n"
+        "echo Launching stress0\n"
+        "cpubusy 0 stress0 &\n"
+        "sleep 1000\n"
+        "echo Launching stress1\n"
+        "cpubusy 0 stress1 &\n"
+        "sleep 1000\n"
+        "echo Launching stress2\n"
+        "cpubusy 0 stress2 &\n"
+        "sleep 1000\n"
+        "echo Launching stress3\n"
+        "cpubusy 0 stress3 &\n"
+        "sleep 1500\n"
+        "echo Step 3 print process and CPU state while burners continue running\n"
+        "echo Success looks like cpubusy PIDs in ps and scheduler_ticks increasing\n"
+        "sleep 1000\n"
+        "ps\n"
+        "cat /proc/cpuinfo\n"
+        "sleep 1000\n"
+        "echo Step 4 leave workers running for manual inspection\n"
+        "echo Use kill PID to stop each cpubusy worker shown by ps\n"
+        "echo Example kill 7\n"
+        "echo END stress-test\n",
+        1,
+    },
+};
 
 static err_t mark_user_bin_executable(const char *path) {
     struct fs_dirent dirent;
@@ -35,6 +281,88 @@ static err_t mark_user_bin_executable(const char *path) {
     }
 
     return update_inode_metadata(dirent.ino_id, INODE_EDIT_PERM, 0, 0x1, 0);
+}
+
+static err_t seed_write_file(const char *path, const char *contents, uint8_t executable) {
+    if (path == NULL || contents == NULL) {
+        return INVALID_ARGS;
+    }
+
+    if (k_check_if_exists(path)) {
+        err_t err = k_unlink(path);
+        if (err != SUCCESS) {
+            return err;
+        }
+    }
+
+    int fd = k_open(path, O_CREAT | O_WRONLY);
+    if (fd < 0) {
+        return fd;
+    }
+
+    struct oft_entry *entry;
+    err_t err = get_oft_entry_by_fd(fd, &entry);
+    if (err != SUCCESS) {
+        return err;
+    }
+
+    size_t len = strlen(contents);
+    size_t written = 0;
+    while (written < len) {
+        int chunk = k_write(entry, contents + written, len - written);
+        if (chunk < 0) {
+            k_close(entry);
+            return chunk;
+        }
+        if (chunk == 0) {
+            k_close(entry);
+            return FILE_WRITE_ERROR;
+        }
+        written += (size_t)chunk;
+    }
+
+    err = k_close(entry);
+    if (err != SUCCESS) {
+        return err;
+    }
+
+    return executable ? mark_user_bin_executable(path) : SUCCESS;
+}
+
+static err_t seed_tests(void) {
+    struct fs_dirent dir;
+    err_t err = get_dirent_by_path("/tests", &dir, NULL, NULL);
+    if (err == SUCCESS) {
+        attributes_t metadata;
+        err = get_inode_metadata(dir.ino_id, &metadata);
+        if (err != SUCCESS) {
+            return err;
+        }
+        if (metadata.type != DIRECTORY_TYPE) {
+            err = k_unlink("/tests");
+            if (err != SUCCESS) {
+                return err;
+            }
+            err = FILE_NOT_CREATED;
+        }
+    }
+
+    if (err == FILE_NOT_CREATED || err == FILE_NOT_FOUND) {
+        err = k_make_directory("/tests");
+    }
+    if (err != SUCCESS) {
+        return err;
+    }
+
+    for (size_t i = 0; i < sizeof(test_scripts) / sizeof(test_scripts[0]); i++) {
+        err = seed_write_file(test_scripts[i].path, test_scripts[i].contents,
+                              test_scripts[i].executable);
+        if (err != SUCCESS) {
+            return err;
+        }
+    }
+
+    return SUCCESS;
 }
 
 static err_t seed_user_bin_file(const user_bin_t *bin) {
@@ -124,6 +452,9 @@ static err_t seed_user_bins_for_mkfs(void) {
     err_t err = initialize_oft();
     if (err == SUCCESS) {
         err = seed_user_bins();
+    }
+    if (err == SUCCESS) {
+        err = seed_tests();
     }
 
     err_t cleanup_err = empty_oft();
@@ -698,21 +1029,27 @@ err_t unmount() {
 err_t read_block(void *data, block_no_t num) {
     unsigned char *bytes = (unsigned char*) data;
     struct node_st *block_node;
+    uint64_t flags = spin_lock_irqsave(&fs_block_cache_lock);
     err_t err_code = lru_cache_add_to_front(&block_node, num);
     if (err_code) {
+        spin_unlock_irqrestore(&fs_block_cache_lock, flags);
         return err_code;
     }
 
     memcpy(bytes, block_node->data, get_bytes_per_block());
+    spin_unlock_irqrestore(&fs_block_cache_lock, flags);
 
     return SUCCESS;
 }
 
 err_t write_block(void *data, block_no_t num) {
+    uint64_t flags = spin_lock_irqsave(&fs_block_cache_lock);
     err_t err = lru_cache_update_data(data, num);
     if (err) {
+        spin_unlock_irqrestore(&fs_block_cache_lock, flags);
         return err;
     }
+    spin_unlock_irqrestore(&fs_block_cache_lock, flags);
     return SUCCESS;
 }
 

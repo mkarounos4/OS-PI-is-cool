@@ -25,6 +25,7 @@ static int pri_counters[3] = {0, 0, 0};
 static const int MAX_PRI_CNTRS[3] = {9, 6, 4};
 static int curr_pri = 0;
 static spinlock_t scheduler_lock = SPINLOCK_INIT;
+static volatile uint32_t boot_cpu_scheduler_started;
 
 static void scheduler_tick(void *ctx);
 static void add_thread_to_scheduler_locked(tcb_t *thread);
@@ -50,6 +51,7 @@ void idle_task_fn(void* args) {
 void scheduler_init(void) {
     curr_tick = 0;
     curr_pri = 0;
+    boot_cpu_scheduler_started = 0;
 
     for (int i = 0; i < 3; i++) {
         thread_ready_queues[i] = vec_new(2, NULL);
@@ -102,6 +104,19 @@ void scheduler_cpu_init(void) {
 // Starts execution at thread 0. Does not return.
 void scheduler_start(void) {
     cpu_t *cpu = cpu_current();
+    if (cpu == NULL) {
+        while (1) {
+            asm volatile("wfe" ::: "memory");
+        }
+    }
+
+    if (cpu->id != 0) {
+        while (!boot_cpu_scheduler_started) {
+            asm volatile("wfe" ::: "memory");
+        }
+        asm volatile("dmb sy" ::: "memory");
+    }
+
     uint64_t flags = spin_lock_irqsave(&scheduler_lock);
     timer_schedule_local_interrupt_ms(SCHEDULER_QUANTUM_MS, set_ready_to_schedule, cpu);
     tcb_t *next_thread = get_next_thread_locked();
@@ -109,9 +124,17 @@ void scheduler_start(void) {
     if (next_thread != NULL) {
         cpu->curr_thread = next_thread;
         next_thread->state = THREAD_RUNNING;
+        if (cpu->id == 0) {
+            boot_cpu_scheduler_started = 1;
+            asm volatile("dmb sy\nsev" ::: "memory");
+        }
         context_switch_unlock_irqrestore(&cpu->boot_ctx, &next_thread->ctx,
                                          &scheduler_lock, flags);
     } else {
+        if (cpu->id == 0) {
+            boot_cpu_scheduler_started = 1;
+            asm volatile("dmb sy\nsev" ::: "memory");
+        }
         context_switch_unlock_irqrestore(&cpu->boot_ctx, &cpu->idle_ctx,
                                          &scheduler_lock, flags);
     }

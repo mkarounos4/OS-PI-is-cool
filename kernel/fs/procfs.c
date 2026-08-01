@@ -1037,6 +1037,46 @@ static int build_cache(char *buf, size_t size) {
                     inode_stats.dirty);
 }
 
+static int build_cpuinfo(char *buf, size_t size) {
+    int len = snprintf(buf, size,
+                       "processor: %u\n"
+                       "online_processors: %u\n"
+                       "arch: AArch64\n"
+                       "exception_level: EL%u\n"
+#ifdef PLATFORM_RPI5
+                       "platform: Raspberry Pi 5 / BCM2712\n"
+#elif defined(PLATFORM_QEMU)
+                       "platform: QEMU raspi3b\n"
+#else
+                       "platform: unknown\n"
+#endif
+                       "page_size: %u\n"
+                       "timer: ARM generic timer\n"
+                       "per_cpu:\n"
+                       "id online mpidr scheduler_ticks current_tid\n",
+                       (unsigned int)cpu_id(),
+                       (unsigned int)cpu_online_count(),
+                       (unsigned int)cpu_current_el(),
+                       (unsigned int)PAGE_SIZE);
+
+    for (uint32_t id = 0; id < MAX_CPUS; id++) {
+        cpu_t *cpu = cpu_get(id);
+        int current_tid = -1;
+        if (cpu != NULL && cpu->curr_thread != NULL) {
+            current_tid = cpu->curr_thread->tid;
+        }
+
+        len = append(buf, size, len, "%u %u 0x%lx %u %d\n",
+                     (unsigned int)id,
+                     cpu != NULL ? (unsigned int)cpu->online : 0u,
+                     cpu != NULL ? cpu->mpidr : 0u,
+                     cpu != NULL ? (unsigned int)cpu->scheduler_ticks : 0u,
+                     current_tid);
+    }
+
+    return len;
+}
+
 static int build_proc_file(struct proc_st *proc, char *buf, size_t size) {
     if (proc->file_id >= PROC_FILE_PID_STATUS) {
         pcb_t *pcb = get_pcb_by_pid(proc->pid);
@@ -1096,45 +1136,7 @@ static int build_proc_file(struct proc_st *proc, char *buf, size_t size) {
                         "build: " __DATE__ " " __TIME__ "\n"
                         "compiler: aarch64-none-elf-gcc\n");
     case PROC_FILE_CPUINFO:
-        return snprintf(buf, size,
-#ifdef PLATFORM_RPI5
-                        "processor: %u\n"
-                        "online_processors: %u\n"
-                        "arch: AArch64\n"
-                        "exception_level: EL%u\n"
-                        "platform: Raspberry Pi 5 / BCM2712\n"
-                        "page_size: %u\n"
-                        "timer: ARM generic timer\n",
-                        (unsigned int)cpu_id(),
-                        (unsigned int)cpu_online_count(),
-                        (unsigned int)cpu_current_el(),
-                        (unsigned int)PAGE_SIZE
-#elif defined(PLATFORM_QEMU)
-                        "processor: %u\n"
-                        "online_processors: %u\n"
-                        "arch: AArch64\n"
-                        "exception_level: EL%u\n"
-                        "platform: QEMU raspi3b\n"
-                        "page_size: %u\n"
-                        "timer: ARM generic timer\n",
-                        (unsigned int)cpu_id(),
-                        (unsigned int)cpu_online_count(),
-                        (unsigned int)cpu_current_el(),
-                        (unsigned int)PAGE_SIZE
-#else
-                        "processor: %u\n"
-                        "online_processors: %u\n"
-                        "arch: AArch64\n"
-                        "exception_level: EL%u\n"
-                        "platform: unknown\n"
-                        "page_size: %u\n"
-                        "timer: ARM generic timer\n",
-                        (unsigned int)cpu_id(),
-                        (unsigned int)cpu_online_count(),
-                        (unsigned int)cpu_current_el(),
-                        (unsigned int)PAGE_SIZE
-#endif
-        );
+        return build_cpuinfo(buf, size);
     case PROC_FILE_THREADS:
         return build_threads(buf, size);
     case PROC_FILE_LOCKS:

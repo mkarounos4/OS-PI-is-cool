@@ -1,5 +1,7 @@
 #include "inode_cache.h"
 
+#include "sync/spinlock.h"
+
 // Static helper functions
 static int find_inode_in_cache(ino_id_t id, struct cache_ll_node_st **node);
 static int remove_cache_inode(struct cache_ll_node_st *node);
@@ -10,20 +12,27 @@ static struct cache_ll_node_st *tail = NULL;
 static uint32_t inode_cache_hits = 0;
 static uint32_t inode_cache_misses = 0;
 static uint32_t inode_cache_evictions = 0;
+static spinlock_t inode_cache_lock = SPINLOCK_INIT;
 
 struct cached_inode_st *get_inode_from_cache(ino_id_t id) {
+    uint64_t flags = spin_lock_irqsave(&inode_cache_lock);
     // Returns inode if already in cache and updates refs by 1
     struct cache_ll_node_st *node = NULL;
     int found = find_inode_in_cache(id, &node);
     if (found) {
         inode_cache_hits++;
         node->num_refs++;
+        spin_unlock_irqrestore(&inode_cache_lock, flags);
         return &node->cache_node;
     }
     inode_cache_misses++;
 
     // If not in cache yet, create it
     node = kmalloc(sizeof(struct cache_ll_node_st));
+    if (node == NULL) {
+        spin_unlock_irqrestore(&inode_cache_lock, flags);
+        return NULL;
+    }
     *node = (struct cache_ll_node_st) {
         .num_refs = 1,
         .next = NULL,
@@ -58,18 +67,22 @@ struct cached_inode_st *get_inode_from_cache(ino_id_t id) {
         }
         kfree(node);
         print_error(error);
+        spin_unlock_irqrestore(&inode_cache_lock, flags);
         return NULL;
     }
     
     // Return node
+    spin_unlock_irqrestore(&inode_cache_lock, flags);
     return &node->cache_node;
 }
 
 err_t remove_ref_from_cache(ino_id_t id) {
+    uint64_t flags = spin_lock_irqsave(&inode_cache_lock);
     // Gets inode from cache, and returns -1 if not cached
     struct cache_ll_node_st *node = NULL;
     int found = find_inode_in_cache(id, &node);
     if (!found) {
+        spin_unlock_irqrestore(&inode_cache_lock, flags);
         return FILE_NOT_FOUND;
     }
 
@@ -79,18 +92,22 @@ err_t remove_ref_from_cache(ino_id_t id) {
         remove_cache_inode(node);
     }
 
+    spin_unlock_irqrestore(&inode_cache_lock, flags);
     return SUCCESS;
 }
 
 err_t empty_inode_cache() {
+    uint64_t flags = spin_lock_irqsave(&inode_cache_lock);
     // Iterates over all cached inodes and removes them from cache
     while (head != NULL) {
         err_t error = remove_cache_inode(head);
         if (error != SUCCESS) {
+            spin_unlock_irqrestore(&inode_cache_lock, flags);
             return error;
         }
     }
 
+    spin_unlock_irqrestore(&inode_cache_lock, flags);
     return SUCCESS;
 }
 
@@ -144,6 +161,7 @@ void inode_cache_get_stats(struct inode_cache_stats *stats) {
         return;
     }
 
+    uint64_t flags = spin_lock_irqsave(&inode_cache_lock);
     uint32_t used = 0;
     uint32_t dirty = 0;
     struct cache_ll_node_st *curr = head;
@@ -161,4 +179,5 @@ void inode_cache_get_stats(struct inode_cache_stats *stats) {
     stats->misses = inode_cache_misses;
     stats->evictions = inode_cache_evictions;
     stats->dirty = dirty;
+    spin_unlock_irqrestore(&inode_cache_lock, flags);
 }

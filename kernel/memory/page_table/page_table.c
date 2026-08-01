@@ -68,6 +68,7 @@ extern uint8_t __RAM_end[];
 
 struct Page *pages;
 static spinlock_t page_allocator_lock = SPINLOCK_INIT;
+static spinlock_t page_table_metadata_lock = SPINLOCK_INIT;
 
 typedef struct mem_segment_st {
   ino_id_t ino_id;
@@ -118,7 +119,7 @@ static void page_table_struct_destroy(hashmap_value_t value) {
   kfree(page_table);
 }
 
-static void page_table_structs_init(void) {
+static void page_table_structs_init_locked(void) {
   if (page_table_structs.bucket_count != 0) {
     return;
   }
@@ -126,8 +127,8 @@ static void page_table_structs_init(void) {
   page_table_structs = hashmap_new(16, page_table_struct_destroy);
 }
 
-static page_table_t *get_page_table_struct(uint64_t *table) {
-  page_table_structs_init();
+static page_table_t *get_page_table_struct_locked(uint64_t *table) {
+  page_table_structs_init_locked();
 
   uint64_t table_key = (uint64_t)(uintptr_t)table;
   hashmap_value_t value = NULL;
@@ -144,14 +145,17 @@ int add_page_table_struct(uint64_t *table) {
     return 0;
   }
 
-  page_table_structs_init();
+  uint64_t flags = spin_lock_irqsave(&page_table_metadata_lock);
+  page_table_structs_init_locked();
 
-  if (get_page_table_struct(table) != NULL) {
+  if (get_page_table_struct_locked(table) != NULL) {
+    spin_unlock_irqrestore(&page_table_metadata_lock, flags);
     return 1;
   }
 
   page_table_t *page_table = kmalloc(sizeof(page_table_t));
   if (page_table == NULL) {
+    spin_unlock_irqrestore(&page_table_metadata_lock, flags);
     return 0;
   }
 
@@ -162,20 +166,25 @@ int add_page_table_struct(uint64_t *table) {
   if (!hashmap_put(&page_table_structs,
                    HASHMAP_KEY_FROM_UINT64(table_key), page_table)) {
     page_table_struct_destroy(page_table);
+    spin_unlock_irqrestore(&page_table_metadata_lock, flags);
     return 0;
   }
 
+  spin_unlock_irqrestore(&page_table_metadata_lock, flags);
   return 1;
 }
 
 void free_page_table_struct(uint64_t *table) {
+  uint64_t flags = spin_lock_irqsave(&page_table_metadata_lock);
   if (table == NULL || page_table_structs.bucket_count == 0) {
+    spin_unlock_irqrestore(&page_table_metadata_lock, flags);
     return;
   }
 
   uint64_t table_key = (uint64_t)(uintptr_t)table;
   hashmap_remove(&page_table_structs, HASHMAP_KEY_FROM_UINT64(table_key),
                  NULL);
+  spin_unlock_irqrestore(&page_table_metadata_lock, flags);
 }
 
 static void destroy_page_table_level(uint64_t *table, int level) {
@@ -212,19 +221,31 @@ void destroy_page_table(uint64_t *table) {
 }
 
 int copy_page_table_struct(uint64_t *src_table, uint64_t *dst_table) {
-  page_table_t *src = get_page_table_struct(src_table);
+  uint64_t flags = spin_lock_irqsave(&page_table_metadata_lock);
+  page_table_t *src = get_page_table_struct_locked(src_table);
   if (src == NULL) {
+    spin_unlock_irqrestore(&page_table_metadata_lock, flags);
     return INVALID_ARGS;
   }
 
-  free_page_table_struct(dst_table);
-
-  if (!add_page_table_struct(dst_table)) {
-    return INVALID_ARGS;
+  if (dst_table != NULL && page_table_structs.bucket_count != 0) {
+    uint64_t table_key = (uint64_t)(uintptr_t)dst_table;
+    hashmap_remove(&page_table_structs, HASHMAP_KEY_FROM_UINT64(table_key),
+                   NULL);
   }
 
-  page_table_t *dst = get_page_table_struct(dst_table);
+  page_table_t *dst = kmalloc(sizeof(page_table_t));
   if (dst == NULL) {
+    spin_unlock_irqrestore(&page_table_metadata_lock, flags);
+    return INVALID_ARGS;
+  }
+
+  dst->table = dst_table;
+  dst->segments = vec_new(2, mem_segment_destroy);
+  uint64_t dst_key = (uint64_t)(uintptr_t)dst_table;
+  if (!hashmap_put(&page_table_structs, HASHMAP_KEY_FROM_UINT64(dst_key), dst)) {
+    page_table_struct_destroy(dst);
+    spin_unlock_irqrestore(&page_table_metadata_lock, flags);
     return INVALID_ARGS;
   }
 
@@ -232,6 +253,7 @@ int copy_page_table_struct(uint64_t *src_table, uint64_t *dst_table) {
     mem_segment_t *src_segment = vec_get(&src->segments, i);
     mem_segment_t *dst_segment = kmalloc(sizeof(mem_segment_t));
     if (dst_segment == NULL) {
+      spin_unlock_irqrestore(&page_table_metadata_lock, flags);
       return INVALID_ARGS;
     }
 
@@ -239,6 +261,7 @@ int copy_page_table_struct(uint64_t *src_table, uint64_t *dst_table) {
     vec_push_back(&dst->segments, dst_segment);
   }
 
+  spin_unlock_irqrestore(&page_table_metadata_lock, flags);
   return SUCCESS;
 }
 
@@ -343,6 +366,7 @@ static int read_segment_page(mem_segment_t *segment, uint64_t page_va,
 
 int load_segment_page_for_fault(uint64_t *table, uint64_t fault_va,
                                 int instruction_fault) {
+  uint64_t flags = spin_lock_irqsave(&page_table_metadata_lock);
   vmstat_page_faults++;
   if (instruction_fault) {
     vmstat_instruction_faults++;
@@ -350,13 +374,16 @@ int load_segment_page_for_fault(uint64_t *table, uint64_t fault_va,
     vmstat_data_faults++;
   }
 
-  page_table_t *page_table = get_page_table_struct(table);
+  page_table_t *page_table = get_page_table_struct_locked(table);
   if (page_table == NULL) {
     vmstat_faults_unmapped++;
     vmstat_faults_invalid++;
+    spin_unlock_irqrestore(&page_table_metadata_lock, flags);
     return PAGE_FAULT_NOT_HANDLED;
   }
 
+  mem_segment_t fault_segment;
+  int found_segment = 0;
   for (size_t i = 0; i < vec_len(&page_table->segments); i++) {
     mem_segment_t *segment = vec_get(&page_table->segments, i);
     if (fault_va < segment->va ||
@@ -366,37 +393,56 @@ int load_segment_page_for_fault(uint64_t *table, uint64_t fault_va,
 
     if (!segment_allows_fault(segment, instruction_fault)) {
       vmstat_faults_permission++;
+      spin_unlock_irqrestore(&page_table_metadata_lock, flags);
       return PAGE_FAULT_PERMISSION;
     }
+
+    fault_segment = *segment;
+    found_segment = 1;
+    break;
+  }
+
+  if (found_segment) {
+    spin_unlock_irqrestore(&page_table_metadata_lock, flags);
 
     uint64_t page_va = fault_va & ~PAGE_MASK;
     void *page = alloc_page();
     if (page == NULL) {
+      flags = spin_lock_irqsave(&page_table_metadata_lock);
       vmstat_faults_error++;
+      spin_unlock_irqrestore(&page_table_metadata_lock, flags);
       return PAGE_FAULT_ERROR;
     }
 
-    int err = read_segment_page(segment, page_va, page);
+    int err = read_segment_page(&fault_segment, page_va, page);
     if (err != SUCCESS) {
       free_page(page);
+      flags = spin_lock_irqsave(&page_table_metadata_lock);
       vmstat_faults_error++;
+      spin_unlock_irqrestore(&page_table_metadata_lock, flags);
       return PAGE_FAULT_ERROR;
     }
 
+    flags = spin_lock_irqsave(&page_table_metadata_lock);
     uint64_t pa = kernel_phys_addr((uint64_t)(uintptr_t)page);
-    if (!pt_map_page(table, page_va, pa, user_segment_attrs(segment->flags))) {
+    if (!pt_map_page(table, page_va, pa, user_segment_attrs(fault_segment.flags))) {
+      spin_unlock_irqrestore(&page_table_metadata_lock, flags);
       free_page(page);
+      flags = spin_lock_irqsave(&page_table_metadata_lock);
       vmstat_faults_error++;
+      spin_unlock_irqrestore(&page_table_metadata_lock, flags);
       return PAGE_FAULT_ERROR;
     }
 
     vmstat_file_faults++;
     vmstat_faults_handled++;
+    spin_unlock_irqrestore(&page_table_metadata_lock, flags);
     return PAGE_FAULT_HANDLED;
   }
 
   vmstat_faults_unmapped++;
   vmstat_faults_invalid++;
+  spin_unlock_irqrestore(&page_table_metadata_lock, flags);
   return PAGE_FAULT_NOT_HANDLED;
 }
 
@@ -669,11 +715,17 @@ static void *pt_map_new_page(uint64_t *l0, uint64_t va, uint64_t attrs) {
 uint8_t pt_walk(uint64_t *l0, uint64_t va) { return pt_walk_user_page(l0, va); }
 
 uint8_t pt_walk_user_page(uint64_t *l0, uint64_t va) {
-  return pt_map_new_page(l0, va, ATTR_USER_RW) != NULL;
+  uint64_t flags = spin_lock_irqsave(&page_table_metadata_lock);
+  uint8_t mapped = pt_map_new_page(l0, va, ATTR_USER_RW) != NULL;
+  spin_unlock_irqrestore(&page_table_metadata_lock, flags);
+  return mapped;
 }
 
 uint8_t pt_walk_kernel_page(uint64_t *l0, uint64_t va) {
-  return pt_map_new_page(l0, va, ATTR_KERNEL_RW) != NULL;
+  uint64_t flags = spin_lock_irqsave(&page_table_metadata_lock);
+  uint8_t mapped = pt_map_new_page(l0, va, ATTR_KERNEL_RW) != NULL;
+  spin_unlock_irqrestore(&page_table_metadata_lock, flags);
+  return mapped;
 }
 
 void *pt_seed_kernel_page(uint64_t *l0, uint64_t va) {
@@ -970,19 +1022,30 @@ int load_memory_segment(uint64_t *table, ino_id_t ino_id,
                         uint64_t file_offset, uint64_t file_size,
                         uint64_t va, uint64_t pa, uint64_t mem_size,
                         uint32_t flags) {
-  page_table_t *page_table = get_page_table_struct(table);
+  uint64_t lock_flags = spin_lock_irqsave(&page_table_metadata_lock);
+  page_table_t *page_table = get_page_table_struct_locked(table);
   if (page_table == NULL) {
-    if (!add_page_table_struct(table)) {
+    page_table_t *new_page_table = kmalloc(sizeof(page_table_t));
+    if (new_page_table == NULL) {
+      spin_unlock_irqrestore(&page_table_metadata_lock, lock_flags);
       return INVALID_ARGS;
     }
-    page_table = get_page_table_struct(table);
-    if (page_table == NULL) {
+
+    new_page_table->table = table;
+    new_page_table->segments = vec_new(2, mem_segment_destroy);
+    uint64_t table_key = (uint64_t)(uintptr_t)table;
+    if (!hashmap_put(&page_table_structs,
+                     HASHMAP_KEY_FROM_UINT64(table_key), new_page_table)) {
+      page_table_struct_destroy(new_page_table);
+      spin_unlock_irqrestore(&page_table_metadata_lock, lock_flags);
       return INVALID_ARGS;
     }
+    page_table = new_page_table;
   }
 
   mem_segment_t *segment = kmalloc(sizeof(mem_segment_t));
   if (segment == NULL) {
+    spin_unlock_irqrestore(&page_table_metadata_lock, lock_flags);
     return INVALID_ARGS;
   }
 
@@ -996,6 +1059,7 @@ int load_memory_segment(uint64_t *table, ino_id_t ino_id,
 
   vec_push_back(&page_table->segments, segment);
 
+  spin_unlock_irqrestore(&page_table_metadata_lock, lock_flags);
   return SUCCESS;
 }
 
@@ -1004,10 +1068,12 @@ int page_table_format_segments(uint64_t *table, char *buf, size_t size) {
     return INVALID_ARGS;
   }
 
-  page_table_t *page_table = get_page_table_struct(table);
+  uint64_t flags = spin_lock_irqsave(&page_table_metadata_lock);
+  page_table_t *page_table = get_page_table_struct_locked(table);
   int len = snprintf(buf, size,
                      "va_start va_end pa file_off file_size mem_size ino flags\n");
   if (len < 0) {
+    spin_unlock_irqrestore(&page_table_metadata_lock, flags);
     return FILE_READ_ERROR;
   }
 
@@ -1016,8 +1082,10 @@ int page_table_format_segments(uint64_t *table, char *buf, size_t size) {
                        len < (int)size ? size - (size_t)len : 1,
                        "# no tracked segments\n");
     if (ret < 0) {
+      spin_unlock_irqrestore(&page_table_metadata_lock, flags);
       return FILE_READ_ERROR;
     }
+    spin_unlock_irqrestore(&page_table_metadata_lock, flags);
     return len + ret;
   }
 
@@ -1039,11 +1107,13 @@ int page_table_format_segments(uint64_t *table, char *buf, size_t size) {
                        segment->ino_id,
                        segment->flags);
     if (ret < 0) {
+      spin_unlock_irqrestore(&page_table_metadata_lock, flags);
       return FILE_READ_ERROR;
     }
     len += ret;
   }
 
+  spin_unlock_irqrestore(&page_table_metadata_lock, flags);
   return len;
 }
 
@@ -1081,7 +1151,8 @@ static uint32_t page_table_count_cow_shared_pages(void) {
 }
 
 static uint32_t page_table_count_mmap_regions(void) {
-  page_table_structs_init();
+  uint64_t flags = spin_lock_irqsave(&page_table_metadata_lock);
+  page_table_structs_init_locked();
 
   uint32_t regions = 0;
   for (size_t bucket = 0; bucket < page_table_structs.bucket_count; bucket++) {
@@ -1094,6 +1165,7 @@ static uint32_t page_table_count_mmap_regions(void) {
       entry = entry->next;
     }
   }
+  spin_unlock_irqrestore(&page_table_metadata_lock, flags);
   return regions;
 }
 

@@ -77,13 +77,12 @@ context_switch_unlock_irqrestore:
     str x4, [x0, #CPU_CTX_TTBR0_EL1]
 
     mov x19, x1
+    mov x20, x3
     mov x0, x2
-    mov x1, x3
-    bl spin_unlock_irqrestore
+    bl spin_unlock
     mov x1, x19
 
     // Restore registers
-    ldp x19, x20, [x1, #CPU_CTX_X19]
     ldp x21, x22, [x1, #CPU_CTX_X21]
     ldp x23, x24, [x1, #CPU_CTX_X23]
     ldp x25, x26, [x1, #CPU_CTX_X25]
@@ -105,6 +104,11 @@ context_switch_unlock_irqrestore:
     // Restore SP
     ldr x2, [x1, #CPU_CTX_SP]
     mov sp, x2
+
+    ldp x3, x4, [x1, #CPU_CTX_X19]
+    msr daif, x20
+    mov x19, x3
+    mov x20, x4
 
     ret
 
