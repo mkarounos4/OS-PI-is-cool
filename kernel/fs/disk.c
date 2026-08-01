@@ -29,6 +29,7 @@ static uint32_t inode_table_start = 3;
 static uint32_t data_start_block = 4;
 static unsigned char mount_block_buffer[FS_MOUNT_BLOCK_BUFFER_SIZE] __attribute__((aligned(16)));
 static spinlock_t fs_block_cache_lock = SPINLOCK_INIT;
+static spinlock_t fs_bitmap_lock = SPINLOCK_INIT;
 
 typedef struct fs_seed_file_st {
     const char *path;
@@ -1073,14 +1074,17 @@ err_t set_bit_in_bitmap_range(block_no_t bitmap_start, uint32_t bitmap_blocks,
         return INVALID_ARGS;
     }
 
+    uint64_t flags = spin_lock_irqsave(&fs_bitmap_lock);
     unsigned char *data = kmalloc(get_bytes_per_block());
     if (data == NULL) {
+        spin_unlock_irqrestore(&fs_bitmap_lock, flags);
         return FILE_READ_ERROR;
     }
 
     err_t err = read_block(data, bitmap_start + bitmap_block_idx);
     if (err != SUCCESS) {
         kfree(data);
+        spin_unlock_irqrestore(&fs_bitmap_lock, flags);
         return err;
     }
 
@@ -1094,6 +1098,7 @@ err_t set_bit_in_bitmap_range(block_no_t bitmap_start, uint32_t bitmap_blocks,
 
     err = write_block(data, bitmap_start + bitmap_block_idx);
     kfree(data);
+    spin_unlock_irqrestore(&fs_bitmap_lock, flags);
     return err;
 }
 
@@ -1104,8 +1109,10 @@ err_t find_free_from_bitmap_range(uint32_t *free_block, block_no_t bitmap_start,
         return INVALID_ARGS;
     }
 
+    uint64_t flags = spin_lock_irqsave(&fs_bitmap_lock);
     void *data = kmalloc(get_bytes_per_block());
     if (data == NULL) {
+        spin_unlock_irqrestore(&fs_bitmap_lock, flags);
         return FILE_READ_ERROR;
     }
 
@@ -1114,6 +1121,7 @@ err_t find_free_from_bitmap_range(uint32_t *free_block, block_no_t bitmap_start,
         err_t err_read = read_block(data, bitmap_start + bitmap_block_idx);
         if (err_read != SUCCESS) {
             kfree(data);
+            spin_unlock_irqrestore(&fs_bitmap_lock, flags);
             return err_read;
         }
 
@@ -1144,11 +1152,13 @@ err_t find_free_from_bitmap_range(uint32_t *free_block, block_no_t bitmap_start,
                         err_t err_code = write_block(data, bitmap_start + bitmap_block_idx);
                         if (err_code != SUCCESS) {
                             kfree(data);
+                            spin_unlock_irqrestore(&fs_bitmap_lock, flags);
                             return err_code;
                         }
                     }
                     *free_block = first_bit + bit_in_block;
                     kfree(data);
+                    spin_unlock_irqrestore(&fs_bitmap_lock, flags);
                     return SUCCESS;
                 }
             }
@@ -1156,6 +1166,7 @@ err_t find_free_from_bitmap_range(uint32_t *free_block, block_no_t bitmap_start,
     }
 
     kfree(data);
+    spin_unlock_irqrestore(&fs_bitmap_lock, flags);
     return NO_FREE_BLOCKS;
 }
 
@@ -1164,7 +1175,10 @@ block_no_t get_ith_block_of_file_by_id(ino_id_t id, unsigned int block_num) {
 }
 
 block_no_t get_ith_block_of_file(struct oft_entry *entry, unsigned int block_num) {
-    return get_block_num_from_inode(&entry->inode->inode, block_num);
+    uint64_t flags = cached_inode_lock(entry->inode);
+    struct inode_st snapshot = entry->inode->inode;
+    cached_inode_unlock(entry->inode, flags);
+    return get_block_num_from_inode(&snapshot, block_num);
 }
 
 block_no_t get_next_block_from_file(struct oft_entry *entry, int next_block_index) {
@@ -1172,8 +1186,11 @@ block_no_t get_next_block_from_file(struct oft_entry *entry, int next_block_inde
 }
 
 err_t allocate_new_block_for_file(struct oft_entry *entry, block_no_t *block_num) {
+    uint64_t flags = cached_inode_lock(entry->inode);
     entry->inode->dirty = 1;
-    return allocate_block_for_file_inode(&entry->inode->inode, block_num);
+    err_t err = allocate_block_for_file_inode(&entry->inode->inode, block_num);
+    cached_inode_unlock(entry->inode, flags);
+    return err;
 }
 
 err_t allocate_new_block_for_file_from_id(ino_id_t id_in_fs, block_no_t* allocated_block) {
@@ -1224,8 +1241,11 @@ err_t free_file(const char* f_name) {
 }
 
 err_t clear_blocks_of_file(struct oft_entry *entry) {
+    uint64_t flags = cached_inode_lock(entry->inode);
     entry->inode->dirty = 1;
-    return clear_blocks_of_inode(&entry->inode->inode, 1);
+    err_t err = clear_blocks_of_inode(&entry->inode->inode, 1);
+    cached_inode_unlock(entry->inode, flags);
+    return err;
 }
 
 err_t clear_blocks_of_file_by_id(ino_id_t id) {
@@ -1234,7 +1254,10 @@ err_t clear_blocks_of_file_by_id(ino_id_t id) {
         return -1;
     }
 
+    uint64_t flags = cached_inode_lock(inode_cached);
+    inode_cached->dirty = 1;
     int to_ret = clear_blocks_of_inode(&inode_cached->inode, 1);
+    cached_inode_unlock(inode_cached, flags);
     err_t error = remove_ref_from_cache(id);
     if (error) return error;
     return to_ret;
@@ -1272,7 +1295,10 @@ int get_file_size(struct oft_entry *entry) {
         return 0;
     }
 
-    return entry->inode->inode.metadata.i_size;
+    uint64_t flags = cached_inode_lock(entry->inode);
+    int size = entry->inode->inode.metadata.i_size;
+    cached_inode_unlock(entry->inode, flags);
+    return size;
 }
 
 int get_file_size_by_id(ino_id_t ino_id) {
@@ -1281,7 +1307,9 @@ int get_file_size_by_id(ino_id_t ino_id) {
         return -1;
     }
 
+    uint64_t flags = cached_inode_lock(inode_cached);
     int to_ret = inode_cached->inode.metadata.i_size;
+    cached_inode_unlock(inode_cached, flags);
     err_t error = remove_ref_from_cache(ino_id);
     if (error) return error;
     return to_ret;
@@ -1292,8 +1320,10 @@ int update_file_size(struct oft_entry *entry, int new_size) {
         return -1;
     }
 
+    uint64_t flags = cached_inode_lock(entry->inode);
     entry->inode->dirty = 1;
     entry->inode->inode.metadata.i_size = new_size;
+    cached_inode_unlock(entry->inode, flags);
     return SUCCESS;
 }
 
@@ -1343,9 +1373,22 @@ int get_is_mounted() {
 }
 
 ino_id_t get_curr_dir() {
-    return get_curr_process()->cwd;
+    pcb_t *pcb = get_curr_process();
+    if (pcb == NULL) {
+        return 0;
+    }
+    uint64_t flags = spin_lock_irqsave(&pcb->lock);
+    ino_id_t cwd = pcb->cwd;
+    spin_unlock_irqrestore(&pcb->lock, flags);
+    return cwd;
 }
 
 void set_curr_dir(ino_id_t id) {
-    get_curr_process()->cwd = id;
+    pcb_t *pcb = get_curr_process();
+    if (pcb == NULL) {
+        return;
+    }
+    uint64_t flags = spin_lock_irqsave(&pcb->lock);
+    pcb->cwd = id;
+    spin_unlock_irqrestore(&pcb->lock, flags);
 }

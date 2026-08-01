@@ -840,17 +840,6 @@ static int build_processes(char *buf, size_t size) {
     return len;
 }
 
-static unsigned int proc_count_open_files(pcb_t *pcb) {
-    unsigned int count = 0;
-    for (size_t i = 0; i < vec_len(&pcb->file_descriptors); i++) {
-        int fd = (int)(uintptr_t)vec_get(&pcb->file_descriptors, i);
-        if (fd >= 0) {
-            count++;
-        }
-    }
-    return count;
-}
-
 struct proc_thread_metrics {
     unsigned int total;
     unsigned int running;
@@ -905,6 +894,16 @@ static void proc_collect_thread_metrics(pcb_t *pcb,
 static int build_pid_status(pcb_t *pcb, char *buf, size_t size) {
     struct proc_thread_metrics metrics;
     proc_collect_thread_metrics(pcb, &metrics);
+    uint64_t flags = spin_lock_irqsave(&pcb->lock);
+    ino_id_t cwd = pcb->cwd;
+    unsigned int open_files = 0;
+    for (size_t i = 0; i < vec_len(&pcb->file_descriptors); i++) {
+        int fd = (int)(uintptr_t)vec_get(&pcb->file_descriptors, i);
+        if (fd >= 0) {
+            open_files++;
+        }
+    }
+    spin_unlock_irqrestore(&pcb->lock, flags);
 
     return snprintf(buf, size,
                     "Name: %s\n"
@@ -936,8 +935,8 @@ static int build_pid_status(pcb_t *pcb, char *buf, size_t size) {
                     metrics.zombie,
                     metrics.min_priority,
                     pcb->exit_code,
-                    pcb->cwd,
-                    proc_count_open_files(pcb),
+                    cwd,
+                    open_files,
                     (unsigned int)pcb->pending_signals,
                     metrics.blocked_until,
                     (unsigned long)pcb->ttbr0_el1);
@@ -945,6 +944,7 @@ static int build_pid_status(pcb_t *pcb, char *buf, size_t size) {
 
 static int build_pid_fd(pcb_t *pcb, char *buf, size_t size) {
     int len = snprintf(buf, size, "FD KERNEL_FD\n");
+    uint64_t flags = spin_lock_irqsave(&pcb->lock);
     for (size_t i = 0; i < vec_len(&pcb->file_descriptors); i++) {
         int k_fd = (int)(uintptr_t)vec_get(&pcb->file_descriptors, i);
         if (k_fd < 0) {
@@ -952,6 +952,7 @@ static int build_pid_fd(pcb_t *pcb, char *buf, size_t size) {
         }
         len = append(buf, size, len, "%u %d\n", (unsigned int)i, k_fd);
     }
+    spin_unlock_irqrestore(&pcb->lock, flags);
     return len;
 }
 
@@ -1088,7 +1089,12 @@ static int build_proc_file(struct proc_st *proc, char *buf, size_t size) {
         case PROC_FILE_PID_STATUS:
             return build_pid_status(pcb, buf, size);
         case PROC_FILE_PID_CWD:
-            return snprintf(buf, size, "%u\n", pcb->cwd);
+        {
+            uint64_t flags = spin_lock_irqsave(&pcb->lock);
+            ino_id_t cwd = pcb->cwd;
+            spin_unlock_irqrestore(&pcb->lock, flags);
+            return snprintf(buf, size, "%u\n", cwd);
+        }
         case PROC_FILE_PID_FD:
             return build_pid_fd(pcb, buf, size);
         case PROC_FILE_PID_MAPS:

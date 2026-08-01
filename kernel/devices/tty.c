@@ -89,6 +89,7 @@ static int pending_shell_ttys[MAX_TTY_DEVICES];
 static int pending_shell_count;
 static int pending_terminal_creates;
 static uint8_t tty_nodes_ready;
+static uint8_t tty_creating[MAX_TTY_DEVICES];
 
 static const struct file_operations tty_fops = {
     .open = tty_open,
@@ -106,9 +107,11 @@ static struct char_driver tty_char_driver = {
 
 int tty_drivers_init(void) {
     kmemset(&tty_state, 0, sizeof(struct tty_driver_state));
+    tty_state.lock = (spinlock_t)SPINLOCK_INIT;
     pending_shell_count = 0;
     pending_terminal_creates = 0;
     tty_nodes_ready = 0;
+    kmemset(tty_creating, 0, sizeof(tty_creating));
 
     return register_char_driver(&tty_char_driver);
 }
@@ -119,16 +122,20 @@ int tty_create_device_nodes(void) {
 }
 
 int tty_pop_shell_request(void) {
+    uint64_t flags = spin_lock_irqsave(&tty_state.lock);
     if (pending_terminal_creates > 0) {
         pending_terminal_creates--;
+        spin_unlock_irqrestore(&tty_state.lock, flags);
         int created = tty_create();
         if (created >= 0) {
             tty_gui_activate_terminal(created);
             return created;
         }
+        flags = spin_lock_irqsave(&tty_state.lock);
     }
 
     if (pending_shell_count == 0) {
+        spin_unlock_irqrestore(&tty_state.lock, flags);
         return -1;
     }
 
@@ -137,27 +144,35 @@ int tty_pop_shell_request(void) {
         pending_shell_ttys[i - 1] = pending_shell_ttys[i];
     }
     pending_shell_count--;
+    spin_unlock_irqrestore(&tty_state.lock, flags);
     return minor;
 }
 
 int tty_create() {
+    uint64_t state_flags = spin_lock_irqsave(&tty_state.lock);
     if (tty_state.num_ttys == MAX_TTY_DEVICES) {
+        spin_unlock_irqrestore(&tty_state.lock, state_flags);
         return -1;
     }
     if (!tty_nodes_ready) {
+        spin_unlock_irqrestore(&tty_state.lock, state_flags);
         return -1;
     }
 
     int minor = -1;
     for (int i = 0; i < MAX_TTY_DEVICES; i++) {
-        if (tty_state.devices[i] == NULL || !tty_state.devices[i]->active) {
+        if (!tty_creating[i] &&
+            (tty_state.devices[i] == NULL || !tty_state.devices[i]->active)) {
             minor = i;
+            tty_creating[i] = 1;
             break;
         }
     }
     if (minor < 0) {
+        spin_unlock_irqrestore(&tty_state.lock, state_flags);
         return -1;
     }
+    spin_unlock_irqrestore(&tty_state.lock, state_flags);
 
     struct dev_st device_number = {
         .major = TTY_MAJOR,
@@ -165,14 +180,23 @@ int tty_create() {
     };
     err_t err = devfs_create_char_device(device_number);
     if (err) {
+        state_flags = spin_lock_irqsave(&tty_state.lock);
+        tty_creating[minor] = 0;
+        spin_unlock_irqrestore(&tty_state.lock, state_flags);
         return err;
     }
 
     if (tty_gui_create_terminal(minor) != 0) {
+        state_flags = spin_lock_irqsave(&tty_state.lock);
+        tty_creating[minor] = 0;
+        spin_unlock_irqrestore(&tty_state.lock, state_flags);
         return -2;
     }
     if (tty_gui_char_device_activate(minor) != 0) {
         tty_gui_destroy_terminal(minor);
+        state_flags = spin_lock_irqsave(&tty_state.lock);
+        tty_creating[minor] = 0;
+        spin_unlock_irqrestore(&tty_state.lock, state_flags);
         return -2;
     }
 
@@ -180,10 +204,13 @@ int tty_create() {
     if (new_tty == NULL) {
         tty_gui_char_device_deactivate(minor);
         tty_gui_destroy_terminal(minor);
+        state_flags = spin_lock_irqsave(&tty_state.lock);
+        tty_creating[minor] = 0;
+        spin_unlock_irqrestore(&tty_state.lock, state_flags);
         return -2;
     }
     kmemset(new_tty, 0, sizeof(struct tty_device));
-    tty_state.devices[minor] = new_tty;
+    new_tty->lock = (spinlock_t)SPINLOCK_INIT;
     new_tty->rx = create_ring_buffer(4096);
     new_tty->tx = create_ring_buffer(4096);
     new_tty->rx_wait_queue = vec_new(2, NULL);
@@ -227,7 +254,11 @@ int tty_create() {
     new_tty->command_history_scratch_len = 0;
 
     new_tty->active = 1;
+    state_flags = spin_lock_irqsave(&tty_state.lock);
+    tty_state.devices[minor] = new_tty;
+    tty_creating[minor] = 0;
     tty_state.num_ttys++;
+    spin_unlock_irqrestore(&tty_state.lock, state_flags);
     return minor;
 }
 
@@ -240,7 +271,10 @@ int tty_open(struct oft_entry *entry) {
         !tty_state.devices[minor]->active) {
         return -1;
     }
-    tty_state.devices[minor]->refcount++;
+    struct tty_device *tty = tty_state.devices[minor];
+    uint64_t flags = spin_lock_irqsave(&tty->lock);
+    tty->refcount++;
+    spin_unlock_irqrestore(&tty->lock, flags);
     return 0;
 }
 
@@ -252,10 +286,13 @@ int tty_close(struct oft_entry *entry) {
     if (minor >= MAX_TTY_DEVICES || tty_state.devices[minor] == NULL) {
         return -1;
     }
-    tty_state.devices[minor]->refcount--;
-    if (tty_state.devices[minor]->refcount < 0) {
-        tty_state.devices[minor]->refcount = 0;
+    struct tty_device *tty = tty_state.devices[minor];
+    uint64_t flags = spin_lock_irqsave(&tty->lock);
+    tty->refcount--;
+    if (tty->refcount < 0) {
+        tty->refcount = 0;
     }
+    spin_unlock_irqrestore(&tty->lock, flags);
 
     return 0;
 }
@@ -292,6 +329,7 @@ int tty_read(struct oft_entry *entry, char *buffer, size_t count) {
     ssize_t num_read = 0;
     while (num_read < count) {
         char char_void;
+        uint64_t flags = spin_lock_irqsave(&curr_tty->lock);
         bool read_char = consume_ring_buffer(&curr_tty->rx, &char_void);
         if (!read_char) {
             int already_waiting = 0;
@@ -306,12 +344,16 @@ int tty_read(struct oft_entry *entry, char *buffer, size_t count) {
                 vec_push_back(&curr_tty->rx_wait_queue,
                               (ptr_t)(uintptr_t)curr_thd->tid);
             }
+            spin_unlock_irqrestore(&curr_tty->lock, flags);
             block_thread(curr_thd, THREAD_BLOCKED_INTERRUPTABLE);
+            flags = spin_lock_irqsave(&curr_tty->lock);
             read_char = consume_ring_buffer(&curr_tty->rx, &char_void);
             if (!read_char) {
+                spin_unlock_irqrestore(&curr_tty->lock, flags);
                 return num_read;
             }
         }
+        spin_unlock_irqrestore(&curr_tty->lock, flags);
 
         if (char_void == 0x04) {
             return num_read;
@@ -507,6 +549,7 @@ int tty_format_proc(char *buf, size_t size) {
         return INVALID_ARGS;
     }
 
+    uint64_t state_flags = spin_lock_irqsave(&tty_state.lock);
     int len = snprintf(buf, size, "ttys: %u\n", tty_state.num_ttys);
     for (uint16_t minor = 0; minor < MAX_TTY_DEVICES; minor++) {
         struct tty_device *tty = tty_state.devices[minor];
@@ -514,6 +557,7 @@ int tty_format_proc(char *buf, size_t size) {
             continue;
         }
 
+        uint64_t flags = spin_lock_irqsave(&tty->lock);
         size_t used = len < (int)size ? (size_t)len : size - 1;
         int ret = snprintf(buf + used, size - used,
                            "name: %s\n"
@@ -544,12 +588,15 @@ int tty_format_proc(char *buf, size_t size) {
                            tty->rx.size,
                            tty->tx.size,
                            tty->refcount);
+        spin_unlock_irqrestore(&tty->lock, flags);
         if (ret < 0) {
+            spin_unlock_irqrestore(&tty_state.lock, state_flags);
             return ret;
         }
         len += ret;
     }
 
+    spin_unlock_irqrestore(&tty_state.lock, state_flags);
     return len;
 }
 

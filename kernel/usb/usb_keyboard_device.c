@@ -9,6 +9,7 @@
 #include "scheduler/scheduler.h"
 #include "threading/thread.h"
 #include "uart/uart.h"
+#include "sync/spinlock.h"
 
 #define USB_KEYBOARD_BUFFER_SIZE 4096
 #define USB_KEYBOARD_DEVICE_COUNT 1
@@ -18,6 +19,7 @@ struct usb_keyboard_device {
     Vec rx_wait_queue;
     int refcount;
     uint8_t active;
+    spinlock_t lock;
 };
 
 static struct usb_keyboard_device keyboard_devices[USB_KEYBOARD_DEVICE_COUNT];
@@ -63,7 +65,9 @@ static int keyboard_open(struct oft_entry *entry) {
     if (device == NULL) {
         return -1;
     }
+    uint64_t flags = spin_lock_irqsave(&device->lock);
     device->refcount++;
+    spin_unlock_irqrestore(&device->lock, flags);
     return 0;
 }
 
@@ -72,9 +76,11 @@ static int keyboard_close(struct oft_entry *entry) {
     if (device == NULL) {
         return -1;
     }
+    uint64_t flags = spin_lock_irqsave(&device->lock);
     if (device->refcount > 0) {
         device->refcount--;
     }
+    spin_unlock_irqrestore(&device->lock, flags);
     return 0;
 }
 
@@ -86,25 +92,32 @@ static int keyboard_read(struct oft_entry *entry, char *buffer, size_t count) {
 
     size_t read = 0;
     while (read < count) {
+        uint64_t flags = spin_lock_irqsave(&device->lock);
         if (consume_ring_buffer(&device->rx, &buffer[read])) {
+            spin_unlock_irqrestore(&device->lock, flags);
             read++;
             continue;
         }
         if (read != 0) {
+            spin_unlock_irqrestore(&device->lock, flags);
             break;
         }
         tcb_t *thread = get_curr_thread();
         if (thread == NULL) {
+            spin_unlock_irqrestore(&device->lock, flags);
             break;
         }
         if (!wait_queue_has_tid(&device->rx_wait_queue, thread->tid)) {
             vec_push_back(&device->rx_wait_queue,
                           (ptr_t)(uintptr_t)thread->tid);
         }
+        spin_unlock_irqrestore(&device->lock, flags);
         block_thread(thread, THREAD_BLOCKED_INTERRUPTABLE);
     }
     if (read != 0) {
+        uint64_t flags = spin_lock_irqsave(&device->lock);
         bytes_read += read;
+        spin_unlock_irqrestore(&device->lock, flags);
     }
     return (int)read;
 }
@@ -138,6 +151,7 @@ int usb_keyboard_char_driver_init(void) {
         keyboard_devices[i].rx_wait_queue = vec_new(2, NULL);
         keyboard_devices[i].refcount = 0;
         keyboard_devices[i].active = 1;
+        keyboard_devices[i].lock = (spinlock_t)SPINLOCK_INIT;
     }
     return register_char_driver(&keyboard_driver);
 }
@@ -151,7 +165,13 @@ int usb_keyboard_create_device_nodes(void) {
 }
 
 void usb_keyboard_device_receive(const char *buffer, size_t count) {
-    if (buffer == NULL || !keyboard_devices[0].active) {
+    if (buffer == NULL) {
+        return;
+    }
+
+    uint64_t flags = spin_lock_irqsave(&keyboard_devices[0].lock);
+    if (!keyboard_devices[0].active) {
+        spin_unlock_irqrestore(&keyboard_devices[0].lock, flags);
         return;
     }
 
@@ -161,6 +181,7 @@ void usb_keyboard_device_receive(const char *buffer, size_t count) {
         produced++;
     }
     if (produced == 0) {
+        spin_unlock_irqrestore(&keyboard_devices[0].lock, flags);
         uart_puts("[usb] input buffer full; dropping bytes\n");
         return;
     }
@@ -168,6 +189,7 @@ void usb_keyboard_device_receive(const char *buffer, size_t count) {
     bytes_received += produced;
 
     wake_readers(&keyboard_devices[0]);
+    spin_unlock_irqrestore(&keyboard_devices[0].lock, flags);
     struct dev_st input = {
         .major = USB_KEYBOARD_MAJOR,
         .minor = 0,
@@ -176,10 +198,12 @@ void usb_keyboard_device_receive(const char *buffer, size_t count) {
 }
 
 void usb_keyboard_get_counters(uint64_t *received, uint64_t *read) {
+    uint64_t flags = spin_lock_irqsave(&keyboard_devices[0].lock);
     if (received != NULL) {
         *received = bytes_received;
     }
     if (read != NULL) {
         *read = bytes_read;
     }
+    spin_unlock_irqrestore(&keyboard_devices[0].lock, flags);
 }

@@ -181,7 +181,9 @@ int default_open(struct oft_entry *entry) {
 int default_read(struct oft_entry *entry, char *buf, size_t n) {
     int tot_bytes_read = 0;
     int size = get_file_size(entry);
+    uint64_t entry_flags = spin_lock_irqsave(&entry->lock);
     if (entry->cursor >= (uint32_t) size) {
+        spin_unlock_irqrestore(&entry->lock, entry_flags);
         return 0;
     }
 
@@ -206,6 +208,7 @@ int default_read(struct oft_entry *entry, char *buf, size_t n) {
 
         if (error != SUCCESS) {
             kfree(data);
+            spin_unlock_irqrestore(&entry->lock, entry_flags);
             return error;
         }
 
@@ -230,6 +233,7 @@ int default_read(struct oft_entry *entry, char *buf, size_t n) {
 
         if (n == 0 || entry->cursor >= (uint32_t) size) {
             kfree(data);
+            spin_unlock_irqrestore(&entry->lock, entry_flags);
             return tot_bytes_read;
         }
         
@@ -242,6 +246,7 @@ int default_read(struct oft_entry *entry, char *buf, size_t n) {
     }
     
     kfree(data);
+    spin_unlock_irqrestore(&entry->lock, entry_flags);
     return SUCCESS;
 }
 
@@ -250,20 +255,24 @@ int k_file_add_reference(int fd) {
         return FS_NOT_MOUNTED;
     }
 
-    struct oft_entry *entry;
-    err_t err = get_oft_entry_by_fd(fd, &entry);
+    err_t err = oft_add_reference(fd);
     if (err != SUCCESS) {
         return err;
     }
 
-    err = oft_add_reference(fd);
+    struct oft_entry *entry;
+    err = get_oft_entry_by_fd(fd, &entry);
     if (err != SUCCESS) {
         return err;
     }
 
     if (entry->inode->inode.metadata.fops != NULL &&
         entry->inode->inode.metadata.fops->open != NULL) {
-        return entry->inode->inode.metadata.fops->open(entry);
+        err = entry->inode->inode.metadata.fops->open(entry);
+    }
+    if (err != SUCCESS) {
+        oft_close_file(entry);
+        return err;
     }
 
     return SUCCESS;
@@ -294,6 +303,7 @@ int default_write(struct oft_entry *entry, const char *buf, size_t n) {
 
     // Move real cursor to correct position in binary file, do special math for first offset.
     int size = get_file_size(entry);
+    uint64_t entry_flags = spin_lock_irqsave(&entry->lock);
     uint32_t offset;
     if (entry->mode & O_APPEND) {
         offset = size;
@@ -306,6 +316,7 @@ int default_write(struct oft_entry *entry, const char *buf, size_t n) {
     if (curr_block_no == 0) {
         err_t err = allocate_new_block_for_file(entry, &curr_block_no);
         if (err) {
+            spin_unlock_irqrestore(&entry->lock, entry_flags);
             return err;
         }
     }
@@ -319,12 +330,15 @@ int default_write(struct oft_entry *entry, const char *buf, size_t n) {
         const char *to_write;
         if (curr_block_no == 0) {
             kfree(data);
+            spin_unlock_irqrestore(&entry->lock, entry_flags);
             return FAT_NO_SPACE_REMAINING;
         }
         block_no_t block_to_write = curr_block_no;
         if (bytes_to_write < get_bytes_per_block()) {
             err_t err = read_block(data, block_to_write);
             if (err != SUCCESS) {
+                kfree(data);
+                spin_unlock_irqrestore(&entry->lock, entry_flags);
                 return err;
             }
             if (start) {
@@ -344,6 +358,7 @@ int default_write(struct oft_entry *entry, const char *buf, size_t n) {
         err_t err = write_block((void *)to_write, curr_block_no);
         if (err != 0) {
             kfree(data);
+            spin_unlock_irqrestore(&entry->lock, entry_flags);
             return err;
         }
 
@@ -355,6 +370,7 @@ int default_write(struct oft_entry *entry, const char *buf, size_t n) {
             int res = update_file_size(entry, size);
             if (res != SUCCESS) {
                 kfree(data);
+                spin_unlock_irqrestore(&entry->lock, entry_flags);
                 return res;
             }
         }
@@ -364,6 +380,7 @@ int default_write(struct oft_entry *entry, const char *buf, size_t n) {
         tot_bytes_written += bytes_to_write;
         if (n == 0) {
             kfree(data);
+            spin_unlock_irqrestore(&entry->lock, entry_flags);
             return tot_bytes_written;
         }
         
@@ -373,6 +390,7 @@ int default_write(struct oft_entry *entry, const char *buf, size_t n) {
             err_t alloc_err = allocate_new_block_for_file(entry, &curr_block_no);
             if (alloc_err != SUCCESS) {
                 kfree(data);
+                spin_unlock_irqrestore(&entry->lock, entry_flags);
                 return alloc_err;
             }
         }
@@ -387,6 +405,7 @@ int default_write(struct oft_entry *entry, const char *buf, size_t n) {
     }
 
     kfree(data);
+    spin_unlock_irqrestore(&entry->lock, entry_flags);
     return SUCCESS;
 }
 
@@ -405,6 +424,7 @@ int k_lseek(int fd, int offset, int whence) {
         return OFT_FD_DOES_NOT_EXIST;
     }
 
+    uint64_t entry_flags = spin_lock_irqsave(&entry->lock);
     int file_size = get_file_size(entry);
 
     if (whence == F_SEEK_SET) {
@@ -415,6 +435,7 @@ int k_lseek(int fd, int offset, int whence) {
         entry->cursor = file_size + offset;
         
     } else {
+        spin_unlock_irqrestore(&entry->lock, entry_flags);
         return INVALID_ARGS;
     }
     
@@ -430,6 +451,7 @@ int k_lseek(int fd, int offset, int whence) {
        err_t error = read_block(data, curr_block);
        if (error) {
            kfree(data);
+           spin_unlock_irqrestore(&entry->lock, entry_flags);
            return error;
        }
        int end = offset + file_size > get_bytes_per_block() ? get_bytes_per_block() : offset + file_size;
@@ -439,6 +461,7 @@ int k_lseek(int fd, int offset, int whence) {
        error = write_block(data, curr_block);
        kfree(data);
        if (error) {
+           spin_unlock_irqrestore(&entry->lock, entry_flags);
            return error;
        }
        offset -= dif_until_new_block;
@@ -451,6 +474,7 @@ int k_lseek(int fd, int offset, int whence) {
         err_t alloc_err = allocate_new_block_for_file(entry, &curr_block);
         if (alloc_err != SUCCESS) {
             kfree(data);
+            spin_unlock_irqrestore(&entry->lock, entry_flags);
             return alloc_err;
         }
         write_block(data, curr_block); // fill hole with 0
@@ -463,6 +487,7 @@ int k_lseek(int fd, int offset, int whence) {
         update_file_size(entry, entry->cursor);
     }
 
+    spin_unlock_irqrestore(&entry->lock, entry_flags);
     return entry->cursor;
 }
 
