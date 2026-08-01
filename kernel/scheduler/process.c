@@ -10,11 +10,13 @@
 #include "signals/signals.h"
 #include "user_image.h"
 #include "devices/tty.h"
+#include "sync/spinlock.h"
 
 #define PA_MASK UINT64_C(0x0000ffffffffffff)
 
 static pcb_t processes[MAX_PROCESS_COUNT];
 static HashMap pgrps;
+static spinlock_t process_table_lock = SPINLOCK_INIT;
 
 static void __attribute__((noreturn)) process_first_run(void) {
     struct trap_frame *frame;
@@ -299,12 +301,16 @@ long s_waitpid_impl(pid_t pid, int *status, int32_t flags) {
 
 // Returns pointer to next unused pcb, null
 static pcb_t *get_next_unused_pcb() {
+    uint64_t flags = spin_lock_irqsave(&process_table_lock);
     for (int i = 0; i < MAX_PROCESS_COUNT; i++) {
         if (processes[i].state == PROC_UNUSED_STATE) {
             processes[i].pid = i;
+            processes[i].state = PROC_BLOCKED_STATE;
+            spin_unlock_irqrestore(&process_table_lock, flags);
             return &processes[i];
         }
     }
+    spin_unlock_irqrestore(&process_table_lock, flags);
     return NULL;
 }
 
@@ -394,7 +400,7 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
 
     // Setup FD table here based on parent if applicable (after FS impl)
     new_proc->ppid = ppid;
-    pcb_t *parent_proc = get_pcb_by_pid(ppid);
+    pcb_t *parent_proc = ppid == new_proc->pid ? NULL : get_pcb_by_pid(ppid);
     if (parent_proc == NULL) {
         new_proc->pgid = new_proc->pid;
         new_proc->cwd = ROOT_INO;
@@ -529,20 +535,26 @@ void proc_destroy(pcb_t *p) {
 }
 
 pcb_t *get_pcb_by_pid(pid_t pid) {
+    uint64_t flags = spin_lock_irqsave(&process_table_lock);
     if (pid >= MAX_PROCESS_COUNT || pid < 0 || processes[pid].state == PROC_UNUSED_STATE) {
+        spin_unlock_irqrestore(&process_table_lock, flags);
         return NULL;
     }
 
-    return &processes[pid];
+    pcb_t *pcb = &processes[pid];
+    spin_unlock_irqrestore(&process_table_lock, flags);
+    return pcb;
 }
 
 void processes_init() {
+    uint64_t flags = spin_lock_irqsave(&process_table_lock);
     pgrps = hashmap_new(16, pgrp_destroy);
 
     for (unsigned int i = 0; i < MAX_PROCESS_COUNT; i++) {
         processes[i].state = PROC_UNUSED_STATE;
         processes[i].pid = i;
     }
+    spin_unlock_irqrestore(&process_table_lock, flags);
 
     pid_t pid = proc_create((void *(*)(void *))(uintptr_t)USER_INIT_PROCESS_ENTRY, NULL, 0);
     pcb_t *init_pcb = get_pcb_by_pid(pid);

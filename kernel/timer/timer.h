@@ -9,9 +9,11 @@ typedef void (*timer_handler_t)(void *ctx);
 
 // Initialize the generic timer hardware.
 void timer_init(void);
+void timer_init_cpu(void);
 
 // Schedule a one-shot timer interrupt for the given number of milliseconds away.
 int timer_schedule_interrupt_ms(uint64_t milliseconds, timer_handler_t handler, void *ctx);
+int timer_schedule_local_interrupt_ms(uint64_t milliseconds, timer_handler_t handler, void *ctx);
 
 // Cancel any currently scheduled one-shot timer interrupt.
 void timer_cancel_interrupt(void);

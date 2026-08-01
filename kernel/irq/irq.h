@@ -9,6 +9,7 @@ typedef struct trap_frame *(*irq_handler_t)(unsigned intid, struct trap_frame *f
 
 // Initialize GIC
 void irq_init(void);
+void irq_init_cpu(void);
 
 // Attach a c handeler for the given interrupt ID.
 int irq_register(unsigned intid, irq_handler_t handler, void *ctx);

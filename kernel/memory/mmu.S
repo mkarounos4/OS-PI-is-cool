@@ -30,3 +30,33 @@ initialize_mmu_asm:
     ldr x0, =kernel_main
     br x0
 .size initialize_mmu_asm, . - initialize_mmu_asm
+
+.global initialize_secondary_mmu_asm
+.type initialize_secondary_mmu_asm, %function
+initialize_secondary_mmu_asm:
+    // x0 = TTBR0_EL1, x1 = TTBR1_EL1, x2 = TCR_EL1, x3 = MAIR_EL1
+    // x4 = virtual stack top, x5 = CPU id
+
+    msr mair_el1, x3
+
+    dsb ishst
+    tlbi vmalle1
+    dsb ish
+
+    msr ttbr0_el1, x0
+    msr ttbr1_el1, x1
+    msr tcr_el1, x2
+    isb
+
+    mrs x7, sctlr_el1
+    orr x7, x7, #1
+    msr sctlr_el1, x7
+    isb
+
+    mov sp, x4
+    mov x29, xzr
+    mov x30, xzr
+    mov x0, x5
+    ldr x5, =secondary_kernel_main
+    br x5
+.size initialize_secondary_mmu_asm, . - initialize_secondary_mmu_asm

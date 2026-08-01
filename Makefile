@@ -7,6 +7,7 @@ BOOTDIR = /run/media/veerkakar/bootfs
 QEMU_SD_IMG ?= build/qemu/sd.img
 QEMU_SD_SIZE ?= 1G
 QEMU_SERIAL ?= mon:stdio
+QEMU_SMP ?= 4
 UART_OUT ?= 0
 
 PLATFORM ?= rpi
@@ -186,6 +187,7 @@ qemu:
 	qemu-system-aarch64 \
 	    -M raspi3b \
 	    -cpu cortex-a53 \
+	    -smp $(QEMU_SMP) \
 	    -display gtk \
 	    -serial $(QEMU_SERIAL) \
 	    -kernel kernel8.img \

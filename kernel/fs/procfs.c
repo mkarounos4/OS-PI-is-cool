@@ -19,6 +19,7 @@
 #include "uart/uart.h"
 #include "virtual_fs.h"
 #include "usb/xhci.h"
+#include "cpu/cpu.h"
 
 #define PROC_KIND_ROOT_DIR 1
 #define PROC_KIND_PID_DIR 2
@@ -1097,30 +1098,39 @@ static int build_proc_file(struct proc_st *proc, char *buf, size_t size) {
     case PROC_FILE_CPUINFO:
         return snprintf(buf, size,
 #ifdef PLATFORM_RPI5
-                        "processor: 0\n"
+                        "processor: %u\n"
+                        "online_processors: %u\n"
                         "arch: AArch64\n"
                         "exception_level: EL%u\n"
                         "platform: Raspberry Pi 5 / BCM2712\n"
                         "page_size: %u\n"
                         "timer: ARM generic timer\n",
+                        (unsigned int)cpu_id(),
+                        (unsigned int)cpu_online_count(),
                         (unsigned int)cpu_current_el(),
                         (unsigned int)PAGE_SIZE
 #elif defined(PLATFORM_QEMU)
-                        "processor: 0\n"
+                        "processor: %u\n"
+                        "online_processors: %u\n"
                         "arch: AArch64\n"
                         "exception_level: EL%u\n"
                         "platform: QEMU raspi3b\n"
                         "page_size: %u\n"
                         "timer: ARM generic timer\n",
+                        (unsigned int)cpu_id(),
+                        (unsigned int)cpu_online_count(),
                         (unsigned int)cpu_current_el(),
                         (unsigned int)PAGE_SIZE
 #else
-                        "processor: 0\n"
+                        "processor: %u\n"
+                        "online_processors: %u\n"
                         "arch: AArch64\n"
                         "exception_level: EL%u\n"
                         "platform: unknown\n"
                         "page_size: %u\n"
                         "timer: ARM generic timer\n",
+                        (unsigned int)cpu_id(),
+                        (unsigned int)cpu_online_count(),
                         (unsigned int)cpu_current_el(),
                         (unsigned int)PAGE_SIZE
 #endif

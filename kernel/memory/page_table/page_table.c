@@ -9,6 +9,7 @@
 #include "fs/disk.h"
 #include "fs/errors.h"
 #include "uart.h"
+#include "sync/spinlock.h"
 
 #include "user_image.h"
 
@@ -51,6 +52,8 @@
 #define DEVICE_BLOCK_RPI5_RP1_PERIPH UINT64_C(0x1c00000000)
 #define DEVICE_BLOCK_RPI5_RP1_BAR     UINT64_C(0x1f00000000)
 #define DEVICE_BLOCK_RPI5_RP1_MSIX UINT64_C(0x1f80000000)
+#define BOOT_LOW_PHYS_START UINT64_C(0x80000)
+#define BOOT_LOW_MAP_SIZE   UINT64_C(0x80000)
 
 extern uint8_t __text_start[];
 extern uint8_t __text_end[];
@@ -64,6 +67,7 @@ extern uint8_t __kernel_page_pool_start[];
 extern uint8_t __RAM_end[];
 
 struct Page *pages;
+static spinlock_t page_allocator_lock = SPINLOCK_INIT;
 
 typedef struct mem_segment_st {
   ino_id_t ino_id;
@@ -431,7 +435,11 @@ void page_table_note_tlb_flush(void) {
   vmstat_tlb_flushes++;
 }
 
-void pt_init(struct Page *page_struct_array) { pages = page_struct_array; }
+void pt_init(struct Page *page_struct_array) {
+  uint64_t flags = spin_lock_irqsave(&page_allocator_lock);
+  pages = page_struct_array;
+  spin_unlock_irqrestore(&page_allocator_lock, flags);
+}
 
 typedef struct FreePage {
   struct FreePage *next;
@@ -496,6 +504,7 @@ static void page_allocator_init(void) {
 
 
 void *alloc_page(void) {
+    uint64_t flags = spin_lock_irqsave(&page_allocator_lock);
     page_allocator_init();
 
     void *page = NULL;
@@ -521,11 +530,13 @@ void *alloc_page(void) {
         }
     }
 
+    spin_unlock_irqrestore(&page_allocator_lock, flags);
     return page;
 }
 
 void free_page(void *page) {
     if (page == NULL) return;
+    uint64_t flags = spin_lock_irqsave(&page_allocator_lock);
     vmstat_page_frees++;
 
     if (pages != NULL) {
@@ -540,6 +551,7 @@ void free_page(void *page) {
     FreePage *free = (FreePage *)page;
     free->next = free_list;
     free_list = free;
+    spin_unlock_irqrestore(&page_allocator_lock, flags);
 }
 
 uint64_t kernel_direct_map_va(uint64_t pa) {
@@ -743,9 +755,23 @@ static uint8_t map_kernel_devices(uint64_t *l0) {
          map_device_block(l0, DEVICE_BLOCK_RPI5_RP1_MSIX);
 }
 
+static uint8_t map_boot_mailbox_page(uint64_t *l0) {
+  return pt_map_page(l0, KERNEL_VA_BASE, 0, ATTR_KERNEL_RW);
+}
+
+static uint8_t map_boot_low_range(uint64_t *l0) {
+  return pt_map_range(l0, KERNEL_VA_BASE + BOOT_LOW_PHYS_START,
+                      BOOT_LOW_PHYS_START, BOOT_LOW_MAP_SIZE,
+                      ATTR_KERNEL_RW);
+}
+
 uint64_t *initialize_kernel_page_table(void) {
   uint64_t *l0 = alloc_page();
   if (l0 == NULL) {
+    return NULL;
+  }
+
+  if (!map_boot_low_range(l0)) {
     return NULL;
   }
 
@@ -771,6 +797,10 @@ uint64_t *initialize_kernel_page_table(void) {
   }
 
   if (!map_kernel_devices(l0)) {
+    return NULL;
+  }
+
+  if (!map_boot_mailbox_page(l0)) {
     return NULL;
   }
 
