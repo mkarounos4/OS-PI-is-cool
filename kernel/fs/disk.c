@@ -82,6 +82,164 @@ static err_t seed_user_bin_file(const user_bin_t *bin) {
     return mark_user_bin_executable(bin->path);
 }
 
+static err_t ensure_seed_dir(const char *path) {
+    struct fs_dirent dir;
+    err_t err = get_dirent_by_path(path, &dir, NULL, NULL);
+    if (err == SUCCESS) {
+        attributes_t metadata;
+        err = get_inode_metadata(dir.ino_id, &metadata);
+        if (err != SUCCESS) {
+            return err;
+        }
+        return metadata.type == DIRECTORY_TYPE ? SUCCESS : INVALID_ARGS;
+    }
+    if (err == FILE_NOT_CREATED || err == FILE_NOT_FOUND) {
+        return k_make_directory((char *)path);
+    }
+    return err;
+}
+
+static err_t seed_text_file(const char *path, const char *contents) {
+    if (k_check_if_exists(path)) {
+        return SUCCESS;
+    }
+
+    int fd = k_open(path, O_CREAT | O_WRONLY);
+    if (fd < 0) {
+        return fd;
+    }
+
+    struct oft_entry *entry;
+    err_t err = get_oft_entry_by_fd(fd, &entry);
+    if (err != SUCCESS) {
+        return err;
+    }
+
+    size_t len = 0;
+    while (contents[len] != '\0') {
+        len++;
+    }
+
+    size_t written = 0;
+    while (written < len) {
+        int chunk = k_write(entry, contents + written, len - written);
+        if (chunk < 0) {
+            k_close(entry);
+            return chunk;
+        }
+        if (chunk == 0) {
+            k_close(entry);
+            return FILE_WRITE_ERROR;
+        }
+        written += (size_t)chunk;
+    }
+
+    return k_close(entry);
+}
+
+static err_t seed_include_headers(void) {
+    static const char stddef_h[] =
+        "#pragma once\n"
+        "typedef __SIZE_TYPE__ size_t;\n"
+        "#define NULL ((void *)0)\n";
+    static const char stdint_h[] =
+        "#pragma once\n"
+        "typedef signed char int8_t;\n"
+        "typedef short int16_t;\n"
+        "typedef int int32_t;\n"
+        "typedef long int64_t;\n"
+        "typedef unsigned char uint8_t;\n"
+        "typedef unsigned short uint16_t;\n"
+        "typedef unsigned int uint32_t;\n"
+        "typedef unsigned long uint64_t;\n"
+        "typedef unsigned long uintptr_t;\n"
+        "typedef long intptr_t;\n";
+    static const char stdio_h[] =
+        "#pragma once\n"
+        "int printf(const char *fmt, ...);\n"
+        "int puts(const char *s);\n";
+    static const char string_h[] =
+        "#pragma once\n"
+        "#include <stddef.h>\n"
+        "size_t strlen(const char *str);\n"
+        "int strcmp(const char *lhs, const char *rhs);\n"
+        "long strtol(const char *nptr, char **endptr, int base);\n"
+        "void *memcpy(void *dst, const void *src, size_t num);\n";
+    static const char malloc_h[] =
+        "#pragma once\n"
+        "#include <stddef.h>\n"
+        "void *malloc(size_t size);\n"
+        "void *realloc(void *oldptr, size_t size);\n"
+        "void *calloc(size_t nmemb, size_t size);\n"
+        "void free(void *ptr);\n";
+    static const char fs_h[] =
+        "#pragma once\n"
+        "#include <stdint.h>\n"
+        "#define O_TRUNC 4\n#define O_CREAT 8\n#define O_APPEND 16\n"
+        "#define O_RDONLY 1\n#define O_WRONLY 2\n#define O_RDWR 3\n"
+        "#define F_SEEK_SET 0\n#define F_SEEK_CUR 1\n#define F_SEEK_END 2\n"
+        "#define STDIN 0\n#define STDOUT 1\n#define STDERR 2\n"
+        "#define STDIN_FILENO 0\n#define STDOUT_FILENO 1\n#define STDERR_FILENO 2\n"
+        "int open(const char *fname, int mode);\n"
+        "int close(int fd);\n"
+        "int lseek(int fd, int offset, int whence);\n"
+        "int read(int fd, char *buf, int n);\n"
+        "int write(int fd, const char *buf, int n);\n"
+        "int fs_chmod(char *file_name, char *new_perms, int flag);\n"
+        "char *getcwd(char *path, uint64_t size);\n";
+    static const char syscall_h[] =
+        "#pragma once\n"
+        "#include <stdint.h>\n"
+        "typedef int32_t pid_t;\n"
+        "#define WNOHANG 1\n#define WUNTRACED 2\n#define WCONTINUED 4\n"
+        "#define SIGKILL 9\n#define SIGSTOP 10\n#define SIGCONT 11\n"
+        "#define SIGCHLD 12\n#define SIGTERM 15\n"
+        "long exit(int code);\n"
+        "long getpid(void);\n"
+        "long waitpid(pid_t pid, int *status, uint32_t flags);\n"
+        "long kill(pid_t pid, int signal);\n"
+        "long sleep(uint64_t ms);\n"
+        "void putstr(const char *s);\n"
+        "void puthex(uint64_t value);\n";
+    static const char errno_h[] =
+        "#pragma once\n"
+        "#define EINVAL 22\n#define EIO 5\n#define ENOSYS 38\n";
+    static const char tty_h[] =
+        "#pragma once\n";
+    static const char signals_h[] =
+        "#pragma once\n"
+        "#include <stdint.h>\n"
+        "typedef uint64_t sigset_t;\n";
+
+    err_t err = ensure_seed_dir("/include");
+    if (err != SUCCESS) return err;
+
+    struct seed_header {
+        const char *path;
+        const char *contents;
+    };
+    static const struct seed_header headers[] = {
+        { "/include/stddef.h", stddef_h },
+        { "/include/stdint.h", stdint_h },
+        { "/include/stdio.h", stdio_h },
+        { "/include/string.h", string_h },
+        { "/include/malloc.h", malloc_h },
+        { "/include/fs_syscall.h", fs_h },
+        { "/include/syscall.h", syscall_h },
+        { "/include/errno.h", errno_h },
+        { "/include/tty_syscall.h", tty_h },
+        { "/include/signals.h", signals_h },
+    };
+
+    for (size_t i = 0; i < sizeof(headers) / sizeof(headers[0]); i++) {
+        err = seed_text_file(headers[i].path, headers[i].contents);
+        if (err != SUCCESS) {
+            return err;
+        }
+    }
+    return SUCCESS;
+}
+
 static err_t seed_user_bins(void) {
     struct fs_dirent dir;
     err_t err = get_dirent_by_path("/bin", &dir, NULL, NULL);
@@ -115,7 +273,7 @@ static err_t seed_user_bins(void) {
         }
     }
 
-    return SUCCESS;
+    return seed_include_headers();
 }
 
 static err_t seed_user_bins_for_mkfs(void) {

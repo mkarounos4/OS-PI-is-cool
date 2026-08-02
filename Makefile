@@ -29,6 +29,12 @@ USER_BINS_ASM = $(USER_BUILD_DIR)/user_bins.S
 USER_BINS_C = $(USER_BUILD_DIR)/user_bins.c
 USER_BINS_ASM_OBJ = $(USER_BUILD_DIR)/user_bins.S.o
 USER_BINS_C_OBJ = $(USER_BUILD_DIR)/user_bins.o
+USER_CC_RUNTIME_ELF = $(USER_BUILD_DIR)/cc_runtime.elf
+USER_CC_RUNTIME_MAP = $(USER_BUILD_DIR)/cc_runtime.map
+USER_CC_RUNTIME_HEADER = $(USER_BUILD_DIR)/cc_runtime_symbols.h
+USER_CC_RUNTIME_ASM = $(USER_BUILD_DIR)/cc_runtime_blob.S
+USER_CC_RUNTIME_OBJ = $(USER_BUILD_DIR)/cc_runtime_blob.S.o
+USER_CC_RUNTIME_LINKER = $(USER_DIR)/cc_runtime_linker.ld
 
 HEADERS  := $(shell find $(KERNEL_DIR) -type f -name '*.h') $(USER_DIR)/user_bins.h $(USER_IMAGE_HEADER)
 INCLUDES := $(shell find $(KERNEL_DIR) -type d | sed 's/^/-I/')
@@ -43,7 +49,7 @@ USER_CFLAGS = -Wall -Wextra -O2 \
               -ffreestanding -nostdlib -mgeneral-regs-only \
               -fno-pic -fno-pie -fno-stack-protector \
               -fno-asynchronous-unwind-tables -fno-unwind-tables \
-              -I$(USER_DIR)
+              -I$(USER_BUILD_DIR) -I$(USER_DIR)
 
 LDFLAGS = -nostdlib -nostartfiles -nodefaultlibs -static -no-pie \
           -Wl,--build-id=none -Wl,-Map=kernel.map
@@ -106,6 +112,29 @@ $(USER_BUILD_DIR)/%.o: $(USER_DIR)/%.c $(USER_DIR)/*.h
 $(USER_BOOT_OBJ): $(USER_BOOT_SRC)
 	@mkdir -p $(dir $@)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(USER_CC_RUNTIME_ELF): $(USER_BUILD_DIR)/cc_runtime.o $(USER_LIB_OBJS) $(USER_CC_RUNTIME_LINKER)
+	@mkdir -p $(dir $@)
+	$(CC) -T $(USER_CC_RUNTIME_LINKER) $(USER_LDFLAGS) -Wl,-Map=$(USER_CC_RUNTIME_MAP) $(USER_BUILD_DIR)/cc_runtime.o $(USER_LIB_OBJS) -o $@
+
+$(USER_CC_RUNTIME_HEADER): $(USER_CC_RUNTIME_ELF)
+	@mkdir -p $(dir $@)
+	@printf '#pragma once\n#include <stdint.h>\n\n' > $@
+	@printf '#define CC_RUNTIME_BASE UINT64_C(0x30000)\n' >> $@
+	@$(NM) -g $< | awk '/ (printf|puts|strlen|strcmp|strtol|str_concat|str_copy|isspace|malloc|realloc|calloc|free|memcpy|mem_init|mem_sbrk|mem_heap_lo|mem_heap_hi|syscall0|syscall1|syscall2|syscall3|syscall4|syscall5|syscall6|write_console|putc|get_ticks|yield|current_el|delay|sleep|exit|getpid|spawn|waitpid|sbrk|kill|block_until_event|tty_next_request|putstr|puthex|touch|mv|rm|cat|cp|ls|fs_mkdir|cd|open|close|lseek|read|write|fs_chmod|sigprocmask|sigemptyset|sigaddset|sigfillset|sigsuspend|sigaction|fork|dup2|setpgid|getpgrp|tcsetpgrp|mount|unmount|pipe|ps|exec|getcwd|stat|tty_get_mode|tty_set_mode|tty_get_size|tty_screen_enter|tty_screen_leave|tty_screen_present|proc_change_priority|createlink|readlink)$$/ { printf("#define CC_RUNTIME_%s UINT64_C(0x%s)\n", toupper($$3), $$1); }' >> $@
+
+$(USER_CC_RUNTIME_ASM): $(USER_CC_RUNTIME_ELF)
+	@mkdir -p $(dir $@)
+	@printf '.section .rodata.cc_runtime_elf, "a"\n.balign 8\n.global __cc_runtime_elf_start\n.global __cc_runtime_elf_end\n__cc_runtime_elf_start:\n.incbin "%s"\n__cc_runtime_elf_end:\n.balign 8\n' "$(abspath $<)" > $@
+
+$(USER_CC_RUNTIME_OBJ): $(USER_CC_RUNTIME_ASM)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(USER_BUILD_DIR)/cmds/cc.o: $(USER_CC_RUNTIME_HEADER)
+
+$(USER_BUILD_DIR)/bin/cc.elf: $(USER_BUILD_DIR)/cmds/cc.o $(USER_LIB_OBJS) $(USER_BOOT_OBJ) $(USER_LINKER) $(USER_CC_RUNTIME_OBJ)
+	@mkdir -p $(dir $@)
+	$(CC) -T $(USER_LINKER) $(USER_LDFLAGS) -Wl,-Map=$(USER_BUILD_DIR)/bin/cc.map $(USER_BOOT_OBJ) $(USER_BUILD_DIR)/cmds/cc.o $(USER_CC_RUNTIME_OBJ) $(USER_LIB_OBJS) -o $@
 
 $(USER_BUILD_DIR)/bin/shell.elf: $(USER_BUILD_DIR)/cmds/shell.o $(USER_SHELL_OBJS) $(USER_LIB_OBJS) $(USER_BOOT_OBJ) $(USER_LINKER)
 	@mkdir -p $(dir $@)
