@@ -80,6 +80,8 @@ enum syscall_type {
     S_PROC_CHANGE_PRIORITY = 54,
     S_CREATE_LINK = 55,
     S_READLINK = 56,
+    S_MMAP = 57,
+    S_MUNMAP = 58,
 };
 
 long write_console(const char *s, uint64_t len);

@@ -1,6 +1,7 @@
 #include "page_table.h"
 
 #include "kmalloc.h"
+#include "scheduler.h"
 #include "traps.h"
 #include <stddef.h>
 #include <stdint.h>
@@ -12,6 +13,7 @@
 #include "sync/spinlock.h"
 
 #include "user_image.h"
+#include "mmap.h"
 
 #define PAGE_MASK (PAGE_SIZE - 1ULL)
 #define L1_BLOCK_SIZE UINT64_C(0x40000000)
@@ -20,10 +22,6 @@
 
 #define DESC_BLOCK (0ULL << 1)
 #define DESC_TABLE (1ULL << 1)
-
-#define ELF_PF_X 0x1
-#define ELF_PF_W 0x2
-#define ELF_PF_R 0x4
 
 #define PTE_ATTRINDX(n) (((uint64_t)(n) & 0x7ULL) << 2)
 #define PTE_SH_INNER (3ULL << 8)
@@ -43,6 +41,8 @@
   (ATTR_NORMAL | PTE_AP_EL0_RO | PTE_SH_INNER | PTE_AF | PTE_PXN | PTE_UXN)
 #define ATTR_USER_RW                                                           \
   (ATTR_NORMAL | PTE_AP_EL0_RW | PTE_SH_INNER | PTE_AF | PTE_PXN | PTE_UXN)
+#define ATTR_USER_RWX \
+    (ATTR_NORMAL | PTE_AP_EL0_RW | PTE_SH_INNER | PTE_AF)
 #define ATTR_DEVICE                                                            \
   (PTE_ATTRINDX(0) | PTE_AP_EL1_RW | PTE_AF | PTE_PXN | PTE_UXN)
 
@@ -66,18 +66,34 @@ extern uint8_t __kernel_end[];
 extern uint8_t __kernel_page_pool_start[];
 extern uint8_t __RAM_end[];
 
+static uint64_t align_up(uint64_t value) {
+  return (value + PAGE_MASK) & ~PAGE_MASK;
+}
+
+static uint64_t align_down(uint64_t value) { return value & ~PAGE_MASK; }
+
+static void zero_page(void *page) {
+  uint64_t *words = (uint64_t *)page;
+  for (uint64_t i = 0; i < PAGE_SIZE / sizeof(uint64_t); i++) {
+    words[i] = 0;
+  }
+}
+
 struct Page *pages;
+static uint64_t curr_mmap_va;
 static spinlock_t page_allocator_lock = SPINLOCK_INIT;
 static spinlock_t page_table_metadata_lock = SPINLOCK_INIT;
 
 typedef struct mem_segment_st {
-  ino_id_t ino_id;
-  uint64_t file_offset;
-  uint64_t file_size;
-  uint64_t va;
-  uint64_t pa;
-  uint64_t mem_size;
-  uint32_t flags;
+    uint64_t start;
+    uint64_t length;
+
+    ino_id_t ino_id;
+    uint64_t file_offset;
+    uint64_t file_size;
+
+    uint32_t prot;
+    uint32_t map_flags;
 } mem_segment_t;
 
 typedef struct page_table_st {
@@ -106,6 +122,11 @@ static uint64_t vmstat_page_allocs;
 static uint64_t vmstat_page_frees;
 
 static void mem_segment_destroy(ptr_t value) {
+  mem_segment_t *seg = (mem_segment_t*)value;
+  for (uint64_t start_addr = align_up(seg->start); start_addr < align_down(seg->start + seg->length); start_addr++) {
+      // dec_pte_refcount_va((void*)start_addr);
+      // TODO: actually delete page from page table
+  }
   kfree(value);
 }
 
@@ -139,6 +160,8 @@ static page_table_t *get_page_table_struct_locked(uint64_t *table) {
 
   return (page_table_t *)value;
 }
+
+
 
 int add_page_table_struct(uint64_t *table) {
   if (table == NULL) {
@@ -266,23 +289,19 @@ int copy_page_table_struct(uint64_t *src_table, uint64_t *dst_table) {
 }
 
 static uint64_t user_segment_attrs(uint32_t flags) {
-  if ((flags & ELF_PF_W) != 0) {
-    return ATTR_USER_RW;
-  }
+    if ((flags & MMAP_PROT_EXEC) && (flags & MMAP_PROT_WRITE)) {
+        return ATTR_USER_RWX;
+    }
 
-  if ((flags & ELF_PF_X) != 0) {
-    return ATTR_USER_RX;
-  }
+    if ((flags & MMAP_PROT_EXEC)) {
+        return ATTR_USER_RX;
+    }
+
+    if ((flags & MMAP_PROT_WRITE) != 0) {
+      return ATTR_USER_RW;
+    }
 
   return ATTR_USER_RO;
-}
-
-static int segment_allows_fault(mem_segment_t *segment, int instruction_fault) {
-  if (instruction_fault) {
-    return (segment->flags & ELF_PF_X) != 0;
-  }
-
-  return (segment->flags & (ELF_PF_R | ELF_PF_W)) != 0;
 }
 
 static void copy_bytes(void *dst, const void *src, size_t size) {
@@ -303,19 +322,25 @@ static uint64_t max_u64(uint64_t a, uint64_t b) {
 
 static int read_segment_page(mem_segment_t *segment, uint64_t page_va,
                              void *page) {
-  uint64_t copy_start = max_u64(page_va, segment->va);
+  uint64_t copy_start = max_u64(page_va, segment->start);
   uint64_t copy_end = min_u64(page_va + PAGE_SIZE,
-                              segment->va + segment->mem_size);
+                              segment->start + segment->length);
   if (copy_end <= copy_start) {
     return INVALID_ARGS;
   }
 
-  uint64_t file_copy_end = min_u64(copy_end, segment->va + segment->file_size);
+  uint64_t file_copy_end = min_u64(copy_end, segment->start + segment->file_size);
   if (file_copy_end <= copy_start) {
     return SUCCESS;
   }
 
-  uint64_t segment_file_offset = segment->file_offset + copy_start - segment->va;
+  // anonymous mmap case
+  if (segment->ino_id == INVALID_INO) {
+      zero_page(page);
+      return SUCCESS;
+  }
+
+  uint64_t segment_file_offset = segment->file_offset + copy_start - segment->start;
   int inode_file_size = get_file_size_by_id(segment->ino_id);
   if (inode_file_size < 0) {
     return inode_file_size;
@@ -365,10 +390,10 @@ static int read_segment_page(mem_segment_t *segment, uint64_t page_va,
 }
 
 int load_segment_page_for_fault(uint64_t *table, uint64_t fault_va,
-                                int instruction_fault) {
+                                int access_type) {
   uint64_t flags = spin_lock_irqsave(&page_table_metadata_lock);
   vmstat_page_faults++;
-  if (instruction_fault) {
+  if (access_type == MMAP_PROT_EXEC) {
     vmstat_instruction_faults++;
   } else {
     vmstat_data_faults++;
@@ -386,12 +411,13 @@ int load_segment_page_for_fault(uint64_t *table, uint64_t fault_va,
   int found_segment = 0;
   for (size_t i = 0; i < vec_len(&page_table->segments); i++) {
     mem_segment_t *segment = vec_get(&page_table->segments, i);
-    if (fault_va < segment->va ||
-        fault_va >= segment->va + segment->mem_size) {
+    if (fault_va < segment->start ||
+        fault_va >= segment->start + segment->length) {
       continue;
     }
 
-    if (!segment_allows_fault(segment, instruction_fault)) {
+    printf("prt: %u, acc: %u\n", segment->prot, access_type);
+    if (!(segment->prot & access_type)){
       vmstat_faults_permission++;
       spin_unlock_irqrestore(&page_table_metadata_lock, flags);
       return PAGE_FAULT_PERMISSION;
@@ -425,7 +451,7 @@ int load_segment_page_for_fault(uint64_t *table, uint64_t fault_va,
 
     flags = spin_lock_irqsave(&page_table_metadata_lock);
     uint64_t pa = kernel_phys_addr((uint64_t)(uintptr_t)page);
-    if (!pt_map_page(table, page_va, pa, user_segment_attrs(fault_segment.flags))) {
+    if (!pt_map_page(table, page_va, pa, user_segment_attrs(fault_segment.prot))) {
       spin_unlock_irqrestore(&page_table_metadata_lock, flags);
       free_page(page);
       flags = spin_lock_irqsave(&page_table_metadata_lock);
@@ -499,19 +525,6 @@ struct Page *get_page_struct(uint64_t *va) {
   return &pages[pa >> 12];
 }
 
-static uint64_t align_down(uint64_t value) { return value & ~PAGE_MASK; }
-
-static uint64_t align_up(uint64_t value) {
-  return (value + PAGE_MASK) & ~PAGE_MASK;
-}
-
-static void zero_page(void *page) {
-  uint64_t *words = (uint64_t *)page;
-  for (uint64_t i = 0; i < PAGE_SIZE / sizeof(uint64_t); i++) {
-    words[i] = 0;
-  }
-}
-
 static inline int64_t phys_pa_to_pfn(uint64_t phys_pa) {
     uint64_t pa = kernel_phys_addr(phys_pa);
     uint64_t pfn = pa >> 12;
@@ -545,6 +558,7 @@ static void page_allocator_init(void) {
     return;
   }
 
+  curr_mmap_va = align_up(PROC_KERNEL_STACK_TOP + 1);
   next_free_page = align_up((uint64_t)(uintptr_t)__kernel_page_pool_start);
 }
 
@@ -1018,10 +1032,10 @@ void tlb_invalidate_all_user(void) {
         : "memory");
 }
 
-int load_memory_segment(uint64_t *table, ino_id_t ino_id,
+int add_vm_region(uint64_t *table, ino_id_t ino_id,
                         uint64_t file_offset, uint64_t file_size,
-                        uint64_t va, uint64_t pa, uint64_t mem_size,
-                        uint32_t flags) {
+                        uint64_t start, uint64_t length,
+                        uint32_t prot, uint32_t map_flags) {
   uint64_t lock_flags = spin_lock_irqsave(&page_table_metadata_lock);
   page_table_t *page_table = get_page_table_struct_locked(table);
   if (page_table == NULL) {
@@ -1052,12 +1066,26 @@ int load_memory_segment(uint64_t *table, ino_id_t ino_id,
   segment->ino_id = ino_id;
   segment->file_offset = file_offset;
   segment->file_size = file_size;
-  segment->va = va;
-  segment->pa = pa;
-  segment->mem_size = mem_size;
-  segment->flags = flags;
+  segment->start = start;
+  segment->length = length;
+  segment->prot = prot;
+  segment->map_flags = map_flags;
 
-  vec_push_back(&page_table->segments, segment);
+  int added = 0;
+  for (size_t i = 0; i < vec_len(&page_table->segments); i++) {
+      mem_segment_t *seg = (mem_segment_t*)vec_get(&page_table->segments, i);
+      if (seg->start > segment->start) {
+          vec_insert(&page_table->segments, i, segment);
+          added = 1;
+          break;
+      } else if (seg->start + seg->length >= segment->start) {
+          kfree(segment);
+          return INVALID_ARGS;
+      }
+  }
+  if (!added) {
+      vec_push_back(&page_table->segments, segment);
+  }
 
   spin_unlock_irqrestore(&page_table_metadata_lock, lock_flags);
   return SUCCESS;
@@ -1071,7 +1099,7 @@ int page_table_format_segments(uint64_t *table, char *buf, size_t size) {
   uint64_t flags = spin_lock_irqsave(&page_table_metadata_lock);
   page_table_t *page_table = get_page_table_struct_locked(table);
   int len = snprintf(buf, size,
-                     "va_start va_end pa file_off file_size mem_size ino flags\n");
+                     "va_start va_end file_off file_size mem_size ino prot flags\n");
   if (len < 0) {
     spin_unlock_irqrestore(&page_table_metadata_lock, flags);
     return FILE_READ_ERROR;
@@ -1097,15 +1125,15 @@ int page_table_format_segments(uint64_t *table, char *buf, size_t size) {
 
     size_t used = len < (int)size ? (size_t)len : size - 1;
     int ret = snprintf(buf + used, size - used,
-                       "0x%x 0x%x 0x%x 0x%x 0x%x 0x%x %u 0x%x\n",
-                       segment->va,
-                       segment->va + segment->mem_size,
-                       segment->pa,
+                       "0x%x 0x%x 0x%x 0x%x 0x%x %u 0x%x 0x%x\n",
+                       segment->start,
+                       segment->start + segment->length,
                        segment->file_offset,
                        segment->file_size,
-                       segment->mem_size,
+                       segment->length,
                        segment->ino_id,
-                       segment->flags);
+                       segment->prot,
+                       segment->map_flags);
     if (ret < 0) {
       spin_unlock_irqrestore(&page_table_metadata_lock, flags);
       return FILE_READ_ERROR;
@@ -1253,3 +1281,107 @@ int page_table_format_vmstat(char *buf, size_t size) {
                   (unsigned int)vmstat_page_allocs,
                   (unsigned int)vmstat_page_frees);
 }
+
+void *mmap(void *addr, size_t length, int prot, int flags, int fd, uint32_t offset) {
+    if (addr != NULL && !(flags & MAP_FIXED)) {
+        return NULL;
+    }
+
+    if (length == 0) {
+        return NULL;
+    }
+    length = align_up(length);
+
+    if (offset & (PAGE_SIZE-1)) {
+        return NULL;
+    }
+
+    if (prot > (MMAP_PROT_READ | MMAP_PROT_WRITE | MMAP_PROT_EXEC) || prot < 0) {
+        return NULL;
+    }
+
+    if (flags & MAP_PRIVATE && flags & MAP_SHARED) {
+        return NULL;
+    } else if ((flags & (MAP_PRIVATE | MAP_SHARED)) == 0) {
+        return NULL;
+    }
+
+    ino_id_t ino_id;
+    size_t file_size;
+    if (!(flags & MAP_ANONYMOUS)) {
+        struct oft_entry *entry;
+        if (get_oft_entry_by_fd(fd, &entry)) {
+            return NULL;
+        }
+        ino_id = entry->ino_id;
+        file_size = entry->inode->inode.metadata.i_size;
+
+        if (offset > file_size) {
+            remove_ref_from_cache(ino_id);
+            return NULL;
+        }
+
+        file_size = MIN(length, file_size - offset);
+    } else {
+        if (fd != -1 || offset != 0) {
+            return NULL;
+        }
+        
+        ino_id = INVALID_INO;
+        file_size = 0;
+    }
+
+    if (addr == NULL) {
+        addr = (void*)curr_mmap_va;
+        curr_mmap_va = align_up(curr_mmap_va+length);
+    }
+
+    pcb_t *curr_pcb = get_curr_process();
+    err_t err = add_vm_region((uint64_t*) curr_pcb->ttbr0_el1_va, ino_id, offset, file_size, (uint64_t) addr, length, prot, flags);
+    if (err) {
+        return NULL;
+    }
+    return addr;
+}
+
+int munmap(void *addr, size_t length) {
+    pcb_t *curr_pcb = get_curr_process();
+    uint64_t flags = spin_lock_irqsave(&page_table_metadata_lock);
+    page_table_t *page = get_page_table_struct_locked((uint64_t*)curr_pcb->ttbr0_el1_va);
+    if (page == NULL) {
+        spin_unlock_irqrestore(&page_table_metadata_lock, flags);
+        return -1;
+    }
+
+    for (size_t i = 0; i < vec_len(&page->segments); i++) {
+        mem_segment_t *seg = vec_get(&page->segments, i);
+        // case 1: covers whole segment
+        uint64_t rem_start = (uint64_t)addr;
+        uint64_t rem_end = rem_start + length;
+        uint64_t seg_end = seg->start + seg->length;
+        if (rem_start <= seg->start && rem_end >= seg_end) {
+            // TODO: flush if shared (UPDATE MEM DLTOR FUNC)
+            vec_erase(&page->segments, i);
+            i--;
+        } else if (rem_start <= seg->start && rem_end > seg->start) {
+            // case 2: covers start
+            seg->length -= rem_start - seg->start;
+            seg->file_offset += rem_start - seg->start;
+            seg->start = rem_start;
+        } else if (rem_end >= seg_end && rem_start < seg_end) {
+            // case 3: covers end
+            seg->length -= seg_end - rem_start;
+        } else if (rem_start > seg->start && rem_end < seg_end) {
+            // case 4: split
+            add_vm_region(page->table, seg->ino_id, seg->file_offset + (rem_end - seg->start), seg->file_size - length, rem_end, seg->length - length, seg->prot, seg->map_flags);
+            seg->length -= seg_end - rem_start;
+        }
+    }
+
+    spin_unlock_irqrestore(&page_table_metadata_lock, flags);
+    return 0;
+}
+
+int msync(void *addr, size_t length, int flags);
+int mprotect(void *addr, size_t length, int prot);
+int madvise(void *addr, size_t length, int advice);

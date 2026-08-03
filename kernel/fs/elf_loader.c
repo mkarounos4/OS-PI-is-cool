@@ -10,6 +10,7 @@
 #include "signals/signals.h"
 #include "string.h"
 #include "threading/thread.h"
+#include "memory/mmap.h"
 
 #define ELF_NIDENT 16
 #define ELF_CLASS_64 2
@@ -41,7 +42,6 @@ typedef struct elf64_ehdr_st {
 
 typedef struct elf64_phdr_st {
     uint32_t p_type;
-    uint32_t p_flags;
     uint64_t p_offset;
     uint64_t p_vaddr;
     uint64_t p_paddr;
@@ -76,10 +76,8 @@ static void install_ttbr0(uint64_t ttbr0_el1) {
 
 static int elf_load_user_segment(uint64_t *table, ino_id_t ino_id,
                                  uint64_t file_offset, uint64_t file_size,
-                                 uint64_t va, uint64_t pa, uint64_t mem_size,
-                                 uint32_t flags) {
-    return load_memory_segment(table, ino_id, file_offset, file_size, va, pa,
-                               mem_size, flags);
+                                 uint64_t va, uint64_t mem_size) {
+    return add_vm_region(table, ino_id, file_offset, file_size, va, mem_size, MMAP_PROT_READ | MMAP_PROT_WRITE | MMAP_PROT_EXEC, MAP_PRIVATE | MAP_FIXED);
 }
 
 static void free_exec_args(char **args, int argc) {
@@ -418,8 +416,7 @@ int elf_exec_process(pcb_t *pcb, const char *path, char *const argv[],
 
         err = elf_load_user_segment(new_table, entry->ino_id, phdr.p_offset,
                                     phdr.p_filesz, phdr.p_vaddr,
-                                    phdr.p_paddr, phdr.p_memsz,
-                                    phdr.p_flags);
+                                    phdr.p_memsz);
         if (err != SUCCESS) {
             free_exec_args(args, argc);
             destroy_page_table(new_table);
