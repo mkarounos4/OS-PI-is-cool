@@ -40,6 +40,8 @@
   (ATTR_NORMAL | PTE_AP_EL0_RO | PTE_SH_INNER | PTE_AF | PTE_PXN | PTE_UXN)
 #define ATTR_USER_RW                                                           \
   (ATTR_NORMAL | PTE_AP_EL0_RW | PTE_SH_INNER | PTE_AF | PTE_PXN | PTE_UXN)
+#define ATTR_USER_RWX \
+    (ATTR_NORMAL | PTE_AP_EL0_RW | PTE_SH_INNER | PTE_AF)
 #define ATTR_DEVICE                                                            \
   (PTE_ATTRINDX(0) | PTE_AP_EL1_RW | PTE_AF | PTE_PXN | PTE_UXN)
 
@@ -117,7 +119,7 @@ static uint64_t vmstat_page_frees;
 static void mem_segment_destroy(ptr_t value) {
   mem_segment_t *seg = (mem_segment_t*)value;
   for (uint64_t start_addr = align_up(seg->start); start_addr < align_down(seg->start + seg->length); start_addr++) {
-      dec_pte_refcount_va((void*)start_addr);
+      // dec_pte_refcount_va((void*)start_addr);
       // TODO: actually delete page from page table
   }
   kfree(value);
@@ -260,13 +262,17 @@ int copy_page_table_struct(uint64_t *src_table, uint64_t *dst_table) {
 }
 
 static uint64_t user_segment_attrs(uint32_t flags) {
-  if ((flags & MMAP_PROT_WRITE) != 0) {
-    return ATTR_USER_RW;
-  }
+    if ((flags & MMAP_PROT_EXEC) && (flags & MMAP_PROT_WRITE)) {
+        return ATTR_USER_RWX;
+    }
 
-  if ((flags & MMAP_PROT_EXEC) != 0) {
-    return ATTR_USER_RX;
-  }
+    if ((flags & MMAP_PROT_EXEC)) {
+        return ATTR_USER_RX;
+    }
+
+    if ((flags & MMAP_PROT_WRITE) != 0) {
+      return ATTR_USER_RW;
+    }
 
   return ATTR_USER_RO;
 }
@@ -379,6 +385,7 @@ int load_segment_page_for_fault(uint64_t *table, uint64_t fault_va,
       continue;
     }
 
+    printf("prt: %u, acc: %u\n", segment->prot, access_type);
     if (!(segment->prot & access_type)){
       vmstat_faults_permission++;
       return PAGE_FAULT_PERMISSION;

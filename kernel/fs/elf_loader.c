@@ -77,7 +77,7 @@ static void install_ttbr0(uint64_t ttbr0_el1) {
 static int elf_load_user_segment(uint64_t *table, ino_id_t ino_id,
                                  uint64_t file_offset, uint64_t file_size,
                                  uint64_t va, uint64_t mem_size) {
-    return add_vm_region(table, ino_id, file_offset, file_size, va, mem_size, MMAP_PROT_EXEC, MAP_PRIVATE | MAP_FIXED);
+    return add_vm_region(table, ino_id, file_offset, file_size, va, mem_size, MMAP_PROT_READ | MMAP_PROT_WRITE | MMAP_PROT_EXEC, MAP_PRIVATE | MAP_FIXED);
 }
 
 static void free_exec_args(char **args, int argc) {
