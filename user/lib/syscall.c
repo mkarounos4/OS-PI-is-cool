@@ -70,3 +70,11 @@ void puthex(uint64_t value) {
         putc(hex[(value >> shift) & 0xf]);
     }
 }
+
+void *mmap(void *addr, size_t length, int prot, int flags, int fd, uint32_t offset) {
+    return (void*)sys_call6(S_MMAP, (long)addr, (long)(uintptr_t)length, (long)(uintptr_t)prot, (long)(uintptr_t)flags, (long)(uintptr_t)fd, (long)(uintptr_t)offset);
+}
+
+int munmap(void *addr, size_t length) {
+    return (int)(uintptr_t)sys_call2(S_MUNMAP, (long)addr, (long)(uintptr_t)length);
+}

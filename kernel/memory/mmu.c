@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "memory/page_table/page_table.h"
+#include "mmap.h"
 #include "scheduler/scheduler.h"
 #include "traps/traps.h"
 
@@ -185,7 +186,7 @@ void handle_instruction_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t
         if (curr_proc != NULL) {
             int fault_status =
                 load_segment_page_for_fault((uint64_t *)(uintptr_t)curr_proc->ttbr0_el1_va,
-                                            far, 1);
+                                            far, MMAP_PROT_EXEC);
             if (fault_status == PAGE_FAULT_HANDLED) {
                 invalidate_all_stage1_tlbs();
                 return;
@@ -296,7 +297,7 @@ void handle_data_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t esr) {
             } else {
                 int fault_status =
                     load_segment_page_for_fault((uint64_t *)(uintptr_t)curr_proc->ttbr0_el1_va,
-                                                far, 0);
+                                                far, is_write ? MMAP_PROT_WRITE : MMAP_PROT_READ);
                 if (fault_status == PAGE_FAULT_HANDLED) {
                     mapped = 1;
                 } else if (fault_status == PAGE_FAULT_PERMISSION) {

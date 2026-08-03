@@ -2,6 +2,7 @@
 
 #include <stddef.h>
 
+#include "mmap.h"
 #include "process.h"
 #include "threading/thread.h"
 #include "timer/timer.h"
@@ -80,6 +81,8 @@ static const char *syscall_name(uint64_t syscall_number) {
         [S_PROC_CHANGE_PRIORITY] = "proc_change_priority",
         [S_CREATE_LINK] = "createlink",
         [S_READLINK] = "readlink",
+        [S_MMAP] = "mmap",
+        [S_MUNMAP] = "munmap",
     };
 
     if (syscall_number >= SYSCALL_COUNT ||
@@ -414,6 +417,10 @@ struct trap_frame *syscall_dispatch(struct trap_frame *frame) {
                                              (char *)(uintptr_t)frame->regs[1],
                                              (size_t)frame->regs[2]));
         break;
+    case S_MMAP:
+        ret = (long)mmap((void*)frame->regs[0], (size_t)frame->regs[1], (int)(uintptr_t)frame->regs[2], (int)(uintptr_t)frame->regs[3], (int)(uintptr_t)frame->regs[4], (uint32_t)(uintptr_t)frame->regs[5]);
+    case S_MUNMAP:
+        ret = munmap((void*)frame->regs[0], (size_t)(uintptr_t)frame->regs[1]);
     default:
         ret = SYS_ENOSYS;
         break;

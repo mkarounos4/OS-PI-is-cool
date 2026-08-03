@@ -65,7 +65,11 @@ int copy_page_table_struct(uint64_t *src_table, uint64_t *dst_table);
 #define PAGE_FAULT_PERMISSION -1
 #define PAGE_FAULT_ERROR -2
 
-int load_memory_segment(uint64_t *table, ino_id_t ino_id,
+int add_vm_region(uint64_t *table, ino_id_t ino_id,
+                        uint64_t file_offset, uint64_t file_size,
+                        uint64_t start, uint64_t length,
+                        uint32_t prot, uint32_t map_flags);
+int old_load_memory_segment(uint64_t *table, ino_id_t ino_id,
                         uint64_t file_offset, uint64_t file_size,
                         uint64_t va, uint64_t pa, uint64_t mem_size,
                         uint32_t flags);
@@ -73,7 +77,7 @@ int page_table_format_segments(uint64_t *table, char *buf, size_t size);
 int page_table_format_meminfo(char *buf, size_t size);
 int page_table_format_vmstat(char *buf, size_t size);
 int load_segment_page_for_fault(uint64_t *table, uint64_t fault_va,
-                                int instruction_fault);
+                                int prot_type);
 void page_table_note_anon_fault(int heap_fault, int stack_fault);
 void page_table_note_invalid_fault(void);
 void page_table_note_cow_fault(void);
