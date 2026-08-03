@@ -1,8 +1,10 @@
 #include "oft.h"
 #include "virtual_fs.h"
+#include "sync/spinlock.h"
 
 static Vec open_file_table;
 static int oft_initialized = 0;
+static spinlock_t oft_table_lock = SPINLOCK_INIT;
 
 static void entry_deletor(void *entry) {
     if (entry != NULL) {
@@ -15,29 +17,35 @@ static void entry_deletor(void *entry) {
 }
 
 err_t initialize_oft() {
+    uint64_t flags = spin_lock_irqsave(&oft_table_lock);
     if (oft_initialized) {
+        spin_unlock_irqrestore(&oft_table_lock, flags);
         empty_oft();
+        flags = spin_lock_irqsave(&oft_table_lock);
     }
 
     open_file_table = vec_new(3, entry_deletor);
     oft_initialized = 1;
+    spin_unlock_irqrestore(&oft_table_lock, flags);
 
     return SUCCESS;
 }
 
 err_t empty_oft(void) {
+    uint64_t flags = spin_lock_irqsave(&oft_table_lock);
     if (!oft_initialized) {
+        spin_unlock_irqrestore(&oft_table_lock, flags);
         return SUCCESS;
     }
 
     vec_destroy(&open_file_table);
     oft_initialized = 0;
+    spin_unlock_irqrestore(&oft_table_lock, flags);
     return SUCCESS;
 }
 
 int oft_open_file(int mode, const char *file_name, ino_id_t ino_id, ino_id_t dir_block) {
-    int oft_id;
-    int err = find_file_in_table(&oft_id);
+    int err;
 
     // if file we're trying to open doesn't have a dirent yet (i.e. id_in_fs is 0, do that)
     struct oft_entry *new_entry = kmalloc(sizeof(struct oft_entry));
@@ -47,6 +55,7 @@ int oft_open_file(int mode, const char *file_name, ino_id_t ino_id, ino_id_t dir
         .ref_count = 1,
         .ino_id = ino_id,
         .inode = NULL,
+        .lock = SPINLOCK_INIT,
     };
     
     // Create new file if applicable
@@ -81,24 +90,34 @@ int oft_open_file(int mode, const char *file_name, ino_id_t ino_id, ino_id_t dir
     }
 
     // adds to open_file_table
+    uint64_t flags = spin_lock_irqsave(&oft_table_lock);
+    int oft_id;
+    find_file_in_table(&oft_id);
     if (oft_id == -1 || (size_t)oft_id == vec_len(&open_file_table)) {
         oft_id = (int)vec_len(&open_file_table);
         vec_push_back(&open_file_table, new_entry);
     } else {
         vec_set(&open_file_table, oft_id, new_entry);
     }
+    spin_unlock_irqrestore(&oft_table_lock, flags);
 
     return oft_id;
 }
 
 int oft_add_reference(int fd) {
-    struct oft_entry *entry;
-    err_t err = get_oft_entry_by_fd(fd, &entry);
-    if (err) {
-        return err;
+    uint64_t flags = spin_lock_irqsave(&oft_table_lock);
+    if (fd < 0 || (size_t)fd >= vec_len(&open_file_table)) {
+        spin_unlock_irqrestore(&oft_table_lock, flags);
+        return OFT_FD_DOES_NOT_EXIST;
     }
 
+    struct oft_entry *entry = (struct oft_entry *)vec_get(&open_file_table, fd);
+    if (entry == NULL) {
+        spin_unlock_irqrestore(&oft_table_lock, flags);
+        return OFT_FD_DOES_NOT_EXIST;
+    }
     entry->ref_count++;
+    spin_unlock_irqrestore(&oft_table_lock, flags);
     return SUCCESS;
 }
 
@@ -107,6 +126,7 @@ int oft_close_file(struct oft_entry *entry) {
         return INVALID_ARGS;
     }
 
+    uint64_t flags = spin_lock_irqsave(&oft_table_lock);
     int oft_id = -1;
     for (size_t i = 0; i < vec_len(&open_file_table); i++) {
         void *elem_void = vec_get(&open_file_table, i);
@@ -124,6 +144,7 @@ int oft_close_file(struct oft_entry *entry) {
     }
 
     if (oft_id == -1) {
+        spin_unlock_irqrestore(&oft_table_lock, flags);
         return FILE_NOT_FOUND;
     }
 
@@ -131,12 +152,18 @@ int oft_close_file(struct oft_entry *entry) {
     if (entry->ref_count == 0) {
         if (vec_len(&open_file_table) == (size_t)oft_id + 1) {
             vec_pop_back(&open_file_table, NULL);
+            spin_unlock_irqrestore(&oft_table_lock, flags);
             entry_deletor((void*)entry);
+            return SUCCESS;
         } else {
-            vec_set(&open_file_table, oft_id, NULL);
+            open_file_table.data[oft_id] = NULL;
+            spin_unlock_irqrestore(&oft_table_lock, flags);
+            entry_deletor((void*)entry);
+            return SUCCESS;
         }
     }
 
+    spin_unlock_irqrestore(&oft_table_lock, flags);
     return SUCCESS;
 }
 
@@ -157,10 +184,14 @@ int find_file_in_table(int *oft_id) {
 }
 
 err_t get_oft_entry_by_fd(int fd, struct oft_entry** entry_res) {
+    uint64_t flags = spin_lock_irqsave(&oft_table_lock);
     if (fd < 0 || (size_t)fd >= vec_len(&open_file_table)) {
+        spin_unlock_irqrestore(&oft_table_lock, flags);
         return OFT_FD_DOES_NOT_EXIST;
     } 
 
     *entry_res = (struct oft_entry*) vec_get(&open_file_table, fd);
-    return *entry_res == NULL ? OFT_FD_DOES_NOT_EXIST : SUCCESS;
+    err_t err = *entry_res == NULL ? OFT_FD_DOES_NOT_EXIST : SUCCESS;
+    spin_unlock_irqrestore(&oft_table_lock, flags);
+    return err;
 }

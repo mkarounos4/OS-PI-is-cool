@@ -1,6 +1,7 @@
 #include "kmalloc.h"
 
 #include "uart/uart.h"
+#include "sync/spinlock.h"
 
 // create pointers to the heads of their segregated explicit free lists of size in double word blocks
 typedef struct {
@@ -40,6 +41,7 @@ static void *HeapMemory = NULL;
 static void *HeapMemoryEnd = NULL;
 static void *heap_ptr = NULL;
 static Seg_Lists *seg_lists_ptr = NULL;
+static spinlock_t kmalloc_lock = SPINLOCK_INIT;
 
 void kmem_init(void *start, void *end) {
     HeapMemory = start;
@@ -339,6 +341,7 @@ void *kmalloc(size_t size)
 {
     if (size == 0) return NULL;
 
+    uint64_t flags = spin_lock_irqsave(&kmalloc_lock);
     void *ptr = get_allocation(size);
 
     if (ptr == NULL) {
@@ -346,13 +349,20 @@ void *kmalloc(size_t size)
         size_t extend_size = (aligned_size > PAGE_SIZE) ? aligned_size : PAGE_SIZE;
 
         ptr = extend_heap(extend_size);
-        if (ptr == NULL) return NULL;
+        if (ptr == NULL) {
+            spin_unlock_irqrestore(&kmalloc_lock, flags);
+            return NULL;
+        }
 
         // allocate newly confimed/obtained free memory
-	ptr = get_allocation(size);
-        if (ptr == NULL) return NULL;
+		ptr = get_allocation(size);
+        if (ptr == NULL) {
+            spin_unlock_irqrestore(&kmalloc_lock, flags);
+            return NULL;
+        }
     }
 
+    spin_unlock_irqrestore(&kmalloc_lock, flags);
     return ptr;
 }
 
@@ -360,12 +370,14 @@ void kfree(void *ptr)
 {
 
     if (!ptr) return; // ptr is NULL -> do nothing
+    uint64_t flags = spin_lock_irqsave(&kmalloc_lock);
     
     void *header_ptr = (char *)ptr - WS;
     size_t size = *(size_t *)header_ptr & ~0xF;
     
     initialize_free(header_ptr, size);
 
+    spin_unlock_irqrestore(&kmalloc_lock, flags);
     return;
 }
 
@@ -377,11 +389,15 @@ void* krealloc(void* oldptr, size_t size)
     if (!oldptr) return kmalloc(size);
     if (size == 0) { kfree(oldptr); return NULL; }
 
+    uint64_t flags = spin_lock_irqsave(&kmalloc_lock);
     size_t oldsize = (*(size_t *)((char *)oldptr - WS)) & ~0xF;
     size_t needed = align(size + DWS);
 
     // current block already big enough
-    if (oldsize >= needed) return oldptr;
+    if (oldsize >= needed) {
+        spin_unlock_irqrestore(&kmalloc_lock, flags);
+        return oldptr;
+    }
 
     // try expanding into next block if free
     void *next_hdr = (char *)oldptr - WS + oldsize;
@@ -392,9 +408,11 @@ void* krealloc(void* oldptr, size_t size)
             remove_free((char *)next_hdr + WS, next_size);
             *(size_t *)((char *)oldptr - WS) = (oldsize + next_size) | 1;
             *(size_t *)((char *)oldptr - WS + oldsize + next_size - WS) = (oldsize + next_size) | 1;
+            spin_unlock_irqrestore(&kmalloc_lock, flags);
             return oldptr;
         }
     }
+    spin_unlock_irqrestore(&kmalloc_lock, flags);
 
     // fallback
     void *newptr = kmalloc(size);

@@ -38,9 +38,9 @@ The project is intentionally educational rather than a complete POSIX implementa
 
 | Area | Implemented |
 |---|---|
-| Architecture | Bare-metal AArch64 kernel, EL1/EL0 isolation, traps, IRQs, syscalls, timer preemption |
+| Architecture | Bare-metal AArch64 kernel, SMP boot path, EL1/EL0 isolation, traps, IRQs, syscalls, timer preemption |
 | Processes | `fork`, `exec`, `waitpid`, `exit`, process groups, zombies, orphans, job control |
-| Scheduling | Multi-priority round-robin scheduling, timer interrupts, blocking sleep, thread wakeups |
+| Scheduling | SMP-aware multi-priority round-robin scheduling, per-CPU current/idle state, timer interrupts, blocking sleep, thread wakeups |
 | Virtual Memory | Per-process page tables, page faults, lazy allocation, demand paging, `mmap`, copy-on-write |
 | ELF Loading | Runtime `exec`, ELF validation, argument stack setup, lazy `PT_LOAD` paging from `/bin` |
 | Filesystem | Inode filesystem, directories, symlinks, permissions, VFS, file descriptors, block/inode caches |
@@ -49,7 +49,7 @@ The project is intentionally educational rather than a complete POSIX implementa
 | Threads | Kernel/user threading support, mutexes, semaphores, condition variables |
 | Drivers / Devices | Memory-mapped hardware drivers, UART, SD/block device support, framebuffer, TTY backends, fan |
 | Terminal / GUI | UART TTY, framebuffer graphical terminal, multi-terminal support, raw/canonical mode |
-| Userspace | ELF executables, shell, user libraries, Unix-style commands, tests, and editor utilities |
+| Userspace | ELF executables, shell, user libraries, Unix-style commands, seeded `/tests` scripts, `cpubusy`, and editor utilities |
 
 ---
 
@@ -124,7 +124,8 @@ While not a complete POSIX implementation, the system intentionally mirrors fami
 
 The OS is designed as an educational Unix-style kernel rather than a production replacement for Linux. Some production-scale features are intentionally out of scope:
 
-- Single-core execution instead of SMP
+- One global SMP scheduler queue rather than per-CPU run queues, CPU affinity,
+  load balancing, or scheduler IPIs
 - No networking stack yet
 - Focused hardware support for the devices needed to boot, interact with, render output, and persist data
 - ext2-inspired educational filesystem rather than a fully POSIX-compliant production filesystem
@@ -173,7 +174,7 @@ These tradeoffs keep the full OS understandable while still implementing the cor
 
 OS-PI-is-cool was developed by **Veer Kakar** and **Matthew Karounos**.
 
-See [About Us](docs/about-us.md) for the dedicated project-authorship page.
+See [this](docs/about-us.md) dedicated project-ownership page for more information.
 That page is intentionally structured as a place to add more depth later.
 
 ---
@@ -255,6 +256,9 @@ Major completed subsystems include:
 - Virtual filesystem layer
 - Demand paging
 - Lazy page allocation
+- SMP multicore boot and scheduler execution
+- Seeded shell smoke tests under `/tests`
+- `cpubusy` CPU-load utility for multicore and stress demos
 - Graphical framebuffer terminal
 - Raspberry Pi 5 RP1 USB HID keyboard input with connect/reconnect support
 - Interactive shell with userspace commands
@@ -266,7 +270,7 @@ Major completed subsystems include:
 Planned or in-progress areas:
 
 - TCP/IP networking stack
-- Multicore/SMP support
+- CPU affinity, load balancing, and inter-processor interrupts
 - More complete POSIX userspace APIs
 - GUI desktop environment on top of the framebuffer terminal system
 - On-device C toolchain or small C-like compiler for writing userspace programs inside the OS
@@ -284,6 +288,7 @@ Every subsystem has a dedicated design document located in `docs/`.
 - Raspberry Pi 5 support
 - QEMU Raspberry Pi 3B support
 - EL1 kernel / EL0 userspace
+- SMP secondary-core release and per-CPU kernel state
 - Interrupt and exception handling
 - System calls
 - Timer-driven preemption
@@ -295,6 +300,8 @@ Every subsystem has a dedicated design document located in `docs/`.
 ### [Process Management](docs/architecture/processes.md)
 
 - Multi-priority round-robin scheduler
+- One global scheduler queue protected by a scheduler spinlock
+- Per-CPU current thread, idle context, and scheduler timer state
 - End-to-end trap frame, scheduler interrupt, context switch, and EL0 return path
 - `fork()` with Copy-on-Write
 - `exec()` process replacement
@@ -365,6 +372,8 @@ Every subsystem has a dedicated design document located in `docs/`.
 - Interactive shell
 - Job control
 - Userspace ELF build and `/bin` seeding
+- Seeded executable shell tests under `/tests`
+- `cpubusy` for timed or infinite CPU-bound workloads
 - Core Unix-style commands including:
 
   - `cat`

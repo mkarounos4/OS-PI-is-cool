@@ -11,6 +11,7 @@
 #include "scheduler/scheduler.h"
 #include "fs/oft.h"
 #include "threading/thread.h"
+#include "sync/spinlock.h"
 
 #define PIPE_CAPACITY 4096
 
@@ -27,15 +28,19 @@ static struct file_operations pipe_ops = {
 };
 
 static int install_process_fd(pcb_t *pcb, int k_fd) {
+    uint64_t flags = spin_lock_irqsave(&pcb->lock);
     for (size_t i = 0; i < vec_len(&pcb->file_descriptors); i++) {
         if (vec_get(&pcb->file_descriptors, i) == (void *)(uintptr_t)-1) {
             vec_set(&pcb->file_descriptors, i, (void *)(uintptr_t)k_fd);
+            spin_unlock_irqrestore(&pcb->lock, flags);
             return (int)i;
         }
     }
 
     vec_push_back(&pcb->file_descriptors, (void *)(uintptr_t)k_fd);
-    return (int)vec_len(&pcb->file_descriptors) - 1;
+    int fd = (int)vec_len(&pcb->file_descriptors) - 1;
+    spin_unlock_irqrestore(&pcb->lock, flags);
+    return fd;
 }
 
 struct pipe_st {
@@ -46,6 +51,7 @@ struct pipe_st {
 
     Vec rx_wait_queue;
     Vec tx_wait_queue;
+    spinlock_t lock;
 };
 
 static void pipe_free(struct pipe_st *pipe) {
@@ -75,6 +81,7 @@ int pipe(int pipefd[2]) {
     
     pipe->num_readers = 1;
     pipe->num_writers = 1;
+    pipe->lock = (spinlock_t)SPINLOCK_INIT;
 
     pipe->buffer = create_ring_buffer(PIPE_CAPACITY);
 
@@ -170,12 +177,14 @@ int pipe_open(struct oft_entry *entry) {
         return (int)SYS_EINVAL;
     }
 
+    uint64_t flags = spin_lock_irqsave(&pipe->lock);
     if (entry->mode & O_RDONLY) {
         pipe->num_readers++;
     }
     if (entry->mode & O_WRONLY) {
         pipe->num_writers++;
     }
+    spin_unlock_irqrestore(&pipe->lock, flags);
     return 0;
 }
 
@@ -185,6 +194,7 @@ int pipe_close(struct oft_entry *entry) {
         return (int)SYS_EINVAL;
     }
 
+    uint64_t flags = spin_lock_irqsave(&pipe->lock);
     if (entry->mode & O_RDONLY) {
         pipe->num_readers--;
     }
@@ -194,13 +204,17 @@ int pipe_close(struct oft_entry *entry) {
             char next_char = 0x04;
             int wrote = produce_ring_buffer(&pipe->buffer, &next_char);
             if (!wrote) {
+                spin_unlock_irqrestore(&pipe->lock, flags);
                 return (int)SYS_EAGAIN;
             }
             pipe_wake_up_readers(pipe);
         }
     }
 
-    if (pipe->num_readers == 0 && pipe->num_writers == 0) {
+    int should_free = pipe->num_readers == 0 && pipe->num_writers == 0;
+    spin_unlock_irqrestore(&pipe->lock, flags);
+
+    if (should_free) {
         // clean pipe
         pipe_free(pipe);
     }
@@ -220,16 +234,20 @@ int pipe_read(struct oft_entry *entry, char *buffer, size_t count) {
     ssize_t num_read = 0;
     while (num_read < count) {
         char char_void;
+        uint64_t flags = spin_lock_irqsave(&pipe->lock);
         bool read_char = consume_ring_buffer(&pipe->buffer, &char_void);
         if (!read_char) {
             if (pipe->num_writers == 0) {
+                spin_unlock_irqrestore(&pipe->lock, flags);
                 return num_read;
             }
             pipe_wake_up_writers(pipe);
             vec_push_back(&pipe->rx_wait_queue, (ptr_t)(uintptr_t)curr_thd->tid);
+            spin_unlock_irqrestore(&pipe->lock, flags);
             block_thread(curr_thd, THREAD_BLOCKED_INTERRUPTABLE);
             continue;
         }
+        spin_unlock_irqrestore(&pipe->lock, flags);
 
         if (char_void == 0x04) {
             return num_read;
@@ -240,7 +258,9 @@ int pipe_read(struct oft_entry *entry, char *buffer, size_t count) {
         num_read++;
     }
     
+    uint64_t flags = spin_lock_irqsave(&pipe->lock);
     pipe_wake_up_writers(pipe);
+    spin_unlock_irqrestore(&pipe->lock, flags);
     return num_read;
 }
 
@@ -256,18 +276,23 @@ int pipe_write(struct oft_entry *entry, const char *buffer, size_t count) {
 
     ssize_t num_read = 0;
     while (num_read < count) {
+        uint64_t flags = spin_lock_irqsave(&pipe->lock);
         bool wrote_char = produce_ring_buffer(&pipe->buffer, buffer);
         if (!wrote_char) {
             pipe_wake_up_readers(pipe);
             vec_push_back(&pipe->tx_wait_queue, (ptr_t)(uintptr_t)curr_thd->tid);
+            spin_unlock_irqrestore(&pipe->lock, flags);
             block_thread(curr_thd, THREAD_BLOCKED_INTERRUPTABLE);
             continue;
         }
+        spin_unlock_irqrestore(&pipe->lock, flags);
 
         buffer++;
         num_read++;
     }
     
+    uint64_t flags = spin_lock_irqsave(&pipe->lock);
     pipe_wake_up_readers(pipe);
+    spin_unlock_irqrestore(&pipe->lock, flags);
     return num_read;
 }

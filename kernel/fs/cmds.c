@@ -9,6 +9,58 @@
 #include "timer/timer.h"
 #include "scheduler/scheduler.h"
 #include "virtual_fs.h"
+#include "sync/spinlock.h"
+
+static int install_process_fd(pcb_t *pcb, int k_fd) {
+    uint64_t flags = spin_lock_irqsave(&pcb->lock);
+    int new_fd = -1;
+    for (size_t i = 0; i < vec_len(&pcb->file_descriptors); i++) {
+        if (vec_get(&pcb->file_descriptors, i) == (void *)(uintptr_t)-1) {
+            vec_set(&pcb->file_descriptors, i, (ptr_t)(uintptr_t)k_fd);
+            new_fd = (int)i;
+            break;
+        }
+    }
+
+    if (new_fd == -1) {
+        vec_push_back(&pcb->file_descriptors, (ptr_t)(uintptr_t)k_fd);
+        new_fd = (int)vec_len(&pcb->file_descriptors) - 1;
+    }
+    spin_unlock_irqrestore(&pcb->lock, flags);
+    return new_fd;
+}
+
+static err_t pin_process_fd(pcb_t *pcb, int fd, int *k_fd_out,
+                            struct oft_entry **entry_out) {
+    if (pcb == NULL || k_fd_out == NULL || entry_out == NULL) {
+        return INVALID_ARGS;
+    }
+
+    uint64_t flags = spin_lock_irqsave(&pcb->lock);
+    if (fd < 0 || (size_t)fd >= vec_len(&pcb->file_descriptors)) {
+        spin_unlock_irqrestore(&pcb->lock, flags);
+        return INVALID_ARGS;
+    }
+
+    int k_fd = (int)(uintptr_t)vec_get(&pcb->file_descriptors, fd);
+    if (k_fd < 0) {
+        spin_unlock_irqrestore(&pcb->lock, flags);
+        return OFT_FD_DOES_NOT_EXIST;
+    }
+
+    err_t err = oft_add_reference(k_fd);
+    spin_unlock_irqrestore(&pcb->lock, flags);
+    if (err != SUCCESS) {
+        return err;
+    }
+
+    err = get_oft_entry_by_fd(k_fd, entry_out);
+    if (err != SUCCESS) {
+        return err;
+    }
+    *k_fd_out = k_fd;
+    return SUCCESS;
+}
 
 int open(const char *fname, int mode) {
     pcb_t *pcb = get_curr_process();
@@ -21,21 +73,7 @@ int open(const char *fname, int mode) {
         return fd;
     }
 
-    int new_fd = -1;
-    for (size_t i = 0; i < vec_len(&pcb->file_descriptors); i++) {
-        if (vec_get(&pcb->file_descriptors, i) == (void *)(uintptr_t)-1) {
-            vec_set(&pcb->file_descriptors, i, (ptr_t)(uintptr_t)fd);
-            new_fd = i;
-            break;
-        }
-    }
-
-    if (new_fd == -1) {
-        vec_push_back(&pcb->file_descriptors, (ptr_t)(uintptr_t)fd);
-        new_fd = vec_len(&pcb->file_descriptors)-1;
-    }
-
-    return new_fd;
+    return install_process_fd(pcb, fd);
 }
 
 int close(int fd) {
@@ -44,14 +82,19 @@ int close(int fd) {
         return PID_NOT_FOUND;
     }
 
+    uint64_t flags = spin_lock_irqsave(&pcb->lock);
     if (fd < 0 || (size_t)fd >= vec_len(&pcb->file_descriptors)) {
+        spin_unlock_irqrestore(&pcb->lock, flags);
         return INVALID_ARGS;
     }
 
     int k_fd = (int)(uintptr_t)vec_get(&pcb->file_descriptors, fd);
     if (k_fd < 0) {
+        spin_unlock_irqrestore(&pcb->lock, flags);
         return OFT_FD_DOES_NOT_EXIST;
     }
+    vec_set(&pcb->file_descriptors, fd, (void *)(uintptr_t)-1);
+    spin_unlock_irqrestore(&pcb->lock, flags);
 
     struct oft_entry *entry;
     err_t err = get_oft_entry_by_fd(k_fd, &entry);
@@ -63,7 +106,6 @@ int close(int fd) {
     if (err) {
         return err;
     }
-    vec_set(&pcb->file_descriptors, fd, (void *)(uintptr_t)-1);
 
     return SUCCESS;
 }
@@ -74,22 +116,16 @@ int read(int fd, char *buf, int n) {
         return PID_NOT_FOUND;
     }
 
-    if (fd < 0 || (size_t)fd >= vec_len(&pcb->file_descriptors)) {
-        return INVALID_ARGS;
-    }
-
-    int k_fd = (int)(uintptr_t)vec_get(&pcb->file_descriptors, fd);
-    if (k_fd < 0) {
-        return OFT_FD_DOES_NOT_EXIST;
-    }
-
     struct oft_entry *entry;
-    err_t err = get_oft_entry_by_fd(k_fd, &entry);
+    int k_fd;
+    err_t err = pin_process_fd(pcb, fd, &k_fd, &entry);
     if (err) {
         return err;
     }
 
-    return k_read(entry, buf, n);
+    int ret = k_read(entry, buf, n);
+    oft_close_file(entry);
+    return ret;
 }
 
 int write(int fd, char *buf, int n) {
@@ -98,22 +134,16 @@ int write(int fd, char *buf, int n) {
         return PID_NOT_FOUND;
     }
 
-    if (fd < 0 || (size_t)fd >= vec_len(&pcb->file_descriptors)) {
-        return INVALID_ARGS;
-    }
-
-    int k_fd = (int)(uintptr_t)vec_get(&pcb->file_descriptors, fd);
-    if (k_fd < 0) {
-        return OFT_FD_DOES_NOT_EXIST;
-    }
-
     struct oft_entry *entry;
-    err_t err = get_oft_entry_by_fd(k_fd, &entry);
+    int k_fd;
+    err_t err = pin_process_fd(pcb, fd, &k_fd, &entry);
     if (err) {
         return err;
     }
 
-    return k_write(entry, buf, n);
+    int ret = k_write(entry, buf, n);
+    oft_close_file(entry);
+    return ret;
 }
 
 int lseek(int fd, int offset, int whence) {
@@ -122,16 +152,16 @@ int lseek(int fd, int offset, int whence) {
         return PID_NOT_FOUND;
     }
 
-    if (fd < 0 || (size_t)fd >= vec_len(&pcb->file_descriptors)) {
-        return INVALID_ARGS;
+    struct oft_entry *entry;
+    int k_fd;
+    err_t err = pin_process_fd(pcb, fd, &k_fd, &entry);
+    if (err) {
+        return err;
     }
 
-    int k_fd = (int)(uintptr_t)vec_get(&pcb->file_descriptors, fd);
-    if (k_fd < 0) {
-        return OFT_FD_DOES_NOT_EXIST;
-    }
-
-    return k_lseek(k_fd, offset, whence);
+    int ret = k_lseek(k_fd, offset, whence);
+    oft_close_file(entry);
+    return ret;
 }
 
 // Throws FS_not_mounted, k_open errors, k_close errors, k_update_file_time errors

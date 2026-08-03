@@ -28,6 +28,8 @@ SECTIONS
     .boot_pgtables (NOLOAD) : {
         KEEP(*(.bss.boot_pgtables))
         KEEP(*(.bss.boot_pgtables.*))
+        KEEP(*(.bss.boot_stacks))
+        KEEP(*(.bss.boot_stacks.*))
     } :bootdata
 
     . = ALIGN(4096);

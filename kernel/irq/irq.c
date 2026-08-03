@@ -4,6 +4,8 @@
 
 #include "memory/page_table/page_table.h"
 #include "uart/uart.h"
+#include "cpu/cpu.h"
+#include "sync/spinlock.h"
 
 #define GIC_MAX_INTIDS 1020u
 #define ARM_GENERIC_TIMER_INTID 30u
@@ -16,7 +18,8 @@ struct irq_slot {
 
 static struct irq_slot irq_table[GIC_MAX_INTIDS];
 static uint32_t irq_counts[GIC_MAX_INTIDS];
-static unsigned irq_depth;
+static unsigned irq_depth[MAX_CPUS];
+static spinlock_t irq_table_lock = SPINLOCK_INIT;
 
 static inline void mmio_write32(uint64_t address, uint32_t value) {
     *(volatile uint32_t *)(uintptr_t)kernel_direct_map_va(address) = value;
@@ -127,7 +130,9 @@ void irq_init(void) {
 #if defined(PLATFORM_QEMU)
     irq_disable();
 
-    local_write(RPI3_LOCAL_CORE0_TIMER_IRQCNTL, 0);
+    for (uint32_t id = 0; id < MAX_CPUS; id++) {
+        local_write(RPI3_LOCAL_CORE0_TIMER_IRQCNTL + id * 4u, 0);
+    }
     local_write(RPI3_LOCAL_GPU_INT_ROUTING, 0);
     bcm_irq_write(BCM2835_IRQ_DISABLE2, BCM2835_UART0_PENDING2_BIT);
 
@@ -162,12 +167,25 @@ void irq_init(void) {
         gicd_write(GICD_ICFGR + (intid / 4u), 0);
     }
 
-    gicc_write(GICC_PMR, 0xffu);
-    gicc_write(GICC_CTLR, 3u);
+    irq_init_cpu();
     gicd_write(GICD_CTLR, 3u);
 
     asm volatile("dsb sy\nisb" ::: "memory");
 #endif
+}
+
+void irq_init_cpu(void) {
+    irq_disable();
+#if defined(PLATFORM_QEMU)
+    uint32_t id = cpu_id();
+    if (id < MAX_CPUS) {
+        local_write(RPI3_LOCAL_CORE0_TIMER_IRQCNTL + id * 4u, 0);
+    }
+#else
+    gicc_write(GICC_PMR, 0xffu);
+    gicc_write(GICC_CTLR, 3u);
+#endif
+    asm volatile("dsb sy\nisb" ::: "memory");
 }
 
 int irq_register(unsigned intid, irq_handler_t handler, void *ctx) {
@@ -177,10 +195,10 @@ int irq_register(unsigned intid, irq_handler_t handler, void *ctx) {
         return -1;
     }
 
-    flags = irq_save();
+    flags = spin_lock_irqsave(&irq_table_lock);
     irq_table[intid].handler = handler;
     irq_table[intid].ctx = ctx;
-    irq_restore(flags);
+    spin_unlock_irqrestore(&irq_table_lock, flags);
 
     return 0;
 }
@@ -192,8 +210,8 @@ void irq_enable_line(unsigned intid) {
 
 #if defined(PLATFORM_QEMU)
     if (intid == ARM_GENERIC_TIMER_INTID) {
-        local_write(RPI3_LOCAL_CORE0_TIMER_IRQCNTL,
-                    local_read(RPI3_LOCAL_CORE0_TIMER_IRQCNTL) | RPI3_LOCAL_CNTP_IRQ_BITS);
+        uint32_t reg = RPI3_LOCAL_CORE0_TIMER_IRQCNTL + cpu_id() * 4u;
+        local_write(reg, local_read(reg) | RPI3_LOCAL_CNTP_IRQ_BITS);
     } else if (intid == BCM2835_UART0_INTID) {
         bcm_irq_write(BCM2835_IRQ_ENABLE2, BCM2835_UART0_PENDING2_BIT);
     }
@@ -209,8 +227,8 @@ void irq_disable_line(unsigned intid) {
 
 #if defined(PLATFORM_QEMU)
     if (intid == ARM_GENERIC_TIMER_INTID) {
-        local_write(RPI3_LOCAL_CORE0_TIMER_IRQCNTL,
-                    local_read(RPI3_LOCAL_CORE0_TIMER_IRQCNTL) & ~RPI3_LOCAL_CNTP_IRQ_BITS);
+        uint32_t reg = RPI3_LOCAL_CORE0_TIMER_IRQCNTL + cpu_id() * 4u;
+        local_write(reg, local_read(reg) & ~RPI3_LOCAL_CNTP_IRQ_BITS);
     } else if (intid == BCM2835_UART0_INTID) {
         bcm_irq_write(BCM2835_IRQ_DISABLE2, BCM2835_UART0_PENDING2_BIT);
     }
@@ -239,7 +257,7 @@ void irq_set_edge_triggered(unsigned intid) {
 
 struct trap_frame *irq_handle_exception(struct trap_frame *frame) {
 #if defined(PLATFORM_QEMU)
-    uint32_t source = local_read(RPI3_LOCAL_CORE0_IRQ_SOURCE);
+    uint32_t source = local_read(RPI3_LOCAL_CORE0_IRQ_SOURCE + cpu_id() * 4u);
     unsigned intid = IRQ_SPURIOUS_INTID;
 
     if ((source & RPI3_LOCAL_GPU_IRQ_BIT) != 0) {
@@ -265,7 +283,10 @@ struct trap_frame *irq_handle_exception(struct trap_frame *frame) {
     }
     irq_counts[intid]++;
 
-    irq_depth++;
+    uint32_t id = cpu_id();
+    if (id < MAX_CPUS) {
+        irq_depth[id]++;
+    }
 
     if (irq_table[intid].handler != NULL) {
         struct trap_frame *new_frame = irq_table[intid].handler(intid, frame, irq_table[intid].ctx);
@@ -281,13 +302,16 @@ struct trap_frame *irq_handle_exception(struct trap_frame *frame) {
     gicc_write(GICC_EOIR, iar);
 #endif
 
-    irq_depth--;
+    if (id < MAX_CPUS) {
+        irq_depth[id]--;
+    }
 
     return frame;
 }
 
 unsigned irq_get_depth(void) {
-    return irq_depth;
+    uint32_t id = cpu_id();
+    return id < MAX_CPUS ? irq_depth[id] : 0;
 }
 
 void irq_get_controller_info(uint32_t *typer, uint32_t *iidr) {

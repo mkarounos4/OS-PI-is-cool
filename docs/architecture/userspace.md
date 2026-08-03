@@ -281,6 +281,29 @@ This design makes userspace reproducible. The kernel image contains the command
 ELFs needed to populate a fresh filesystem, but commands still execute from the
 filesystem after boot.
 
+## Seeding `/tests`
+
+`mkfs` also creates `/tests` and writes executable shell scripts into it. These
+scripts are ordinary files, not built-in kernel commands. They run through the
+same shell parser, `exec` path, userspace commands, filesystem operations, and
+`/proc` reads that a user would run manually.
+
+The seeded scripts include:
+
+- `/tests/README.sh`: lists the available test scripts.
+- `/tests/all.sh`: runs the main scripted smoke pass.
+- `/tests/proc.sh`: shows `/proc` CPU, process, timer, and interrupt state.
+- `/tests/vfs.sh`: exercises files, directories, links, metadata, and removal.
+- `/tests/vm.sh`: exercises memory diagnostics and a timed CPU workload.
+- `/tests/multicore.sh`: launches one timed `cpubusy` worker per expected CPU.
+- `/tests/stress.sh`: launches infinite `cpubusy` workers for manual stress
+  testing until the user kills them.
+
+The `cpubusy` command accepts `cpubusy <timer_ticks> <tag>`. A nonzero duration
+stops automatically after that many timer ticks. A zero duration runs until the
+process receives a signal, which is useful for checking that all online CPUs
+continue taking scheduler ticks under sustained load.
+
 ## Runtime ELF Exec
 
 At runtime, command ELFs are loaded through the filesystem-backed `exec` path,

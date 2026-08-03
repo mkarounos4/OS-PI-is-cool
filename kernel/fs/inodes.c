@@ -384,6 +384,7 @@ err_t update_inode_metadata(ino_id_t id, int flags, uint8_t type, uint8_t perm, 
         return err;
     }
 
+    uint64_t lock_flags = cached_inode_lock(node);
     if (flags & INODE_EDIT_TYPE) {
         node->inode.metadata.type = type;
     }
@@ -402,6 +403,7 @@ err_t update_inode_metadata(ino_id_t id, int flags, uint8_t type, uint8_t perm, 
     }
 
     node->dirty = 1;
+    cached_inode_unlock(node, lock_flags);
     remove_ref_from_cache(id);
     return SUCCESS;
 }
@@ -417,8 +419,10 @@ err_t set_inode_metadata(ino_id_t id, attributes_t *metadata) {
         return err;
     }
 
+    uint64_t lock_flags = cached_inode_lock(node);
     node->dirty = 1;
     node->inode.metadata = *metadata;
+    cached_inode_unlock(node, lock_flags);
     remove_ref_from_cache(id);
     return SUCCESS;
 }
@@ -488,7 +492,10 @@ block_no_t get_block_num_from_disk_ptr(block_no_t ptr_block_num, unsigned int de
 block_no_t get_block_num_from_inode_with_id(ino_id_t id, unsigned int index) {
     struct cached_inode_st *inode = get_inode_from_cache(id);
     if (inode == NULL) return 0;
-    block_no_t block = get_block_num_from_inode(&inode->inode, index);
+    uint64_t lock_flags = cached_inode_lock(inode);
+    struct inode_st snapshot = inode->inode;
+    cached_inode_unlock(inode, lock_flags);
+    block_no_t block = get_block_num_from_inode(&snapshot, index);
     remove_ref_from_cache(id);
     return block;
 }
@@ -546,8 +553,10 @@ err_t allocate_block_for_file_inode_from_id(ino_id_t id_in_fs, block_no_t *new_b
         return -1;
     }
 
+    uint64_t lock_flags = cached_inode_lock(inode_cached);
     err_t error = allocate_block_for_file_inode(&inode_cached->inode, new_block);
     inode_cached->dirty = 1;
+    cached_inode_unlock(inode_cached, lock_flags);
     err_t error2 = remove_ref_from_cache(id_in_fs);
     if (error) return error;
     return error2;
@@ -945,20 +954,27 @@ err_t clear_blocks_of_inode(struct inode_st *inode, int skip_first) {
 }
 
 err_t free_file_inode(struct cached_inode_st *cache_inode) {
+    uint64_t lock_flags = cached_inode_lock(cache_inode);
     cache_inode->inode.metadata.i_links_count--;
     if (cache_inode->inode.metadata.i_links_count > 0) {
+        cache_inode->dirty = 1;
+        cached_inode_unlock(cache_inode, lock_flags);
         return SUCCESS;
     }
+    cache_inode->dirty = 1;
     // Remove inode from inode bitmap
     err_t err_code = set_inode_allocated(cache_inode->id, 0);
     if (err_code != SUCCESS) {
+        cached_inode_unlock(cache_inode, lock_flags);
         return err_code;
     }
 
     // Get inode struct
     struct inode_st *inode = &cache_inode->inode;
     
-    return clear_blocks_of_inode(inode, 0);
+    err_code = clear_blocks_of_inode(inode, 0);
+    cached_inode_unlock(cache_inode, lock_flags);
+    return err_code;
 }
 
 err_t add_new_file_inode(ino_id_t *inode_num, int file_type, uint8_t perm, struct file_operations *fops) {
@@ -1012,10 +1028,12 @@ err_t remove_last_block_inode(ino_id_t id) {
     err_t err = get_inode(&inode_cache, id);
     if (err) return err;
 
+    uint64_t lock_flags = cached_inode_lock(inode_cache);
     inode_cache->dirty = 1;
     struct inode_st *inode = &inode_cache->inode;
     uint32_t old_blocks = inode->metadata.i_blocks;
     if (old_blocks == 0) {
+        cached_inode_unlock(inode_cache, lock_flags);
         remove_ref_from_cache(id);
         return ILLEGAL_BLOCK_NO;
     }
@@ -1290,6 +1308,7 @@ err_t remove_last_block_inode(ino_id_t id) {
     inode->metadata.i_blocks = old_blocks - 1u;
 
 done:
+    cached_inode_unlock(inode_cache, lock_flags);
     err_t ref_err = remove_ref_from_cache(id);
     if (err == SUCCESS) {
         err = ref_err;

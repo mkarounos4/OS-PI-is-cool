@@ -12,6 +12,7 @@ detail, but the hardware and CPU-control path is documented here.
 ## List of Features
 
 - [Bare-metal boot path](#bare-metal-boot-path)
+- [SMP secondary-core boot](#smp-secondary-core-boot)
 - [Exception level transition](#exception-level-transition)
 - [Early MMU handoff](#early-mmu-handoff)
 - [Kernel linker script and image layout](#kernel-linker-script-and-image-layout)
@@ -59,7 +60,8 @@ detail, but the hardware and CPU-control path is documented here.
 The key architectural rule is that low-level CPU and hardware details are
 concentrated in a few places:
 
-- `kernel/boot.S` owns the initial core entry and EL transition.
+- `kernel/boot.S` owns the primary and secondary core entry paths and EL
+  transition.
 - `kernel/memory/mmu.S` and `kernel/memory/mmu.c` own early MMU enablement.
 - `kernel/traps/vectors.S` owns register save/restore for exceptions.
 - `kernel/traps/traps.c` owns exception classification and trap dispatch.
@@ -77,8 +79,8 @@ that higher-level code can rely on.
 
 The boot assembly performs the minimum setup needed to enter C safely:
 
-1. Read `mpidr_el1` and keep only core 0 running.
-2. Park secondary cores in a `wfe` loop.
+1. Read `mpidr_el1` and let core 0 continue as the boot CPU.
+2. Send secondary cores to the secondary boot-table wait path.
 3. Load the physical boot stack from `_stack_top_phys`.
 4. Clear frame-pointer and link-register state.
 5. Detect the current exception level.
@@ -87,10 +89,40 @@ The boot assembly performs the minimum setup needed to enter C safely:
 8. Clear the kernel BSS range from `__bss_start_phys` to `__bss_end_phys`.
 9. Call `initialize_vm`.
 
-Secondary cores are deliberately not brought online. The rest of the kernel is
-written around a single-core execution model, so parking the other cores avoids
-concurrency problems before locks, per-core state, and inter-processor
-interrupts exist.
+Secondary cores wait until the primary CPU has prepared boot-table state and
+released them through the SMP bring-up path. This keeps early initialization
+single-owner while still allowing the scheduler to run on every online core
+after shared kernel structures and per-CPU state are ready.
+
+## SMP Secondary-Core Boot
+
+Secondary cores enter `kernel/boot.S`, derive their logical CPU id from
+`mpidr_el1`, and wait in `wfe` until the primary core publishes the secondary
+boot-table-ready flag. After release, each secondary core:
+
+1. Switches to a per-core boot stack.
+2. Performs the same EL2-to-EL1 transition as the boot CPU when needed.
+3. Calls `initialize_secondary_vm`.
+4. Enters `secondary_kernel_main()`.
+
+The C-side secondary path initializes per-CPU state, waits for the primary to
+allow scheduler startup, installs the final kernel page table for that CPU,
+initializes exceptions, IRQs, timers, and the scheduler CPU context, marks the
+CPU online, enables interrupts, and enters `scheduler_start()`.
+
+The primary path prepares platform-specific release words before the final
+kernel initialization completes. QEMU uses the Raspberry Pi 3B spin-table words;
+Raspberry Pi 5 uses the firmware/transfer-monitor release words. Once the
+global scheduler and first userspace thread are ready, the primary releases the
+secondary CPUs and prints the online count with a line such as:
+
+```text
+[smp] online cpus=4
+```
+
+SMP execution is intentionally simple: each CPU has its own current-thread
+pointer, idle context, and local scheduler timer, while the ready queues remain
+global and are protected by `scheduler_lock`.
 
 ## Exception Level Transition
 
@@ -725,7 +757,8 @@ hardware abstraction layer.
 
 Current limits include:
 
-- single-core execution; secondary cores are parked at boot.
+- SMP uses a small fixed CPU count and a global scheduler queue rather than
+  runtime CPU discovery, CPU affinity, or per-CPU load balancing.
 - build-time platform selection instead of runtime hardware discovery.
 - fixed interrupt handler table.
 - no full device tree probing layer.

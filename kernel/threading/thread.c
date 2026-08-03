@@ -5,8 +5,10 @@
 #include "memory/page_table/page_table.h"
 #include "uart/uart.h"
 #include "devices/tty.h"
+#include "sync/spinlock.h"
 
 static Vec threads;
+static spinlock_t threads_lock = SPINLOCK_INIT;
 
 static void __attribute__((noreturn)) thread_start_trampoline(void) {
     void *(*start_routine)(void *);
@@ -18,24 +20,31 @@ static void __attribute__((noreturn)) thread_start_trampoline(void) {
 }
 
 void threads_init() {
+    uint64_t flags = spin_lock_irqsave(&threads_lock);
     threads = vec_new(10, NULL);
+    spin_unlock_irqrestore(&threads_lock, flags);
 }
 
 tcb_t *thread_get_by_tid(tid_t tid) {
+    uint64_t flags = spin_lock_irqsave(&threads_lock);
     if (tid < 0 || tid >= vec_len(&threads)) {
+        spin_unlock_irqrestore(&threads_lock, flags);
         return NULL;
     }
 
     tcb_t *thread = (tcb_t *)vec_get(&threads, tid);
     if (thread == NULL || thread->state == THREAD_UNUSED) {
+        spin_unlock_irqrestore(&threads_lock, flags);
         return NULL;
     }
 
+    spin_unlock_irqrestore(&threads_lock, flags);
     return thread;
 }
 
 tid_t thread_create(pcb_t *parent_pcb, void *(*start_routine)(void*), void *arg) {
     // find next available thread slot
+    uint64_t flags = spin_lock_irqsave(&threads_lock);
     tid_t tid = -1;
     for (int i = 0; i < vec_len(&threads); i++) {
         tcb_t *thd = (tcb_t*) vec_get(&threads, i);
@@ -48,6 +57,7 @@ tid_t thread_create(pcb_t *parent_pcb, void *(*start_routine)(void*), void *arg)
         tid = vec_len(&threads);
         tcb_t *tcb = kcalloc(1, sizeof(tcb_t));
         if (tcb == NULL) {
+            spin_unlock_irqrestore(&threads_lock, flags);
             return -1;
         }
         vec_push_back(&threads, tcb);
@@ -58,6 +68,7 @@ tid_t thread_create(pcb_t *parent_pcb, void *(*start_routine)(void*), void *arg)
     // allocate per-thread kernel stack
     new_thread->kernel_stack = alloc_page();
     if (new_thread->kernel_stack == NULL) {
+        spin_unlock_irqrestore(&threads_lock, flags);
         return -1;
     }
  
@@ -98,9 +109,10 @@ tid_t thread_create(pcb_t *parent_pcb, void *(*start_routine)(void*), void *arg)
     new_thread->ctx.ttbr0_el1 = parent_pcb->ttbr0_el1;
     new_thread->ctx.ttbr0_el1_va = parent_pcb->ttbr0_el1_va;
  
-    pcb_thread_change_state(parent_pcb, THREAD_UNUSED, THREAD_RUNNING);
     vec_push_back(&parent_pcb->tids, (ptr_t)(uintptr_t)new_thread->tid);
+    spin_unlock_irqrestore(&threads_lock, flags);
 
+    pcb_thread_change_state(parent_pcb, THREAD_UNUSED, THREAD_RUNNING);
     return tid;
 }
 
@@ -193,6 +205,7 @@ int thread_detach(tid_t tid) {
 void thread_cleanup(tcb_t *target) {
     pcb_t *pcb = target->pcb;
     remove_thread_from_scheduler(target);
+    uint64_t flags = spin_lock_irqsave(&threads_lock);
     vec_destroy(&target->waiting_on_this);
     target->state = THREAD_UNUSED;
     
@@ -209,6 +222,7 @@ void thread_cleanup(tcb_t *target) {
         kfree(target);
     }
 
+    spin_unlock_irqrestore(&threads_lock, flags);
     pcb_thread_change_state(pcb, THREAD_ZOMBIE, THREAD_UNUSED);
 }
 

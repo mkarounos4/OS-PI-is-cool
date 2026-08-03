@@ -56,8 +56,15 @@ static uint64_t boot_ttbr0_l1[PAGE_TABLE_ENTRIES] BOOT_PAGE_TABLE;
 static uint64_t boot_ttbr1_l0[PAGE_TABLE_ENTRIES] BOOT_PAGE_TABLE;
 static uint64_t boot_ttbr1_l1[PAGE_TABLE_ENTRIES] BOOT_PAGE_TABLE;
 
+extern uint64_t secondary_boot_table_ready;
+extern void secondary_kernel_main(uint64_t cpu_id);
+
 extern void initialize_mmu_asm(uint64_t ttbr0_el1, uint64_t ttbr1_el1,
                                uint64_t tcr_el1, uint64_t mair_el1);
+extern void initialize_secondary_mmu_asm(uint64_t ttbr0_el1, uint64_t ttbr1_el1,
+                                         uint64_t tcr_el1, uint64_t mair_el1,
+                                         uint64_t stack_top_va,
+                                         uint64_t cpu_id);
 
 static void BOOT_TEXT zero_table(uint64_t *table) {
     volatile uint64_t *entries = table;
@@ -108,8 +115,39 @@ static void BOOT_TEXT initialize_boot_tables(void) {
 
 void BOOT_TEXT initialize_vm(void) {
     initialize_boot_tables();
+    secondary_boot_table_ready = 1;
+    asm volatile("dsb sy\nsev" ::: "memory");
     initialize_mmu((uint64_t)(uintptr_t)boot_ttbr0_l0,
                    (uint64_t)(uintptr_t)boot_ttbr1_l0);
+
+    while (1) {
+        asm volatile("wfe");
+    }
+}
+
+void BOOT_TEXT initialize_secondary_vm(uint64_t cpu_id, uint64_t stack_top_phys) {
+    uint64_t mair_el1 = 0x000000000000ff00;
+    uint64_t tcr =
+        TCR_T0SZ_48BIT |
+        TCR_IRGN0_WB_RA_WA |
+        TCR_ORGN0_WB_RA_WA |
+        TCR_SH0_INNER |
+        TCR_TG0_4K |
+
+        TCR_T1SZ_48BIT |
+        TCR_IRGN1_WB_RA_WA |
+        TCR_ORGN1_WB_RA_WA |
+        TCR_SH1_INNER |
+        TCR_TG1_4K |
+
+        TCR_IPS_40BIT;
+
+    initialize_secondary_mmu_asm((uint64_t)(uintptr_t)boot_ttbr0_l0,
+                                 (uint64_t)(uintptr_t)boot_ttbr1_l0,
+                                 tcr,
+                                 mair_el1,
+                                 KERNEL_VA_BASE | stack_top_phys,
+                                 cpu_id);
 
     while (1) {
         asm volatile("wfe");
@@ -220,6 +258,18 @@ void handle_instruction_abort(uint64_t fsc, uint64_t far, uint64_t elr, uint64_t
     } else {
         fatal_exception("Instruction Abort: Unknown fsc.");
     }
+}
+
+void install_kernel_page_table_cpu(void) {
+    asm volatile(
+        "dsb ishst\n"
+        "msr ttbr1_el1, %0\n"
+        "tlbi vmalle1is\n"
+        "dsb ish\n"
+        "isb\n"
+        :
+        : "r"(ttbr1_el1)
+        : "memory");
 }
 
 extern char _stack_top;

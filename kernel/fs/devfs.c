@@ -10,6 +10,7 @@
 #include "timer/timer.h"
 #include "uart/uart.h"
 #include "virtual_fs.h"
+#include "sync/spinlock.h"
 
 #define DEVFS_MAX_NODES 64
 #define DEVFS_INO_ROOT_DIR DEVFS_INO_BASE
@@ -22,6 +23,7 @@ struct devfs_node {
 };
 
 static struct devfs_node devfs_nodes[DEVFS_MAX_NODES];
+static spinlock_t devfs_lock = SPINLOCK_INIT;
 
 static int devfs_dir_open(struct oft_entry *entry);
 static int devfs_dir_close(struct oft_entry *entry);
@@ -118,9 +120,11 @@ static int devfs_find_free_node(void) {
 }
 
 err_t devfs_init(void) {
+    uint64_t flags = spin_lock_irqsave(&devfs_lock);
     for (int i = 0; i < DEVFS_MAX_NODES; i++) {
         memset(&devfs_nodes[i], 0, sizeof(devfs_nodes[i]));
     }
+    spin_unlock_irqrestore(&devfs_lock, flags);
 
     return vfs_register_root_mount("dev", DEVFS_INO_ROOT_DIR, &devfs_vfs_ops);
 }
@@ -149,11 +153,16 @@ err_t devfs_get_metadata(ino_id_t ino, attributes_t *metadata) {
     }
 
     int index = devfs_index_from_ino(ino);
+    uint64_t flags = spin_lock_irqsave(&devfs_lock);
     if (index < 0 || !devfs_nodes[index].active) {
+        spin_unlock_irqrestore(&devfs_lock, flags);
         return FILE_NOT_FOUND;
     }
 
-    struct char_driver *driver = get_char_device(devfs_nodes[index].rdev.major);
+    struct dev_st rdev = devfs_nodes[index].rdev;
+    spin_unlock_irqrestore(&devfs_lock, flags);
+
+    struct char_driver *driver = get_char_device(rdev.major);
     if (driver == NULL || driver->fops == NULL) {
         return FILE_NOT_FOUND;
     }
@@ -161,7 +170,7 @@ err_t devfs_get_metadata(ino_id_t ino, attributes_t *metadata) {
     metadata->type = CHAR_DRIVER_TYPE;
     metadata->perm = 0x7;
     metadata->fops = (struct file_operations *)driver->fops;
-    metadata->i_rdev = devfs_nodes[index].rdev;
+    metadata->i_rdev = rdev;
     return SUCCESS;
 }
 
@@ -208,11 +217,17 @@ err_t devfs_format_path(ino_id_t ino, char *path, size_t size) {
     }
 
     int index = devfs_index_from_ino(ino);
+    uint64_t flags = spin_lock_irqsave(&devfs_lock);
     if (index < 0 || !devfs_nodes[index].active) {
+        spin_unlock_irqrestore(&devfs_lock, flags);
         return FILE_NOT_FOUND;
     }
 
-    if (snprintf(path, size, "/dev/%s", devfs_nodes[index].name) >=
+    char name[32];
+    strcpy(name, devfs_nodes[index].name);
+    spin_unlock_irqrestore(&devfs_lock, flags);
+
+    if (snprintf(path, size, "/dev/%s", name) >=
         (int)size) {
         return INVALID_ARGS;
     }
@@ -231,6 +246,7 @@ int devfs_create_char_device(struct dev_st rdev) {
         return INVALID_ARGS;
     }
 
+    uint64_t flags = spin_lock_irqsave(&devfs_lock);
     int index = devfs_find_node_by_rdev(rdev);
     if (index < 0) {
         index = devfs_find_node_by_name(name);
@@ -239,12 +255,14 @@ int devfs_create_char_device(struct dev_st rdev) {
         index = devfs_find_free_node();
     }
     if (index < 0) {
+        spin_unlock_irqrestore(&devfs_lock, flags);
         return NO_FREE_BLOCKS;
     }
 
     devfs_nodes[index].active = 1;
     devfs_nodes[index].rdev = rdev;
     strcpy(devfs_nodes[index].name, name);
+    spin_unlock_irqrestore(&devfs_lock, flags);
     return SUCCESS;
 }
 
@@ -273,12 +291,16 @@ static int devfs_dir_lookup(const char *f_name, struct fs_dirent *dirent, int cu
     if ( strcmp(f_name, "..") == 0) {
         return devfs_emit_dirent(dirent, "..", ROOT_INO);
     }
+    uint64_t flags = spin_lock_irqsave(&devfs_lock);
     int index = devfs_find_node_by_name(f_name);
     if (index < 0) {
+        spin_unlock_irqrestore(&devfs_lock, flags);
         return FILE_NOT_FOUND;
     }
-    return devfs_emit_dirent(dirent, devfs_nodes[index].name,
-                             devfs_node_ino(index));
+    char name[32];
+    strcpy(name, devfs_nodes[index].name);
+    spin_unlock_irqrestore(&devfs_lock, flags);
+    return devfs_emit_dirent(dirent, name, devfs_node_ino(index));
 }
 
 static int devfs_dir_readdir(struct oft_entry *dir, struct fs_dirent *out) {
@@ -286,12 +308,15 @@ static int devfs_dir_readdir(struct oft_entry *dir, struct fs_dirent *out) {
         return INVALID_ARGS;
     }
 
+    uint64_t flags = spin_lock_irqsave(&devfs_lock);
     if (dir->cursor == 0) {
         dir->cursor++;
+        spin_unlock_irqrestore(&devfs_lock, flags);
         return devfs_emit_dirent(out, ".", DEVFS_INO_ROOT_DIR);
     }
     if (dir->cursor == 1) {
         dir->cursor++;
+        spin_unlock_irqrestore(&devfs_lock, flags);
         return devfs_emit_dirent(out, "..", ROOT_INO);
     }
 
@@ -300,9 +325,12 @@ static int devfs_dir_readdir(struct oft_entry *dir, struct fs_dirent *out) {
             continue;
         }
         dir->cursor = (uint32_t)i + 3;
-        return devfs_emit_dirent(out, devfs_nodes[i].name,
-                                 devfs_node_ino(i));
+        char name[32];
+        strcpy(name, devfs_nodes[i].name);
+        spin_unlock_irqrestore(&devfs_lock, flags);
+        return devfs_emit_dirent(out, name, devfs_node_ino(i));
     }
 
+    spin_unlock_irqrestore(&devfs_lock, flags);
     return FILE_NOT_FOUND;
 }
