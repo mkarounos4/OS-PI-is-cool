@@ -65,6 +65,15 @@ static uint64_t align_up(uint64_t value) {
   return (value + PAGE_MASK) & ~PAGE_MASK;
 }
 
+static uint64_t align_down(uint64_t value) { return value & ~PAGE_MASK; }
+
+static void zero_page(void *page) {
+  uint64_t *words = (uint64_t *)page;
+  for (uint64_t i = 0; i < PAGE_SIZE / sizeof(uint64_t); i++) {
+    words[i] = 0;
+  }
+}
+
 struct Page *pages;
 static uint64_t curr_mmap_va;
 
@@ -106,6 +115,11 @@ static uint64_t vmstat_page_allocs;
 static uint64_t vmstat_page_frees;
 
 static void mem_segment_destroy(ptr_t value) {
+  mem_segment_t *seg = (mem_segment_t*)value;
+  for (uint64_t start_addr = align_up(seg->start); start_addr < align_down(seg->start + seg->length); start_addr++) {
+      dec_pte_refcount_va((void*)start_addr);
+      // TODO: actually delete page from page table
+  }
   kfree(value);
 }
 
@@ -287,9 +301,9 @@ static int read_segment_page(mem_segment_t *segment, uint64_t page_va,
     return SUCCESS;
   }
 
-  // 0 full section if is anonymous page
+  // anonymous mmap case
   if (segment->ino_id == INVALID_INO) {
-      memset(page, 0, PAGE_SIZE);
+      zero_page(page);
       return SUCCESS;
   }
 
@@ -448,15 +462,6 @@ static FreePage *free_list;
 struct Page *get_page_struct(uint64_t *va) {
   uint64_t pa = kernel_phys_addr(*va);
   return &pages[pa >> 12];
-}
-
-static uint64_t align_down(uint64_t value) { return value & ~PAGE_MASK; }
-
-static void zero_page(void *page) {
-  uint64_t *words = (uint64_t *)page;
-  for (uint64_t i = 0; i < PAGE_SIZE / sizeof(uint64_t); i++) {
-    words[i] = 0;
-  }
 }
 
 static inline int64_t phys_pa_to_pfn(uint64_t phys_pa) {
@@ -1219,7 +1224,7 @@ void *mmap(void *addr, size_t length, int prot, int flags, int fd, uint32_t offs
 
     if (addr == NULL) {
         addr = (void*)curr_mmap_va;
-        curr_mmap_va = align_up(curr_mmap_va+length+);
+        curr_mmap_va = align_up(curr_mmap_va+length);
     }
 
     pcb_t *curr_pcb = get_curr_process();

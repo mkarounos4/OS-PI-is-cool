@@ -19,7 +19,7 @@
 #define SYS_WRITE_CONSOLE_MAX 1024u
 #define SYS_USER_PTR_MIN      UINT64_C(0x1000)
 #define SYS_WRITE_CHUNK       128u
-#define SYSCALL_COUNT         57u
+#define SYSCALL_COUNT         59u
 
 static uint32_t syscall_counts[SYSCALL_COUNT];
 
