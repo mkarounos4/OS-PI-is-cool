@@ -3,6 +3,7 @@
 #include "fs/caches/inode_cache.h"
 #include "string.h"
 #include "uart/uart.h"
+#include "sync/spinlock.h"
 
 #define VFS_MAX_ROOT_MOUNTS 8
 
@@ -14,6 +15,7 @@ struct virtual_root_mount {
 
 static struct virtual_root_mount root_mounts[VFS_MAX_ROOT_MOUNTS];
 static int root_mount_count;
+static spinlock_t vfs_mount_lock = SPINLOCK_INIT;
 
 err_t vfs_register_root_mount(const char *name, ino_id_t root_ino,
                               const struct virtual_fs_ops *ops) {
@@ -21,15 +23,18 @@ err_t vfs_register_root_mount(const char *name, ino_id_t root_ino,
         return INVALID_ARGS;
     }
 
+    uint64_t flags = spin_lock_irqsave(&vfs_mount_lock);
     for (int i = 0; i < root_mount_count; i++) {
         if (strcmp(root_mounts[i].name, name) == 0) {
             root_mounts[i].root_ino = root_ino;
             root_mounts[i].ops = ops;
+            spin_unlock_irqrestore(&vfs_mount_lock, flags);
             return SUCCESS;
         }
     }
 
     if (root_mount_count >= VFS_MAX_ROOT_MOUNTS) {
+        spin_unlock_irqrestore(&vfs_mount_lock, flags);
         return NO_FREE_BLOCKS;
     }
 
@@ -38,6 +43,7 @@ err_t vfs_register_root_mount(const char *name, ino_id_t root_ino,
     strcpy(mount->name, name);
     mount->root_ino = root_ino;
     mount->ops = ops;
+    spin_unlock_irqrestore(&vfs_mount_lock, flags);
     return SUCCESS;
 }
 
@@ -46,6 +52,7 @@ int vfs_lookup_root_mount(const char *name, struct fs_dirent *dirent) {
         return FILE_NOT_FOUND;
     }
 
+    uint64_t flags = spin_lock_irqsave(&vfs_mount_lock);
     for (int i = 0; i < root_mount_count; i++) {
         if (strcmp(root_mounts[i].name, name) != 0) {
             continue;
@@ -56,25 +63,33 @@ int vfs_lookup_root_mount(const char *name, struct fs_dirent *dirent) {
             strcpy(dirent->name, root_mounts[i].name);
             dirent->ino_id = root_mounts[i].root_ino;
         }
+        spin_unlock_irqrestore(&vfs_mount_lock, flags);
         return SUCCESS;
     }
 
+    spin_unlock_irqrestore(&vfs_mount_lock, flags);
     return FILE_NOT_FOUND;
 }
 
 int vfs_root_mount_readdir(uint32_t offset, struct fs_dirent *dirent) {
+    uint64_t flags = spin_lock_irqsave(&vfs_mount_lock);
     if (dirent == NULL || offset >= (uint32_t)root_mount_count) {
+        spin_unlock_irqrestore(&vfs_mount_lock, flags);
         return FILE_NOT_FOUND;
     }
 
     memset(dirent, 0, sizeof(*dirent));
     strcpy(dirent->name, root_mounts[offset].name);
     dirent->ino_id = root_mounts[offset].root_ino;
+    spin_unlock_irqrestore(&vfs_mount_lock, flags);
     return SUCCESS;
 }
 
 int vfs_root_mount_count(void) {
-    return root_mount_count;
+    uint64_t flags = spin_lock_irqsave(&vfs_mount_lock);
+    int count = root_mount_count;
+    spin_unlock_irqrestore(&vfs_mount_lock, flags);
+    return count;
 }
 
 err_t vfs_format_mounts(char *buf, size_t size) {
@@ -94,6 +109,7 @@ err_t vfs_format_mounts(char *buf, size_t size) {
     }
     len += ret;
 
+    uint64_t flags = spin_lock_irqsave(&vfs_mount_lock);
     for (int i = 0; i < root_mount_count; i++) {
         used = len < (int)size ? (size_t)len : size - 1;
         ret = snprintf(buf + used, size - used, "/%s %s %u\n",
@@ -101,21 +117,26 @@ err_t vfs_format_mounts(char *buf, size_t size) {
                        root_mounts[i].name,
                        root_mounts[i].root_ino);
         if (ret < 0) {
+            spin_unlock_irqrestore(&vfs_mount_lock, flags);
             return ret;
         }
         len += ret;
     }
+    spin_unlock_irqrestore(&vfs_mount_lock, flags);
 
     return len;
 }
 
 static const struct virtual_fs_ops *vfs_ops_for_inode(ino_id_t ino) {
+    uint64_t flags = spin_lock_irqsave(&vfs_mount_lock);
     for (int i = 0; i < root_mount_count; i++) {
         const struct virtual_fs_ops *ops = root_mounts[i].ops;
         if (ops != NULL && ops->is_inode != NULL && ops->is_inode(ino)) {
+            spin_unlock_irqrestore(&vfs_mount_lock, flags);
             return ops;
         }
     }
+    spin_unlock_irqrestore(&vfs_mount_lock, flags);
     return NULL;
 }
 
@@ -171,7 +192,9 @@ err_t vfs_get_metadata(ino_id_t ino, attributes_t *metadata) {
         return err;
     }
 
+    uint64_t flags = cached_inode_lock(node);
     *metadata = node->inode.metadata;
+    cached_inode_unlock(node, flags);
     vfs_put_inode(node);
     return SUCCESS;
 }

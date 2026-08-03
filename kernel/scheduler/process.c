@@ -10,11 +10,13 @@
 #include "signals/signals.h"
 #include "user_image.h"
 #include "devices/tty.h"
+#include "sync/spinlock.h"
 
 #define PA_MASK UINT64_C(0x0000ffffffffffff)
 
 static pcb_t processes[MAX_PROCESS_COUNT];
 static HashMap pgrps;
+static spinlock_t process_table_lock = SPINLOCK_INIT;
 
 static void __attribute__((noreturn)) process_first_run(void) {
     struct trap_frame *frame;
@@ -299,12 +301,16 @@ long s_waitpid_impl(pid_t pid, int *status, int32_t flags) {
 
 // Returns pointer to next unused pcb, null
 static pcb_t *get_next_unused_pcb() {
+    uint64_t flags = spin_lock_irqsave(&process_table_lock);
     for (int i = 0; i < MAX_PROCESS_COUNT; i++) {
         if (processes[i].state == PROC_UNUSED_STATE) {
             processes[i].pid = i;
+            processes[i].state = PROC_BLOCKED_STATE;
+            spin_unlock_irqrestore(&process_table_lock, flags);
             return &processes[i];
         }
     }
+    spin_unlock_irqrestore(&process_table_lock, flags);
     return NULL;
 }
 
@@ -394,14 +400,17 @@ pid_t proc_create(void *(*func)(void*), void *args, pid_t ppid) {
 
     // Setup FD table here based on parent if applicable (after FS impl)
     new_proc->ppid = ppid;
-    pcb_t *parent_proc = get_pcb_by_pid(ppid);
+    new_proc->lock = (spinlock_t)SPINLOCK_INIT;
+    pcb_t *parent_proc = ppid == new_proc->pid ? NULL : get_pcb_by_pid(ppid);
     if (parent_proc == NULL) {
         new_proc->pgid = new_proc->pid;
         new_proc->cwd = ROOT_INO;
     } else {
+        uint64_t parent_flags = spin_lock_irqsave(&parent_proc->lock);
         new_proc->pgid = parent_proc->pgid; 
         vec_push_back(&parent_proc->children, (ptr_t)(uintptr_t)new_proc->pid); 
         new_proc->cwd = parent_proc->cwd;
+        spin_unlock_irqrestore(&parent_proc->lock, parent_flags);
     }
 
     // Setup children array
@@ -459,17 +468,31 @@ void proc_destroy(pcb_t *p) {
     uart_puts("Cleaning up ");
     uart_puthex(p->pid);
     uart_puts("\n");
-    for (int i = 0; i < (int)vec_len(&p->file_descriptors); i++) {
+    uint64_t fd_flags = spin_lock_irqsave(&p->lock);
+    size_t fd_count = vec_len(&p->file_descriptors);
+    int *fds = kmalloc(sizeof(int) * fd_count);
+    if (fds == NULL && fd_count != 0) {
+        spin_unlock_irqrestore(&p->lock, fd_flags);
+        return;
+    }
+    for (size_t i = 0; i < fd_count; i++) {
         int k_fd = (int)(uintptr_t)vec_get(&p->file_descriptors, i);
+        fds[i] = k_fd;
+        vec_set(&p->file_descriptors, i, (void *)(uintptr_t)-1);
+    }
+    spin_unlock_irqrestore(&p->lock, fd_flags);
+
+    for (size_t i = 0; i < fd_count; i++) {
+        int k_fd = fds[i];
         if (k_fd < 0) {
             continue;
         }
-
         struct oft_entry *entry;
         if (get_oft_entry_by_fd(k_fd, &entry) == SUCCESS) {
             k_close(entry);
         }
     }
+    kfree(fds);
     vec_destroy(&p->file_descriptors);
     remove_from_pgrp(p->pid);
 
@@ -494,11 +517,16 @@ void proc_destroy(pcb_t *p) {
 
     pcb_t *parent = get_pcb_by_pid(p->ppid);
 
-    for (int i = 0; parent != NULL && i < (int)vec_len(&parent->children); i++) {
-        if ((pid_t)(uintptr_t)vec_get(&parent->children, i) == p->pid) {
+    if (parent != NULL) {
+        uint64_t parent_flags = spin_lock_irqsave(&parent->lock);
+        for (int i = 0; i < (int)vec_len(&parent->children); i++) {
+            if ((pid_t)(uintptr_t)vec_get(&parent->children, i) != p->pid) {
+                continue;
+            }
             vec_erase(&parent->children, i);
             break;
         }
+        spin_unlock_irqrestore(&parent->lock, parent_flags);
     }
     
     // cleanup children
@@ -515,7 +543,9 @@ void proc_destroy(pcb_t *p) {
         if (child_pcb->state == PROC_ZOMBIE_STATE) {
             proc_destroy(child_pcb);
         } else {
+            uint64_t init_flags = spin_lock_irqsave(&init_proc->lock);
             vec_push_back(&init_proc->children, child_pid);
+            spin_unlock_irqrestore(&init_proc->lock, init_flags);
             child_pcb->ppid = init_proc->pid;
             added_child = 1;
         }
@@ -529,20 +559,26 @@ void proc_destroy(pcb_t *p) {
 }
 
 pcb_t *get_pcb_by_pid(pid_t pid) {
+    uint64_t flags = spin_lock_irqsave(&process_table_lock);
     if (pid >= MAX_PROCESS_COUNT || pid < 0 || processes[pid].state == PROC_UNUSED_STATE) {
+        spin_unlock_irqrestore(&process_table_lock, flags);
         return NULL;
     }
 
-    return &processes[pid];
+    pcb_t *pcb = &processes[pid];
+    spin_unlock_irqrestore(&process_table_lock, flags);
+    return pcb;
 }
 
 void processes_init() {
+    uint64_t flags = spin_lock_irqsave(&process_table_lock);
     pgrps = hashmap_new(16, pgrp_destroy);
 
     for (unsigned int i = 0; i < MAX_PROCESS_COUNT; i++) {
         processes[i].state = PROC_UNUSED_STATE;
         processes[i].pid = i;
     }
+    spin_unlock_irqrestore(&process_table_lock, flags);
 
     pid_t pid = proc_create((void *(*)(void *))(uintptr_t)USER_INIT_PROCESS_ENTRY, NULL, 0);
     pcb_t *init_pcb = get_pcb_by_pid(pid);
@@ -690,6 +726,7 @@ pid_t fork(struct trap_frame *frame) {
     child_tcb->ctx.ttbr0_el1 = child->ttbr0_el1;
     child_tcb->ctx.ttbr0_el1_va = child->ttbr0_el1_va;
 
+    uint64_t parent_flags = spin_lock_irqsave(&parent->lock);
     for (size_t i = 0; i < vec_len(&parent->file_descriptors); i++) {
         void *fd = vec_get(&parent->file_descriptors, i);
         vec_push_back(&child->file_descriptors, fd);
@@ -697,6 +734,7 @@ pid_t fork(struct trap_frame *frame) {
             k_file_add_reference((int)(uintptr_t) fd);
         }
     }
+    spin_unlock_irqrestore(&parent->lock, parent_flags);
     
     // save_curr_context(&child->ctx);
     add_thread_to_scheduler(child_tcb);
@@ -710,18 +748,30 @@ int dup2(int oldfd, int newfd) {
         return (int)SYS_ESRCH;
     }
 
+    uint64_t flags = spin_lock_irqsave(&pcb->lock);
     if (oldfd < 0 || newfd < 0 ||
         (size_t)oldfd >= vec_len(&pcb->file_descriptors)) {
+        spin_unlock_irqrestore(&pcb->lock, flags);
         return (int)SYS_EBADF;
     }
 
-    if ((int)(uintptr_t)vec_get(&pcb->file_descriptors, oldfd) < 0) {
+    int old_kfd = (int)(uintptr_t)vec_get(&pcb->file_descriptors, oldfd);
+    if (old_kfd < 0) {
+        spin_unlock_irqrestore(&pcb->lock, flags);
         return (int)SYS_EBADF;
     }
+
+    k_file_add_reference(old_kfd);
+    spin_unlock_irqrestore(&pcb->lock, flags);
 
     close(newfd);
-    vec_set(&pcb->file_descriptors, newfd, vec_get(&pcb->file_descriptors, oldfd));
-    k_file_add_reference((int)(uintptr_t)vec_get(&pcb->file_descriptors, oldfd));
+
+    flags = spin_lock_irqsave(&pcb->lock);
+    while ((size_t)newfd >= vec_len(&pcb->file_descriptors)) {
+        vec_push_back(&pcb->file_descriptors, (void *)(uintptr_t)-1);
+    }
+    vec_set(&pcb->file_descriptors, newfd, (void *)(uintptr_t)old_kfd);
+    spin_unlock_irqrestore(&pcb->lock, flags);
 
     return 0;
 }

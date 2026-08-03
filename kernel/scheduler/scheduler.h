@@ -8,6 +8,7 @@
 
 // Initializes scheduler state and the initial two kernel threads.
 void scheduler_init(void);
+void scheduler_cpu_init(void);
 
 // Starts execution at thread 0. Does not return.
 void scheduler_start(void) __attribute__((noreturn));

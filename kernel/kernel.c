@@ -25,12 +25,34 @@
 #include "uart/uart_device.h"
 #include "usb/xhci.h"
 #include "usb/usb_keyboard_device.h"
+#include "cpu/cpu.h"
 
 #define FS_DEFAULT_INODE_TABLE_BLOCKS 64
 #define FS_DEFAULT_BLOCK_SIZE_CONFIG 1
 #define RAM_END_PHYS 0x40000000
 
+static inline uint64_t read_mpidr_el1(void) {
+    uint64_t mpidr;
+    asm volatile("mrs %0, mpidr_el1" : "=r"(mpidr));
+    return mpidr;
+}
+
+void secondary_kernel_main(uint64_t cpu_id_value) {
+    cpu_early_init((uint32_t)cpu_id_value, read_mpidr_el1());
+    cpu_wait_until_started((uint32_t)cpu_id_value);
+    install_kernel_page_table_cpu();
+    exceptions_init();
+    irq_init_cpu();
+    timer_init_cpu();
+    scheduler_cpu_init();
+    cpu_mark_online((uint32_t)cpu_id_value);
+    irq_enable();
+    scheduler_start();
+}
+
 void kernel_main(void) {
+    cpu_early_init(0, read_mpidr_el1());
+    cpu_mark_online(0);
     uart_init();
 #ifdef PLATFORM_RPI5
     uart_puts("[boot] build=rpi5 usb=rp1-xhci-hid\n");
@@ -55,6 +77,7 @@ void kernel_main(void) {
     printf("\n");
     irq_enable();
     printf("[boot] irq_enable done\n");
+    cpu_prepare_secondary_cores();
 
     printf("cringe %d\n", -17);
     
@@ -153,7 +176,14 @@ void kernel_main(void) {
 
     initialize_signals();
 
+    printf("[boot] scheduler_init begin\n");
     scheduler_init();
+    printf("[boot] scheduler_init done\n");
+    cpu_release_secondary_cores();
+    for (uint32_t spin = 0; spin < 1000000 && cpu_online_count() < MAX_CPUS; spin++) {
+        asm volatile("yield" ::: "memory");
+    }
+    printf("[smp] online cpus=%d\n", cpu_online_count());
     scheduler_start();
 
     while (1) {

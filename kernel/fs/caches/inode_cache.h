@@ -2,15 +2,19 @@
 
 #include "inodes.h"
 #include "memory/kmalloc.h"
+#include "sync/spinlock.h"
 
 struct cached_inode_st {
     struct inode_st inode; // Actual cached inode data
     ino_id_t id; // id of inode
     int dirty; // boolean if changed made to inode struct and needs to write
+    spinlock_t lock;
 };
 
 struct cache_ll_node_st {
     int num_refs; // Number of open references to this inode in cache
+    volatile int loading;
+    volatile int load_error;
     struct cached_inode_st cache_node; // Data of cached inode
     struct cache_ll_node_st *next; // Linked List next element
     struct cache_ll_node_st *prev; // Linked List previous element
@@ -37,3 +41,12 @@ err_t remove_ref_from_cache(ino_id_t id);
 err_t empty_inode_cache();
 
 void inode_cache_get_stats(struct inode_cache_stats *stats);
+
+static inline uint64_t cached_inode_lock(struct cached_inode_st *inode) {
+    return spin_lock_irqsave(&inode->lock);
+}
+
+static inline void cached_inode_unlock(struct cached_inode_st *inode,
+                                       uint64_t flags) {
+    spin_unlock_irqrestore(&inode->lock, flags);
+}

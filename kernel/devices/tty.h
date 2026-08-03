@@ -7,6 +7,7 @@
 #include "scheduler/process.h"
 #include "scheduler/scheduler.h"
 #include "fs/oft.h"
+#include "sync/spinlock.h"
 
 #define MAX_TTY_DEVICES 8
 #define TTY_INPUT_BUFFER_SIZE 4096
@@ -60,12 +61,13 @@ struct tty_device {
     int command_history_cursor;
     char command_history_scratch[TTY_INPUT_BUFFER_SIZE];
     size_t command_history_scratch_len;
+    spinlock_t lock;
 };
 
 struct tty_driver_state {
     struct tty_device *devices[MAX_TTY_DEVICES];
     uint16_t num_ttys;
-    // TODO add lock
+    spinlock_t lock;
 };
 
 void tty_send_input(int minor, const char *buffer, size_t count);

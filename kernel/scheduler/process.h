@@ -8,6 +8,7 @@
 #include "fs/kapi.h"
 #include "fs/cmds.h"
 #include "errno.h"
+#include "sync/spinlock.h"
 
 #ifndef PID_T_DEFINED
 #define PID_T_DEFINED
@@ -61,6 +62,7 @@ typedef struct pcb_st {
 
     Vec children;   // vec of children PIDs
     Vec file_descriptors;   // vec of fds
+    spinlock_t lock;
                             
     struct sigaction sigactions[32];
     signalset_t pending_signals;

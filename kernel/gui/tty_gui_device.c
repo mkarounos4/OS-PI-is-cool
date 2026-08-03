@@ -5,6 +5,7 @@
 #include "devices/tty.h"
 #include "scheduler/scheduler.h"
 #include "threading/thread.h"
+#include "sync/spinlock.h"
 
 #define TTY_GUI_DEVICE_BUFFER_SIZE 4096
 #define TTY_GUI_DEVICE_COUNT MAX_TTY_DEVICES
@@ -15,6 +16,7 @@ struct tty_gui_device {
     Vec rx_wait_queue;
     int refcount;
     uint8_t active;
+    spinlock_t lock;
 };
 
 static struct tty_gui_device tty_gui_devices[TTY_GUI_DEVICE_COUNT];
@@ -79,6 +81,7 @@ int tty_gui_char_driver_init(void) {
         kmemset(&tty_gui_devices[i], 0, sizeof(struct tty_gui_device));
         tty_gui_devices[i].refcount = 0;
         tty_gui_devices[i].active = 0;
+        tty_gui_devices[i].lock = (spinlock_t)SPINLOCK_INIT;
     }
 
     return register_char_driver(&tty_gui_char_driver);
@@ -103,10 +106,13 @@ int tty_gui_char_device_activate(int minor) {
     }
 
     if (tty_gui_devices[minor].active) {
+        uint64_t flags = spin_lock_irqsave(&tty_gui_devices[minor].lock);
         tty_gui_device_clear_buffers(&tty_gui_devices[minor]);
+        spin_unlock_irqrestore(&tty_gui_devices[minor].lock, flags);
         return 0;
     }
 
+    tty_gui_devices[minor].lock = (spinlock_t)SPINLOCK_INIT;
     tty_gui_devices[minor].rx = create_ring_buffer(TTY_GUI_DEVICE_BUFFER_SIZE);
     tty_gui_devices[minor].tx = create_ring_buffer(TTY_GUI_DEVICE_BUFFER_SIZE);
     tty_gui_devices[minor].rx_wait_queue = vec_new(2, NULL);
@@ -116,8 +122,13 @@ int tty_gui_char_device_activate(int minor) {
 }
 
 void tty_gui_char_device_deactivate(int minor) {
-    if (minor < 0 || minor >= TTY_GUI_DEVICE_COUNT ||
-        !tty_gui_devices[minor].active) {
+    if (minor < 0 || minor >= TTY_GUI_DEVICE_COUNT) {
+        return;
+    }
+
+    uint64_t flags = spin_lock_irqsave(&tty_gui_devices[minor].lock);
+    if (!tty_gui_devices[minor].active) {
+        spin_unlock_irqrestore(&tty_gui_devices[minor].lock, flags);
         return;
     }
 
@@ -135,7 +146,9 @@ void tty_gui_char_device_deactivate(int minor) {
     destroy_ring_buffer(&tty_gui_devices[minor].rx);
     destroy_ring_buffer(&tty_gui_devices[minor].tx);
     vec_destroy(&tty_gui_devices[minor].rx_wait_queue);
-    kmemset(&tty_gui_devices[minor], 0, sizeof(struct tty_gui_device));
+    tty_gui_devices[minor].refcount = 0;
+    tty_gui_devices[minor].active = 0;
+    spin_unlock_irqrestore(&tty_gui_devices[minor].lock, flags);
 }
 
 static int tty_gui_dev_open(struct oft_entry *entry) {
@@ -144,7 +157,9 @@ static int tty_gui_dev_open(struct oft_entry *entry) {
         return -1;
     }
 
+    uint64_t flags = spin_lock_irqsave(&dev->lock);
     dev->refcount++;
+    spin_unlock_irqrestore(&dev->lock, flags);
     return 0;
 }
 
@@ -154,9 +169,11 @@ static int tty_gui_dev_close(struct oft_entry *entry) {
         return -1;
     }
 
+    uint64_t flags = spin_lock_irqsave(&dev->lock);
     if (dev->refcount > 0) {
         dev->refcount--;
     }
+    spin_unlock_irqrestore(&dev->lock, flags);
     return 0;
 }
 
@@ -169,22 +186,27 @@ static int tty_gui_dev_read(struct oft_entry *entry, char *buffer, size_t count)
     size_t num_read = 0;
     while (num_read < count) {
         char next;
+        uint64_t flags = spin_lock_irqsave(&dev->lock);
         if (consume_ring_buffer(&dev->rx, &next)) {
+            spin_unlock_irqrestore(&dev->lock, flags);
             buffer[num_read++] = next;
             continue;
         }
 
         if (num_read > 0) {
+            spin_unlock_irqrestore(&dev->lock, flags);
             return (int)num_read;
         }
 
         tcb_t *thread = get_curr_thread();
         if (thread == NULL) {
+            spin_unlock_irqrestore(&dev->lock, flags);
             return 0;
         }
         if (!wait_queue_has_tid(&dev->rx_wait_queue, thread->tid)) {
             vec_push_back(&dev->rx_wait_queue, (ptr_t)(uintptr_t)thread->tid);
         }
+        spin_unlock_irqrestore(&dev->lock, flags);
         block_thread(thread, THREAD_BLOCKED_INTERRUPTABLE);
     }
 
@@ -201,12 +223,16 @@ static int tty_gui_dev_write(struct oft_entry *entry, const char *buffer,
 
     size_t num_written = 0;
     while (num_written < count) {
+        uint64_t flags = spin_lock_irqsave(&dev->lock);
         if (!produce_ring_buffer(&dev->tx, &buffer[num_written])) {
+            spin_unlock_irqrestore(&dev->lock, flags);
             break;
         }
 
         char next;
-        if (consume_ring_buffer(&dev->tx, &next)) {
+        int has_next = consume_ring_buffer(&dev->tx, &next);
+        spin_unlock_irqrestore(&dev->lock, flags);
+        if (has_next) {
             tty_gui_write_char_for_tty(minor, next);
         }
         num_written++;

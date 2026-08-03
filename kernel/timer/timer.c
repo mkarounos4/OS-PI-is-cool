@@ -5,6 +5,8 @@
 #include "scheduler/scheduler.h"
 #include "string.h"
 #include "threading/thread.h"
+#include "cpu/cpu.h"
+#include "sync/spinlock.h"
 
 #define ARM_GENERIC_TIMER_INTID 30u
 #define CNTP_CTL_ENABLE        1u
@@ -13,6 +15,7 @@
 
 static volatile uint64_t timer_ticks;
 static uint64_t timer_frequency;
+static spinlock_t timer_lock = SPINLOCK_INIT;
 
 typedef struct software_timer_st {
     uint8_t active;
@@ -22,6 +25,7 @@ typedef struct software_timer_st {
 } software_timer_t;
 
 static software_timer_t software_timers[MAX_SOFTWARE_TIMERS];
+static software_timer_t local_timers[MAX_CPUS];
 static void timer_wake_thread(void *ctx);
 
 static inline uint64_t read_cntfrq_el0(void) {
@@ -63,6 +67,12 @@ static void timer_rearm_locked(void) {
     uint64_t now = read_cntpct_el0();
     uint64_t next_deadline = 0;
     int found = 0;
+    uint32_t id = cpu_id();
+
+    if (id < MAX_CPUS && local_timers[id].active) {
+        next_deadline = local_timers[id].deadline;
+        found = 1;
+    }
 
     for (unsigned i = 0; i < MAX_SOFTWARE_TIMERS; i++) {
         if (!software_timers[i].active) {
@@ -96,14 +106,25 @@ static struct trap_frame *timer_irq_handler(unsigned intid, struct trap_frame *f
     timer_handler_t expired_handlers[MAX_SOFTWARE_TIMERS];
     void *expired_ctxs[MAX_SOFTWARE_TIMERS];
     unsigned expired_count = 0;
+    timer_handler_t local_handler = 0;
+    void *local_ctx = 0;
     uint64_t now;
 
     (void)intid;
     (void)ctx;
 
     write_cntp_ctl_el0(0);
+    uint64_t flags = spin_lock_irqsave(&timer_lock);
     timer_ticks++;
     now = read_cntpct_el0();
+    uint32_t id = cpu_id();
+
+    if (id < MAX_CPUS && local_timers[id].active &&
+        (int64_t)(now - local_timers[id].deadline) >= 0) {
+        local_handler = local_timers[id].handler;
+        local_ctx = local_timers[id].ctx;
+        local_timers[id].active = 0;
+    }
 
     for (unsigned i = 0; i < MAX_SOFTWARE_TIMERS; i++) {
         if (!software_timers[i].active) {
@@ -118,13 +139,19 @@ static struct trap_frame *timer_irq_handler(unsigned intid, struct trap_frame *f
         }
     }
 
+    timer_rearm_locked();
+    spin_unlock_irqrestore(&timer_lock, flags);
+
+    if (local_handler != 0) {
+        local_handler(local_ctx);
+    }
+
     for (unsigned i = 0; i < expired_count; i++) {
         if (expired_handlers[i] != 0) {
             expired_handlers[i](expired_ctxs[i]);
         }
     }
 
-    timer_rearm_locked();
     return frame;
 }
 
@@ -134,14 +161,25 @@ void timer_init(void) {
     for (unsigned i = 0; i < MAX_SOFTWARE_TIMERS; i++) {
         software_timers[i].active = 0;
     }
+    for (unsigned i = 0; i < MAX_CPUS; i++) {
+        local_timers[i].active = 0;
+    }
     irq_register(ARM_GENERIC_TIMER_INTID, timer_irq_handler, 0);
+    timer_init_cpu();
+}
+
+void timer_init_cpu(void) {
+    write_cntp_ctl_el0(0);
+    if (timer_frequency == 0) {
+        timer_frequency = read_cntfrq_el0();
+    }
     irq_enable_line(ARM_GENERIC_TIMER_INTID);
 }
 
 uint64_t timer_get_ticks(void) {
-    uint64_t flags = irq_save();
+    uint64_t flags = spin_lock_irqsave(&timer_lock);
     uint64_t ticks = timer_ticks;
-    irq_restore(flags);
+    spin_unlock_irqrestore(&timer_lock, flags);
 
     return ticks;
 }
@@ -155,7 +193,7 @@ int timer_format_proc(char *buf, size_t size) {
         return -1;
     }
 
-    uint64_t flags = irq_save();
+    uint64_t flags = spin_lock_irqsave(&timer_lock);
     uint64_t now = read_cntpct_el0();
     uint64_t ticks = timer_ticks;
     uint64_t frequency = timer_frequency;
@@ -200,13 +238,13 @@ int timer_format_proc(char *buf, size_t size) {
                            (unsigned int)software_timers[i].deadline,
                            (unsigned int)remaining_ms);
         if (ret < 0) {
-            irq_restore(flags);
+            spin_unlock_irqrestore(&timer_lock, flags);
             return ret;
         }
         len += ret;
     }
 
-    irq_restore(flags);
+    spin_unlock_irqrestore(&timer_lock, flags);
     return len;
 }
 
@@ -221,7 +259,7 @@ int timer_schedule_interrupt_ms(uint64_t milliseconds, timer_handler_t handler, 
 
     delay_ticks = timer_ms_to_counter_ticks(milliseconds);
 
-    flags = irq_save();
+    flags = spin_lock_irqsave(&timer_lock);
     for (unsigned i = 0; i < MAX_SOFTWARE_TIMERS; i++) {
         if (!software_timers[i].active) {
             slot = (int)i;
@@ -230,7 +268,7 @@ int timer_schedule_interrupt_ms(uint64_t milliseconds, timer_handler_t handler, 
     }
 
     if (slot < 0) {
-        irq_restore(flags);
+        spin_unlock_irqrestore(&timer_lock, flags);
         return -1;
     }
 
@@ -239,19 +277,44 @@ int timer_schedule_interrupt_ms(uint64_t milliseconds, timer_handler_t handler, 
     software_timers[slot].ctx = ctx;
     software_timers[slot].active = 1;
     timer_rearm_locked();
-    irq_restore(flags);
+    spin_unlock_irqrestore(&timer_lock, flags);
+
+    return 0;
+}
+
+int timer_schedule_local_interrupt_ms(uint64_t milliseconds, timer_handler_t handler, void *ctx) {
+    if (handler == 0) {
+        return -1;
+    }
+
+    uint32_t id = cpu_id();
+    if (id >= MAX_CPUS) {
+        return -1;
+    }
+
+    uint64_t flags = spin_lock_irqsave(&timer_lock);
+    local_timers[id].deadline = read_cntpct_el0() + timer_ms_to_counter_ticks(milliseconds);
+    local_timers[id].handler = handler;
+    local_timers[id].ctx = ctx;
+    local_timers[id].active = 1;
+    timer_rearm_locked();
+    spin_unlock_irqrestore(&timer_lock, flags);
 
     return 0;
 }
 
 void timer_cancel_interrupt(void) {
-    uint64_t flags = irq_save();
+    uint64_t flags = spin_lock_irqsave(&timer_lock);
 
     for (unsigned i = 0; i < MAX_SOFTWARE_TIMERS; i++) {
         software_timers[i].active = 0;
     }
+    uint32_t id = cpu_id();
+    if (id < MAX_CPUS) {
+        local_timers[id].active = 0;
+    }
     timer_rearm_locked();
-    irq_restore(flags);
+    spin_unlock_irqrestore(&timer_lock, flags);
 }
 
 void timer_delay_ms(uint64_t milliseconds) {

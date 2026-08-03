@@ -31,6 +31,7 @@ struct oft_entry {
     ino_id_t ino_id;
     /** @brief Cached inode when using inode-based storage; FAT. */
     struct cached_inode_st* inode;
+    spinlock_t lock;
 };
 
 /**
