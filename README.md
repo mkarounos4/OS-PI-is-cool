@@ -1,8 +1,8 @@
-# OS-PI-is-cool
+# AcheronOS
 
 A bare-metal AArch64 Unix-style operating system for Raspberry Pi 5 hardware and QEMU, with user/kernel isolation, virtual memory, copy-on-write `fork`, ELF userspace, an inode VFS, POSIX-style signals, threads, memory-mapped device I/O, and graphical terminals.
 
-Documentation website: [https://veerkakar17.github.io/rpi-os-docs-website/](https://veerkakar17.github.io/rpi-os-docs-website/)
+Documentation website: [https://acheron-systems.github.io/acheron-os-docs-website/](https://acheron-systems.github.io/acheron-os-docs-website/)
 
 ## Table of Contents
 
@@ -28,7 +28,7 @@ Documentation website: [https://veerkakar17.github.io/rpi-os-docs-website/](http
 
 ## Overview
 
-OS-PI-is-cool is a Unix-inspired operating system written from scratch for **AArch64**. It runs on **Raspberry Pi 5 hardware** and under **QEMU's Raspberry Pi 3B emulator**, combining bare-metal hardware bring-up with realistic OS mechanisms: virtual memory, multitasking, persistent storage, a filesystem-backed `/bin`, and an interactive userspace shell.
+AcheronOS is a Unix-inspired operating system written from scratch for **AArch64**. It runs on **Raspberry Pi 5 hardware** and under **QEMU's Raspberry Pi 3B emulator**, combining bare-metal hardware bring-up with realistic OS mechanisms: virtual memory, multitasking, persistent storage, a filesystem-backed `/bin`, and an interactive userspace shell.
 
 The project is intentionally educational rather than a complete POSIX implementation. It focuses on the core mechanics that make Unix-style systems understandable: processes own resources, threads are scheduled, files and devices share descriptor paths, page faults drive memory behavior, and userspace reaches the kernel through a narrow syscall ABI.
 
