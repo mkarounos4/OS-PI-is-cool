@@ -15,7 +15,7 @@ Portfolio: [veerkakar17.github.io/PortfolioWebsite](https://veerkakar17.github.i
 ### Matthew Karounos
 
 Pennsylvania State University, Class of 2027
-B.S. in Computer Science, Minors in Computer Engineering, Cybersecurity Computational Foundations, Japanese Lanugage
+B.S. in Computer Science, Minors in Computer Engineering, Cybersecurity Computational Foundations, Japanese Language
 
 ## Collaboration
 
