@@ -23,6 +23,7 @@ Documentation website: [https://acheron-systems.github.io/acheron-os-docs-websit
 - [Future Enhancements](#future-enhancements)
 - [Major Features](#major-features)
 - [Project tree](#project-tree)
+- [License](#license)
 
 ---
 
@@ -474,3 +475,6 @@ Every subsystem has a dedicated design document located in `docs/`.
         ├── syscall-table.md       -- Raw syscall/SVC reference
         └── user-api.md            -- Userspace library and command reference
 ```
+
+# License
+This project is protected under the MIT License. For more details, please look at [LICENSE.md](LICENSE.md)
